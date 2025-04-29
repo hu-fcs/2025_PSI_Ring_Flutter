@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'pages/exchange_page.dart';
 import 'pages/debug_page.dart';
+import 'pages/scanner_page.dart'; // ← 追加！スキャナページをインポート
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +48,7 @@ Future<void> loadPrepopulatedDatabase() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -58,6 +60,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const ExchangePage(),
         '/debug': (context) => const DebugPage(),
+        '/scanner': (context) => const ScannerPage(), // ← これを追加！
       },
     );
   }

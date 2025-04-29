@@ -1,4 +1,12 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:grpc/grpc.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import '../generated/hello.pbgrpc.dart';
 
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
@@ -9,43 +17,128 @@ class ExchangePage extends StatefulWidget {
 
 class _ExchangePageState extends State<ExchangePage> {
   bool isExchanging = false;
-  String myId = 'ABC123'; // 本来はUUIDなど動的に生成する
-  List<String> nearbyIds = ['XYZ987', 'DEF456', 'LMN321'];
-  String? checkingId;
+  bool isServerRunning = false;
+  bool isClientConnected = false;
 
-  void toggleExchange() {
+  String? serverIp;
+  final int serverPort = 50051;
+  String? connectedInfo;
+  String displayName = '';
+  String? latestClientName;
+
+  Server? grpcServer;
+
+  final List<String> adjectives = [
+    'Blue', 'Silent', 'Swift', 'Bright', 'Lucky', 'Misty', 'Fierce', 'Brave'
+  ];
+  final List<String> nouns = [
+    'Tiger', 'River', 'Falcon', 'Shadow', 'Mountain', 'Wind', 'Ocean', 'Flame'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    generateDisplayName();
+    fetchLocalIp();
+  }
+
+  void generateDisplayName() {
+    final random = Random();
     setState(() {
-      isExchanging = !isExchanging;
+      displayName = '${adjectives[random.nextInt(adjectives.length)]}${nouns[random.nextInt(nouns.length)]}';
     });
   }
 
-  void startCheck(String targetId) {
-    setState(() {
-      checkingId = targetId;
-    });
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('チェック中'),
-        content: Text('$targetId と照合しています...'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              setState(() {
-                checkingId = null;
-              });
-              Navigator.pop(context);
-            },
-            child: const Text('キャンセル'),
-          ),
-        ],
-      ),
+  Future<void> fetchLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list();
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            setState(() {
+              serverIp = addr.address;
+            });
+            return;
+          }
+        }
+      }
+      setState(() {
+        serverIp = null;
+      });
+    } catch (e) {
+      setState(() {
+        serverIp = null;
+      });
+    }
+  }
+
+  Future<void> startGrpcServer() async {
+    if (grpcServer != null) return;
+
+    grpcServer = Server([
+      HelloServiceImpl(displayName, (clientName) {
+        setState(() {
+          latestClientName = clientName;
+        });
+      })
+    ]);
+    await grpcServer!.serve(
+      port: serverPort,
+      address: '0.0.0.0',
     );
+
+    setState(() {
+      isServerRunning = true;
+    });
+  }
+
+  Future<void> stopGrpcServer() async {
+    if (grpcServer != null) {
+      await grpcServer!.shutdown();
+      grpcServer = null;
+    }
+    setState(() {
+      isServerRunning = false;
+      latestClientName = null;
+    });
+  }
+
+  void toggleExchange(bool value) {
+    setState(() {
+      isExchanging = value;
+    });
+  }
+
+  void startScan(BuildContext context) async {
+    final result = await Navigator.pushNamed(
+      context,
+      '/scanner',
+      arguments: {'displayName': displayName},
+    );
+
+    if (result != null && result is String) {
+      setState(() {
+        connectedInfo = result;
+        isClientConnected = true;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    grpcServer?.shutdown();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final grpcInfoJson = serverIp != null
+        ? jsonEncode({
+      'ip': serverIp,
+      'port': serverPort,
+    })
+        : '';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('鍵交換画面'),
@@ -60,49 +153,85 @@ class _ExchangePageState extends State<ExchangePage> {
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            ElevatedButton.icon(
-              onPressed: toggleExchange,
-              icon: Icon(isExchanging ? Icons.stop : Icons.play_arrow),
-              label: Text(isExchanging ? '停止' : '開始'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isExchanging ? Colors.red : Colors.green,
-              ),
-            ),
+            Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
-            Row(
-              children: [
-                const Text('あなたの識別ID: ',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(myId),
-              ],
+
+            SwitchListTile(
+              title: const Text('アドバタイズ'),
+              subtitle: Text(isExchanging ? 'アドバタイズ中' : '停止中'),
+              value: isExchanging,
+              onChanged: toggleExchange,
+              secondary: Icon(Icons.bluetooth, color: isExchanging ? Colors.blue : Colors.grey),
             ),
+
+            SwitchListTile(
+              title: const Text('gRPCサーバ'),
+              subtitle: Text(isServerRunning ? '起動中' : '停止中'),
+              value: isServerRunning,
+              onChanged: (value) async {
+                if (value) {
+                  await startGrpcServer();
+                } else {
+                  await stopGrpcServer();
+                }
+              },
+              secondary: Icon(Icons.wifi, color: isServerRunning ? Colors.green : Colors.grey),
+            ),
+
             const SizedBox(height: 20),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('近くの識別ID一覧:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView.builder(
-                itemCount: nearbyIds.length,
-                itemBuilder: (context, index) {
-                  final id = nearbyIds[index];
-                  return ListTile(
-                    leading: const Icon(Icons.person),
-                    title: Text(id),
-                    trailing: ElevatedButton(
-                      onPressed: () => startCheck(id),
-                      child: const Text('チェック'),
+
+            if (isServerRunning)
+              serverIp != null
+                  ? Column(
+                children: [
+                  Center(
+                    child: QrImageView(
+                      data: grpcInfoJson,
+                      version: QrVersions.auto,
+                      size: 200.0,
                     ),
-                  );
-                },
-              ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('サーバ起動中！', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('IPアドレス: $serverIp'),
+                  Text('ポート番号: $serverPort'),
+                ],
+              )
+                  : const Text('⚠️ IPアドレス取得失敗', style: TextStyle(color: Colors.red)),
+
+            const SizedBox(height: 20),
+
+            ElevatedButton.icon(
+              onPressed: () => startScan(context),
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('QRコードをスキャンして接続'),
             ),
+            const SizedBox(height: 20),
+
+            if (isClientConnected)
+              Text('クライアント接続成功: $connectedInfo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+
+            if (latestClientName != null)
+              Text('接続完了：Hello, $latestClientName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
       ),
     );
+  }
+}
+
+class HelloServiceImpl extends HelloServiceBase {
+  final String serverDisplayName;
+  final void Function(String clientName) onClientConnected;
+
+  HelloServiceImpl(this.serverDisplayName, this.onClientConnected);
+
+  @override
+  Future<HelloReply> sayHello(ServiceCall call, HelloRequest request) async {
+    print('📥 クライアントから受信: ${request.name}');
+    onClientConnected(request.name);
+    return HelloReply()..message = 'Hello!, $serverDisplayName';
   }
 }
