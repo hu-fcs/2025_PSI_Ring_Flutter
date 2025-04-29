@@ -75,13 +75,18 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<void> startGrpcServer() async {
     if (grpcServer != null) return;
 
-    grpcServer = Server([
-      HelloServiceImpl(displayName, (clientName) {
-        setState(() {
-          latestClientName = clientName;
-        });
-      })
-    ]);
+    grpcServer = await Server.create(
+      services: [
+        HelloServiceImpl(displayName, (clientName) {
+          setState(() {
+            latestClientName = clientName;
+          });
+        })
+      ],
+      codecRegistry: CodecRegistry(codecs: const [GzipCodec(), IdentityCodec()]),
+      interceptors: const <Interceptor>[],
+    );
+
     await grpcServer!.serve(
       port: serverPort,
       address: '0.0.0.0',
