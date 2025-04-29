@@ -12,65 +12,18 @@ class ScannerPage extends StatefulWidget {
 }
 
 class _ScannerPageState extends State<ScannerPage> {
-  // gRPC接続中かどうか
   bool isConnecting = false;
-  // 手動入力モードかどうか（QRコードモードとの切替）
   bool isManualInputMode = false;
 
-  // 手動入力用テキストコントローラー
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController = TextEditingController();
 
-  // IPアドレスとポートを使ってgRPC接続を試みる
-  Future<void> connectAndSendHello(String ip, int port, String displayName) async {
-    showConnectingDialog(ip, port); // 接続中ダイアログを表示
-
-    final channel = ClientChannel(
-      ip,
-      port: port,
-      options: const ChannelOptions(credentials: ChannelCredentials.insecure()),
-    );
-    final stub = HelloServiceClient(channel);
-
-    try {
-      final response = await stub.sayHello(HelloRequest(name: displayName));
-      Navigator.pop(context); // 接続中ダイアログを閉じる
-      if (mounted) {
-        Navigator.pop(context, response.message); // 親画面に返却
-      }
-    } catch (e) {
-      print('❌ gRPC接続エラー: $e');
-      if (mounted) {
-        Navigator.pop(context); // 接続中ダイアログを閉じる
-        Navigator.pop(context, '接続失敗');
-      }
-    } finally {
-      await channel.shutdown();
-    }
-  }
-
-  // 接続中ダイアログを表示する
-  void showConnectingDialog(String ip, int port) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('接続中...'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 20),
-            Text('IPアドレス: $ip\nポート: $port\nに接続しています'),
-          ],
-        ),
-      ),
-    );
-  }
+  // 接続先情報（スキャン時のみ保持）
+  String? ipToConnect;
+  int? portToConnect;
 
   @override
   Widget build(BuildContext context) {
-    // ExchangePageから渡された仮名（自分の名前）
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     final String displayName = args?['displayName'] ?? 'UnknownName';
 
@@ -79,10 +32,9 @@ class _ScannerPageState extends State<ScannerPage> {
       body: Stack(
         children: [
           if (!isManualInputMode)
-          // QRコードスキャンモード
             MobileScanner(
               onDetect: (BarcodeCapture capture) async {
-                if (isConnecting) return;
+                if (isConnecting || ipToConnect != null) return;
 
                 final List<Barcode> barcodes = capture.barcodes;
                 if (barcodes.isNotEmpty) {
@@ -94,14 +46,12 @@ class _ScannerPageState extends State<ScannerPage> {
                       final int port = grpcInfo['port'];
 
                       setState(() {
-                        isConnecting = true;
+                        ipToConnect = ip;
+                        portToConnect = port;
                       });
 
-                      await connectAndSendHello(ip, port, displayName);
-
-                      setState(() {
-                        isConnecting = false;
-                      });
+                      // QRスキャン時だけ確認ポップアップを出す
+                      _confirmAndConnect(ip, port, displayName);
                     } catch (e) {
                       print('QRデコードエラー: $e');
                       if (mounted) {
@@ -113,7 +63,6 @@ class _ScannerPageState extends State<ScannerPage> {
               },
             )
           else
-          // 手動入力モード
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -137,8 +86,9 @@ class _ScannerPageState extends State<ScannerPage> {
                     child: ElevatedButton(
                       onPressed: () {
                         final ip = ipController.text.trim();
-                        final port = int.tryParse(portController.text.trim()) ?? 50051;
-                        if (ip.isNotEmpty) {
+                        final int? port = int.tryParse(portController.text.trim());
+                        if (ip.isNotEmpty && port != null) {
+                          // 手入力時は即接続
                           connectAndSendHello(ip, port, displayName);
                         }
                       },
@@ -148,7 +98,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 ],
               ),
             ),
-          // モード切替ボタン（QRスキャン ⇔ 手動入力）
           if (!isConnecting)
             Positioned(
               bottom: 30,
@@ -165,6 +114,92 @@ class _ScannerPageState extends State<ScannerPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  // スキャン時だけ確認してから接続する
+  Future<void> _confirmAndConnect(String ip, int port, String displayName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('接続確認'),
+        content: Text('IPアドレス: $ip\nポート: $port\nに接続しますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      connectAndSendHello(ip, port, displayName);
+    } else {
+      setState(() {
+        ipToConnect = null;
+        portToConnect = null;
+      });
+    }
+  }
+
+  // gRPC接続処理
+  Future<void> connectAndSendHello(String ip, int port, String displayName) async {
+    setState(() {
+      isConnecting = true;
+    });
+
+    showConnectingDialog(ip, port);
+
+    final channel = ClientChannel(
+      ip,
+      port: port,
+      options: const ChannelOptions(credentials: ChannelCredentials.insecure()),
+    );
+    final stub = HelloServiceClient(channel);
+
+    try {
+      final response = await stub.sayHello(HelloRequest(name: displayName));
+      Navigator.of(context, rootNavigator: true).pop(); // 接続中ダイアログを閉じる
+      if (mounted) {
+        Navigator.pop(context, response.message);
+      }
+    } catch (e) {
+      print('❌ gRPC接続エラー: $e');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        Navigator.pop(context, '接続失敗');
+      }
+    } finally {
+      await channel.shutdown();
+      setState(() {
+        isConnecting = false;
+        ipToConnect = null;
+        portToConnect = null;
+      });
+    }
+  }
+
+  // 接続中のプログレス表示
+  void showConnectingDialog(String ip, int port) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('接続中...'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 20),
+            Text('IPアドレス: $ip\nポート: $port\nに接続しています'),
+          ],
+        ),
       ),
     );
   }
