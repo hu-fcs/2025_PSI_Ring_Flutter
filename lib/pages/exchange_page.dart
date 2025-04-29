@@ -75,7 +75,7 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<void> startGrpcServer() async {
     if (grpcServer != null) return;
 
-    grpcServer = await Server.create(
+    grpcServer = Server.create(
       services: [
         HelloServiceImpl(displayName, (clientName) {
           setState(() {
