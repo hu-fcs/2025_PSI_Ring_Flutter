@@ -12,14 +12,18 @@ class ScannerPage extends StatefulWidget {
 }
 
 class _ScannerPageState extends State<ScannerPage> {
+  // gRPC接続中かどうか
   bool isConnecting = false;
+  // 手動入力モードかどうか（QRコードモードとの切替）
   bool isManualInputMode = false;
 
+  // 手動入力用テキストコントローラー
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController = TextEditingController();
 
+  // IPアドレスとポートを使ってgRPC接続を試みる
   Future<void> connectAndSendHello(String ip, int port, String displayName) async {
-    showConnectingDialog(ip, port);
+    showConnectingDialog(ip, port); // 接続中ダイアログを表示
 
     final channel = ClientChannel(
       ip,
@@ -30,14 +34,14 @@ class _ScannerPageState extends State<ScannerPage> {
 
     try {
       final response = await stub.sayHello(HelloRequest(name: displayName));
-      Navigator.pop(context);
+      Navigator.pop(context); // 接続中ダイアログを閉じる
       if (mounted) {
-        Navigator.pop(context, response.message);
+        Navigator.pop(context, response.message); // 親画面に返却
       }
     } catch (e) {
       print('❌ gRPC接続エラー: $e');
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); // 接続中ダイアログを閉じる
         Navigator.pop(context, '接続失敗');
       }
     } finally {
@@ -45,6 +49,7 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
+  // 接続中ダイアログを表示する
   void showConnectingDialog(String ip, int port) {
     showDialog(
       context: context,
@@ -65,6 +70,7 @@ class _ScannerPageState extends State<ScannerPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ExchangePageから渡された仮名（自分の名前）
     final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     final String displayName = args?['displayName'] ?? 'UnknownName';
 
@@ -73,6 +79,7 @@ class _ScannerPageState extends State<ScannerPage> {
       body: Stack(
         children: [
           if (!isManualInputMode)
+          // QRコードスキャンモード
             MobileScanner(
               onDetect: (BarcodeCapture capture) async {
                 if (isConnecting) return;
@@ -106,6 +113,7 @@ class _ScannerPageState extends State<ScannerPage> {
               },
             )
           else
+          // 手動入力モード
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -140,6 +148,7 @@ class _ScannerPageState extends State<ScannerPage> {
                 ],
               ),
             ),
+          // モード切替ボタン（QRスキャン ⇔ 手動入力）
           if (!isConnecting)
             Positioned(
               bottom: 30,

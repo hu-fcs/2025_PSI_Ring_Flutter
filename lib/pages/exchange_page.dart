@@ -16,18 +16,28 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
+  // アドバタイズ中かどうか
   bool isExchanging = false;
+  // gRPCサーバ起動中かどうか
   bool isServerRunning = false;
+  // クライアント接続済みかどうか
   bool isClientConnected = false;
 
+  // サーバのIPアドレス（Wi-Fiに接続しているIPアドレスを取得）
   String? serverIp;
+  // サーバのポート番号
   final int serverPort = 50051;
+  // クライアントから受け取ったメッセージ
   String? connectedInfo;
+  // 自分自身の仮名
   String displayName = '';
+  // クライアントから受け取った仮名
   String? latestClientName;
 
+  // gRPCサーバインスタンス
   Server? grpcServer;
 
+  // 仮名生成用単語リスト
   final List<String> adjectives = [
     'Blue', 'Silent', 'Swift', 'Bright', 'Lucky', 'Misty', 'Fierce', 'Brave'
   ];
@@ -38,10 +48,11 @@ class _ExchangePageState extends State<ExchangePage> {
   @override
   void initState() {
     super.initState();
-    generateDisplayName();
-    fetchLocalIp();
+    generateDisplayName();  // 仮名をランダム生成
+    fetchLocalIp();         // 現在のWi-Fi IPアドレスを取得
   }
 
+  // 仮名をランダム生成する
   void generateDisplayName() {
     final random = Random();
     setState(() {
@@ -49,19 +60,23 @@ class _ExchangePageState extends State<ExchangePage> {
     });
   }
 
+  // 現在のWi-Fi IPv4アドレスを取得（192.168.x.x や 10.x.x.x に限定）
   Future<void> fetchLocalIp() async {
     try {
-      final interfaces = await NetworkInterface.list();
-      for (var interface in interfaces) {
-        for (var addr in interface.addresses) {
-          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+      final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
+      for (final interface in interfaces) {
+        for (final addr in interface.addresses) {
+          final ip = addr.address;
+          // Wi-Fiの可能性が高いローカルIPを優先
+          if (ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
             setState(() {
-              serverIp = addr.address;
+              serverIp = ip;
             });
             return;
           }
         }
       }
+      // 該当アドレスがなければnull
       setState(() {
         serverIp = null;
       });
@@ -72,11 +87,13 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
+  // gRPCサーバを起動する
   Future<void> startGrpcServer() async {
     if (grpcServer != null) return;
 
     grpcServer = Server.create(
       services: [
+        // サーバ自身の仮名と、クライアント接続時のコールバックを渡す
         HelloServiceImpl(displayName, (clientName) {
           setState(() {
             latestClientName = clientName;
@@ -89,7 +106,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
     await grpcServer!.serve(
       port: serverPort,
-      address: '0.0.0.0',
+      address: '0.0.0.0', // すべてのネットワークインターフェースから受け付ける
     );
 
     setState(() {
@@ -97,6 +114,7 @@ class _ExchangePageState extends State<ExchangePage> {
     });
   }
 
+  // gRPCサーバを停止する
   Future<void> stopGrpcServer() async {
     if (grpcServer != null) {
       await grpcServer!.shutdown();
@@ -108,12 +126,14 @@ class _ExchangePageState extends State<ExchangePage> {
     });
   }
 
+  // アドバタイズ切り替え
   void toggleExchange(bool value) {
     setState(() {
       isExchanging = value;
     });
   }
 
+  // QRコードスキャンへ遷移
   void startScan(BuildContext context) async {
     final result = await Navigator.pushNamed(
       context,
@@ -129,6 +149,7 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
+  // ページ終了時にgRPCサーバをシャットダウン
   @override
   void dispose() {
     grpcServer?.shutdown();
@@ -160,9 +181,11 @@ class _ExchangePageState extends State<ExchangePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // 自分の仮名表示
             Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
 
+            // アドバタイズ切替
             SwitchListTile(
               title: const Text('アドバタイズ'),
               subtitle: Text(isExchanging ? 'アドバタイズ中' : '停止中'),
@@ -171,6 +194,7 @@ class _ExchangePageState extends State<ExchangePage> {
               secondary: Icon(Icons.bluetooth, color: isExchanging ? Colors.blue : Colors.grey),
             ),
 
+            // gRPCサーバ切替
             SwitchListTile(
               title: const Text('gRPCサーバ'),
               subtitle: Text(isServerRunning ? '起動中' : '停止中'),
@@ -187,6 +211,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
             const SizedBox(height: 20),
 
+            // サーバが起動しているときのみQR表示
             if (isServerRunning)
               serverIp != null
                   ? Column(
@@ -208,6 +233,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
             const SizedBox(height: 20),
 
+            // QRコードスキャンボタン
             ElevatedButton.icon(
               onPressed: () => startScan(context),
               icon: const Icon(Icons.qr_code_scanner),
@@ -215,6 +241,7 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
             const SizedBox(height: 20),
 
+            // クライアントから接続されたときの表示
             if (isClientConnected)
               Text('クライアント接続成功: $connectedInfo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
 
@@ -227,12 +254,14 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 }
 
+// gRPCサービスの実装クラス
 class HelloServiceImpl extends HelloServiceBase {
   final String serverDisplayName;
   final void Function(String clientName) onClientConnected;
 
   HelloServiceImpl(this.serverDisplayName, this.onClientConnected);
 
+  // クライアントからのsayHelloリクエストを処理する
   @override
   Future<HelloReply> sayHello(ServiceCall call, HelloRequest request) async {
     print('📥 クライアントから受信: ${request.name}');

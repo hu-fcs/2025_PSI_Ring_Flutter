@@ -14,7 +14,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 2, vsync: this); // 2つのタブ（収集・生成）
   }
 
   @override
@@ -23,16 +23,19 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     super.dispose();
   }
 
+  // データベースから収集鍵を取得
   Future<List<Map<String, dynamic>>> fetchCollectedKeys() async {
     final db = await DatabaseHelper.getDatabase();
     return db.query('ecd_keys');
   }
 
+  // データベースから生成鍵を取得
   Future<List<Map<String, dynamic>>> fetchGeneratedKeys() async {
     final db = await DatabaseHelper.getDatabase();
     return db.query('generated_keys');
   }
 
+  // ダミーの収集鍵を挿入
   Future<void> insertDummyCollectedKey() async {
     final db = await DatabaseHelper.getDatabase();
     await db.insert('ecd_keys', {
@@ -41,9 +44,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       'lon': 13512345,
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     });
-    setState(() {});
+    setState(() {}); // 画面更新
   }
 
+  // ダミーの生成鍵を挿入
   Future<void> insertDummyGeneratedKey() async {
     final db = await DatabaseHelper.getDatabase();
     await db.insert('generated_keys', {
@@ -55,23 +59,27 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     setState(() {});
   }
 
+  // 全ての収集鍵を削除
   Future<void> deleteAllCollectedKeys() async {
     final db = await DatabaseHelper.getDatabase();
     await db.delete('ecd_keys');
     setState(() {});
   }
 
+  // 全ての生成鍵を削除
   Future<void> deleteAllGeneratedKeys() async {
     final db = await DatabaseHelper.getDatabase();
     await db.delete('generated_keys');
     setState(() {});
   }
 
+  // バイナリデータを短縮した16進文字列に変換
   String shortHex(List<int> bytes) {
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
     return hex.length > 5 ? '${hex.substring(0, 5)}...' : hex;
   }
 
+  // UNIXタイムスタンプを人間に読みやすい形式に変換
   String formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
     final millis = isSecond ? unixTimeMs * 1000 : unixTimeMs;
     final dt = DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true).toLocal();
@@ -79,6 +87,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
+  // 緯度・経度をDMS形式（度分秒）に変換
   String toDMS(double decimalDegree, {required bool isLatitude}) {
     final direction = isLatitude
         ? (decimalDegree >= 0 ? 'N' : 'S')
@@ -93,6 +102,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     return "$deg° $min′ $sec″ $direction";
   }
 
+  // 鍵リストのUIを構築（FutureBuilderで非同期データを表示）
   Widget buildKeyList(Future<List<Map<String, dynamic>>> futureData, bool isGenerated) {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: futureData,
@@ -108,11 +118,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
           return const Center(child: Text('データがありません'));
         }
 
+        // 各レコードをCardで表示
         return ListView.builder(
           itemCount: records.length,
           itemBuilder: (context, index) {
             final row = records[index];
 
+            // 生成鍵の表示形式
             if (isGenerated) {
               final secKey = row['seckey_ecd'] as List<int>;
               final pubKey = row['pubkey_ecd'] as List<int>;
@@ -132,15 +144,14 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        '生成: $genTime   期限: $expTime',
-                        style: const TextStyle(fontSize: 14),
-                      ),
+                      Text('生成: $genTime   期限: $expTime'),
                     ],
                   ),
                 ),
               );
-            } else {
+            }
+            // 収集鍵の表示形式
+            else {
               final key = row['key_ecd'] as List<int>;
               final latDecimal = row['lat'] / 1e6;
               final lonDecimal = row['lon'] / 1e6;
@@ -213,6 +224,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       appBar: AppBar(title: const Text('デバッグ画面')),
       body: Column(
         children: [
+          // 上部のタブ（収集/生成）
           TabBar(
             controller: _tabController,
             tabs: const [
@@ -224,6 +236,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             child: TabBarView(
               controller: _tabController,
               children: [
+                // 収集鍵タブの内容
                 Column(
                   children: [
                     OverflowBar(
@@ -242,6 +255,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                     Expanded(child: buildKeyList(fetchCollectedKeys(), false)),
                   ],
                 ),
+                // 生成鍵タブの内容
                 Column(
                   children: [
                     OverflowBar(

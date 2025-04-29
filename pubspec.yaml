@@ -14,17 +14,24 @@ dependencies:
   mobile_scanner: ^3.0.0
   qr_flutter: ^4.1.0
   grpc: ^3.2.4
-  protobuf: ^2.1.0  # 👈 ここを2.1.0にダウングレード
+  protobuf: ^2.1.0
+  flutter_localizations: # ✅ ここ修正
+    sdk: flutter
+  intl: ^0.19.0  # ✅ 日本語ローカライズに必要（まだなければ追加）
 
 dev_dependencies:
-  protoc_plugin: ^20.0.1  # 👈 ここも20.0.1にダウングレード
+  protoc_plugin: ^20.0.1
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 
 flutter:
+  uses-material-design: true
   assets:
     - assets/empty_ecd.db
     - assets/mykey.db
     - assets/exchangekey.db
-  uses-material-design: true
+  fonts:
+    - family: NotoSansJP
+      fonts:
+        - asset: assets/fonts/NotoSansJP-Medium.ttf
