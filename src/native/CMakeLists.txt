@@ -6,14 +6,16 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 add_library(
-        key_derivation
+        psiring_auth # ライブラリ名は適宜変更してください
         SHARED
         key_derivation.c
+        psi.c
+        ring_signature.c
 )
 
 # OpenSSLのヘッダー（BoringSSLから取得）
 target_include_directories(
-        key_derivation
+        psiring_auth
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -25,7 +27,7 @@ find_library(log-lib log)
 set(CRYPTO_LIB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../android/app/src/main/jniLibs/${ANDROID_ABI}/libcrypto.so")
 
 target_link_libraries(
-        key_derivation
+        psiring_auth
         ${log-lib}
         ${CRYPTO_LIB_PATH}
 )

@@ -56,7 +56,7 @@ class _DebugPageState extends State<DebugPage>
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     });
     setState(() {});
-    print("✅ 高品質なダミー収集鍵を挿入しました。");
+    print("✅ ダミー収集鍵を挿入しました。");
   }
 
   Future<void> _insertDummyGeneratedKey() async {
@@ -74,7 +74,7 @@ class _DebugPageState extends State<DebugPage>
       'expire_time': DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch,
     });
     setState(() {});
-    print("✅ 高品質なダミー生成鍵を挿入しました。");
+    print("✅ ダミー生成鍵を挿入しました。");
   }
 
   // --- マスターキー操作 ---

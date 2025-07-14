@@ -16,11 +16,14 @@ class NativeKeyService {
   late final NativeKeyBindings _bindings;
 
   NativeKeyService() {
+    // CMakeLists.txtで設定したライブラリ名に合わせる
+    const libName = 'psiring_auth';
+
     // プラットフォームに応じてライブラリ名を決定
     final dylib = Platform.isAndroid || Platform.isLinux
-        ? DynamicLibrary.open('libkey_derivation.so')
+        ? DynamicLibrary.open('lib$libName.so') // libpsiring_auth.so
         : (Platform.isWindows
-        ? DynamicLibrary.open('key_derivation.dll')
+        ? DynamicLibrary.open('$libName.dll') // psiring_auth.dll
         : DynamicLibrary.process()); // For macOS/iOS
 
     _bindings = NativeKeyBindings(dylib);
