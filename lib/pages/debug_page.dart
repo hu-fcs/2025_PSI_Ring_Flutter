@@ -1,5 +1,7 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../db/database_helper.dart';
+import '../key_management_service.dart';
 
 class DebugPage extends StatefulWidget {
   const DebugPage({super.key});
@@ -8,13 +10,15 @@ class DebugPage extends StatefulWidget {
   State<DebugPage> createState() => _DebugPageState();
 }
 
-class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMixin {
+class _DebugPageState extends State<DebugPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final KeyManagementService _keyManager = KeyManagementService();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this); // 2つのタブ（収集・生成）
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -23,195 +27,235 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     super.dispose();
   }
 
-  // データベースから収集鍵を取得
-  Future<List<Map<String, dynamic>>> fetchCollectedKeys() async {
+  // --- データベース操作 ---
+  Future<List<Map<String, dynamic>>> _fetchKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    return db.query('ecd_keys');
+    return db.query(tableName);
   }
 
-  // データベースから生成鍵を取得
-  Future<List<Map<String, dynamic>>> fetchGeneratedKeys() async {
+  Future<void> _deleteAllKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    return db.query('generated_keys');
+    await db.delete(tableName);
+    setState(() {});
   }
 
-  // ダミーの収集鍵を挿入
-  Future<void> insertDummyCollectedKey() async {
+  // --- ダミーデータ操作 ---
+  Future<void> _insertDummyCollectedKey() async {
+    final keyPair = _keyManager.generateDummyKeyPair();
+    if (keyPair == null) {
+      print("🚨 ダミー収集鍵の生成に失敗しました。");
+      return;
+    }
+
+    final random = Random();
     final db = await DatabaseHelper.getDatabase();
     await db.insert('ecd_keys', {
-      'key_ecd': List<int>.generate(17, (i) => (i + DateTime.now().second) % 256),
-      'lat': 34567890,
-      'lon': 13512345,
+      'key_ecd': keyPair.publicKey,
+      'lat': 34000000 + random.nextInt(1000000),
+      'lon': 135000000 + random.nextInt(1000000),
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     });
-    setState(() {}); // 画面更新
+    setState(() {});
+    print("✅ 高品質なダミー収集鍵を挿入しました。");
   }
 
-  // ダミーの生成鍵を挿入
-  Future<void> insertDummyGeneratedKey() async {
+  Future<void> _insertDummyGeneratedKey() async {
+    final keyPair = _keyManager.generateDummyKeyPair();
+    if (keyPair == null) {
+      print("🚨 ダミー生成鍵の生成に失敗しました。");
+      return;
+    }
+
     final db = await DatabaseHelper.getDatabase();
     await db.insert('generated_keys', {
-      'seckey_ecd': List<int>.generate(17, (i) => (100 + i + DateTime.now().second) % 256),
-      'pubkey_ecd': List<int>.generate(16, (i) => (200 - i - DateTime.now().second) % 256),
+      'seckey_ecd': keyPair.privateKey,
+      'pubkey_ecd': keyPair.publicKey,
       'generate_time': DateTime.now().millisecondsSinceEpoch,
-      'expire_time': DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch,
+      'expire_time': DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch,
     });
     setState(() {});
+    print("✅ 高品質なダミー生成鍵を挿入しました。");
   }
 
-  // 全ての収集鍵を削除
-  Future<void> deleteAllCollectedKeys() async {
-    final db = await DatabaseHelper.getDatabase();
-    await db.delete('ecd_keys');
-    setState(() {});
+  // --- マスターキー操作 ---
+  Future<void> _deleteMasterKey() async {
+    // 削除前に確認ダイアログを表示
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('マスターキーの削除'),
+        content: const Text('マスターキーを削除すると、アプリは初期状態に戻ります。よろしいですか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('削除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _keyManager.deleteMasterKey();
+      setState(() {});
+    }
   }
 
-  // 全ての生成鍵を削除
-  Future<void> deleteAllGeneratedKeys() async {
-    final db = await DatabaseHelper.getDatabase();
-    await db.delete('generated_keys');
-    setState(() {});
-  }
-
-  // バイナリデータを短縮した16進文字列に変換
-  String shortHex(List<int> bytes) {
+  // --- UI構築ヘルパー ---
+  String _shortHex(List<int>? bytes, {int length = 10}) {
+    if (bytes == null || bytes.isEmpty) return 'N/A';
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
-    return hex.length > 5 ? '${hex.substring(0, 5)}...' : hex;
+    return hex.length > length ? '${hex.substring(0, length)}...' : hex;
   }
 
-  // UNIXタイムスタンプを人間に読みやすい形式に変換
-  String formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
+  String _formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
+    if (unixTimeMs == null) return "N/A";
     final millis = isSecond ? unixTimeMs * 1000 : unixTimeMs;
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true).toLocal();
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  // 緯度・経度をDMS形式（度分秒）に変換
-  String toDMS(double decimalDegree, {required bool isLatitude}) {
-    final direction = isLatitude
-        ? (decimalDegree >= 0 ? 'N' : 'S')
-        : (decimalDegree >= 0 ? 'E' : 'W');
-
+  String _toDMS(double decimalDegree, {required bool isLatitude}) {
+    final direction = isLatitude ? (decimalDegree >= 0 ? 'N' : 'S') : (decimalDegree >= 0 ? 'E' : 'W');
     final absDeg = decimalDegree.abs();
     final deg = absDeg.floor();
     final minDecimal = (absDeg - deg) * 60;
     final min = minDecimal.floor();
     final sec = ((minDecimal - min) * 60).toStringAsFixed(2);
-
     return "$deg° $min′ $sec″ $direction";
   }
 
-  // 鍵リストのUIを構築（FutureBuilderで非同期データを表示）
-  Widget buildKeyList(Future<List<Map<String, dynamic>>> futureData, bool isGenerated) {
+  // --- ウィジェット ---
+  Widget _buildMasterKeyCard() {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+      color: Colors.indigo.shade50,
+      elevation: 4,
+      child: Stack( // アイコンを右上に配置するためにStackを使用
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 40, 12), // アイコンのスペースを確保
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, // 高さを最小に
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    const Text('🔑 マスターキー', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Text('(Base64)', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                FutureBuilder<String?>(
+                  future: _keyManager.getMasterKeyBase64(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(height: 20, child: LinearProgressIndicator());
+                    }
+                    if (snapshot.hasData && snapshot.data != null) {
+                      // 1行で省略表示するための設定
+                      return SelectionArea(
+                        child: Text(
+                          snapshot.data!,
+                          style: const TextStyle(fontFamily: 'monospace'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    } else {
+                      return const Text('保存されていません', style: TextStyle(color: Colors.grey));
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          // 右上に配置した削除ボタン
+          Positioned(
+            top: 0,
+            right: 0,
+            child: IconButton(
+              icon: const Icon(Icons.delete_forever),
+              onPressed: _deleteMasterKey,
+              tooltip: 'マスターキーを削除',
+              color: Colors.red.withOpacity(0.7),
+              splashRadius: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKeyList(String tableName, bool isGenerated) {
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: futureData,
+      future: _fetchKeys(tableName),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
-          return Center(child: Text('エラー: ${snapshot.error}'));
-        }
-        final records = snapshot.data!;
-        if (records.isEmpty) {
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return const Center(child: Text('データがありません'));
         }
-
-        // 各レコードをCardで表示
+        final records = snapshot.data!;
         return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: records.length,
           itemBuilder: (context, index) {
             final row = records[index];
-
-            // 生成鍵の表示形式
-            if (isGenerated) {
-              final secKey = row['seckey_ecd'] as List<int>;
-              final pubKey = row['pubkey_ecd'] as List<int>;
-              final genTime = formatTime(row['generate_time']);
-              final expTime = formatTime(row['expire_time']);
-
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Sec: ${shortHex(secKey)}   Pub: ${shortHex(pubKey)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Text('生成: $genTime   期限: $expTime'),
-                    ],
-                  ),
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: isGenerated
+                    ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Expanded(child: Text('Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}')),
+                      Expanded(child: Text('Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}')),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: Text('生成: ${_formatTime(row['generate_time'])}')),
+                      Expanded(child: Text('期限: ${_formatTime(row['expire_time'])}')),
+                    ]),
+                  ],
+                )
+                    : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(_toDMS((row['lat'] as int) / 1e6, isLatitude: true)),
+                      ])),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(_toDMS((row['lon'] as int) / 1e6, isLatitude: false)),
+                      ])),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(_formatTime(row['ts'], isSecond: true)),
+                      ])),
+                    ]),
+                  ],
                 ),
-              );
-            }
-            // 収集鍵の表示形式
-            else {
-              final key = row['key_ecd'] as List<int>;
-              final latDecimal = row['lat'] / 1e6;
-              final lonDecimal = row['lon'] / 1e6;
-              final ts = formatTime(row['ts'], isSecond: true);
-
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Text(
-                          'Key: ${shortHex(key)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.blueGrey,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(toDMS(latDecimal, isLatitude: true)),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(toDMS(lonDecimal, isLatitude: false)),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(ts),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
+              ),
+            );
           },
         );
       },
@@ -224,55 +268,38 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       appBar: AppBar(title: const Text('デバッグ画面')),
       body: Column(
         children: [
-          // 上部のタブ（収集/生成）
           TabBar(
             controller: _tabController,
-            tabs: const [
-              Tab(text: '収集した鍵'),
-              Tab(text: '生成した鍵'),
-            ],
+            tabs: const [Tab(text: '収集した鍵'), Tab(text: '生成した鍵')],
           ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                // 収集鍵タブの内容
-                Column(
-                  children: [
-                    OverflowBar(
-                      alignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton(
-                          onPressed: insertDummyCollectedKey,
-                          child: const Text('ダミー追加'),
-                        ),
-                        ElevatedButton(
-                          onPressed: deleteAllCollectedKeys,
-                          child: const Text('全削除'),
-                        ),
-                      ],
+                SingleChildScrollView(
+                  child: Column(children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
+                        ElevatedButton(onPressed: _insertDummyCollectedKey, child: const Text('ダミー追加')),
+                        ElevatedButton(onPressed: () => _deleteAllKeys('ecd_keys'), child: const Text('収集鍵を全削除')),
+                      ]),
                     ),
-                    Expanded(child: buildKeyList(fetchCollectedKeys(), false)),
-                  ],
+                    _buildKeyList('ecd_keys', false),
+                  ]),
                 ),
-                // 生成鍵タブの内容
-                Column(
-                  children: [
-                    OverflowBar(
-                      alignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton(
-                          onPressed: insertDummyGeneratedKey,
-                          child: const Text('ダミー追加'),
-                        ),
-                        ElevatedButton(
-                          onPressed: deleteAllGeneratedKeys,
-                          child: const Text('全削除'),
-                        ),
-                      ],
+                SingleChildScrollView(
+                  child: Column(children: [
+                    _buildMasterKeyCard(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
+                        ElevatedButton(onPressed: _insertDummyGeneratedKey, child: const Text('ダミー追加')),
+                        ElevatedButton(onPressed: () => _deleteAllKeys('generated_keys'), child: const Text('生成鍵を全削除')),
+                      ]),
                     ),
-                    Expanded(child: buildKeyList(fetchGeneratedKeys(), true)),
-                  ],
+                    _buildKeyList('generated_keys', true),
+                  ]),
                 ),
               ],
             ),

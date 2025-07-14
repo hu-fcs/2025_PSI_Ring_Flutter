@@ -4,21 +4,29 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'native_key_bindings.dart';
 
-// KeyPairクラスをトップレベルに移動
+/// 生成された鍵ペアを保持するヘルパークラス
 class KeyPair {
   final Uint8List privateKey;
   final Uint8List publicKey;
   KeyPair(this.privateKey, this.publicKey);
 }
 
+/// C言語の関数を呼び出すためのサービスクラス
 class NativeKeyService {
   late final NativeKeyBindings _bindings;
 
   NativeKeyService() {
-    final dylib = DynamicLibrary.open('libkey_derivation.so');
+    // プラットフォームに応じてライブラリ名を決定
+    final dylib = Platform.isAndroid || Platform.isLinux
+        ? DynamicLibrary.open('libkey_derivation.so')
+        : (Platform.isWindows
+        ? DynamicLibrary.open('key_derivation.dll')
+        : DynamicLibrary.process()); // For macOS/iOS
+
     _bindings = NativeKeyBindings(dylib);
   }
 
+  /// Cの 'generate_master_key' 関数を呼び出す
   Uint8List? generateMasterKey() {
     final keyPtr = calloc<Uint8>(32);
     try {
@@ -32,7 +40,8 @@ class NativeKeyService {
     }
   }
 
-  KeyPair? deriveNewKeyPair(Uint8List masterKey, int timestamp) {
+  /// Cの 'derive_keypair_from_timestamp' 関数を呼び出す
+  KeyPair? deriveNewKeyPair(Uint8List masterKey, int timestamp, int slotMs) {
     final masterKeyPtr = calloc<Uint8>(masterKey.length);
     final privKeyPtr = calloc<Uint8>(32);
     final pubKeyPtr = calloc<Uint8>(65);
@@ -42,11 +51,11 @@ class NativeKeyService {
       final result = _bindings.derive_keypair_from_timestamp(
         masterKeyPtr,
         timestamp,
+        slotMs,
         privKeyPtr,
         pubKeyPtr,
       );
       if (result == 1) {
-        // KeyPairクラスを正しく呼び出す
         return KeyPair(
           Uint8List.fromList(privKeyPtr.asTypedList(32)),
           Uint8List.fromList(pubKeyPtr.asTypedList(65)),

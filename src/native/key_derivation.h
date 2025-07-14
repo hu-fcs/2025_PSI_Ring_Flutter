@@ -4,19 +4,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// Windows(.dll)とその他(.so, .dylib)でライブラリ関数をエクスポートするためのマクロ
 #if defined(_WIN32)
 #define EXPORT __declspec(dllexport)
 #else
-#define EXPORT __attribute__((visibility("default")))
+#define EXPORT
 #endif
 
-/**
- * @brief 32バイトの暗号学的に安全なマスターキーを生成する。
- *
- * @param out_master_key_32b 出力: 生成された32バイトのマスターキーを格納するバッファ。
- * @return 成功した場合は 1、失敗した場合は 0。
- */
 EXPORT int generate_master_key(
         uint8_t* out_master_key_32b
 );
@@ -26,13 +19,15 @@ EXPORT int generate_master_key(
  *
  * @param master_key       入力: 32バイトのマスターキー。
  * @param timestamp_ms     入力: 鍵導出の元となるタイムスタンプ（ミリ秒）。
+ * @param slot_ms          入力: タイムスロットの間隔（ミリ秒）。
  * @param out_priv_key_32b 出力: 生成された32バイトの秘密鍵を格納するバッファ。
- * @param out_pub_key_65b  出力: 生成された65バイトの公開鍵（uncompressed形式, 0x04 + X + Y）を格納するバッファ。
+ * @param out_pub_key_65b  出力: 生成された65バイトの公開鍵を格納するバッファ。
  * @return 成功した場合は 1、失敗した場合は 0。
  */
 EXPORT int derive_keypair_from_timestamp(
         const uint8_t* master_key,
         uint64_t timestamp_ms,
+        uint64_t slot_ms,
         uint8_t* out_priv_key_32b,
         uint8_t* out_pub_key_65b
 );

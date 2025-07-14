@@ -26,7 +26,6 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // ✅ Kotlin DSL 正しい書き方
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
         }

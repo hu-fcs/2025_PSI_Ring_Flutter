@@ -175,10 +175,6 @@ class NativeKeyBindings {
       _lookup<ffi.NativeFunction<ffi.UintPtr Function()>>('__threadhandle');
   late final ___threadhandle = ___threadhandlePtr.asFunction<int Function()>();
 
-  /// @brief 32バイトの暗号学的に安全なマスターキーを生成する。
-  ///
-  /// @param out_master_key_32b 出力: 生成された32バイトのマスターキーを格納するバッファ。
-  /// @return 成功した場合は 1、失敗した場合は 0。
   int generate_master_key(ffi.Pointer<ffi.Uint8> out_master_key_32b) {
     return _generate_master_key(out_master_key_32b);
   }
@@ -195,18 +191,21 @@ class NativeKeyBindings {
   ///
   /// @param master_key       入力: 32バイトのマスターキー。
   /// @param timestamp_ms     入力: 鍵導出の元となるタイムスタンプ（ミリ秒）。
+  /// @param slot_ms          入力: タイムスロットの間隔（ミリ秒）。
   /// @param out_priv_key_32b 出力: 生成された32バイトの秘密鍵を格納するバッファ。
-  /// @param out_pub_key_65b  出力: 生成された65バイトの公開鍵（uncompressed形式, 0x04 + X + Y）を格納するバッファ。
+  /// @param out_pub_key_65b  出力: 生成された65バイトの公開鍵を格納するバッファ。
   /// @return 成功した場合は 1、失敗した場合は 0。
   int derive_keypair_from_timestamp(
     ffi.Pointer<ffi.Uint8> master_key,
     int timestamp_ms,
+    int slot_ms,
     ffi.Pointer<ffi.Uint8> out_priv_key_32b,
     ffi.Pointer<ffi.Uint8> out_pub_key_65b,
   ) {
     return _derive_keypair_from_timestamp(
       master_key,
       timestamp_ms,
+      slot_ms,
       out_priv_key_32b,
       out_pub_key_65b,
     );
@@ -216,6 +215,7 @@ class NativeKeyBindings {
     ffi.NativeFunction<
       ffi.Int Function(
         ffi.Pointer<ffi.Uint8>,
+        ffi.Uint64,
         ffi.Uint64,
         ffi.Pointer<ffi.Uint8>,
         ffi.Pointer<ffi.Uint8>,
@@ -227,6 +227,7 @@ class NativeKeyBindings {
           .asFunction<
             int Function(
               ffi.Pointer<ffi.Uint8>,
+              int,
               int,
               ffi.Pointer<ffi.Uint8>,
               ffi.Pointer<ffi.Uint8>,

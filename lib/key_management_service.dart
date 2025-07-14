@@ -1,37 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'db/database_helper.dart';
-import 'native_key_service.dart'; // ★ 新しいサービスをインポート
+import 'native_key_service.dart';
 
 class KeyManagementService {
   static const _masterKeyAlias = 'app_master_key';
   final _secureStorage = const FlutterSecureStorage();
-  Timer? _timer;
-
-  // ★ FFIサービスをインスタンス化
   final _nativeKeyService = NativeKeyService();
 
   Future<void> init() async {
-    final masterKey = await _ensureMasterKey();
-    if (masterKey != null) {
-      _startPeriodicKeyGeneration(masterKey);
-    } else {
-      print("🚨 マスターキーの確保に失敗したため、鍵生成を開始できません。");
-    }
+    await _ensureMasterKey();
   }
 
-  // ★ マスターキー生成ロジックをFFI呼び出しに変更
   Future<Uint8List?> _ensureMasterKey() async {
     final stored = await _secureStorage.read(key: _masterKeyAlias);
     if (stored != null) {
       print("🔑 既存のマスターキーを読み込みました。");
       return base64Decode(stored);
     }
-
     print("⚙️ 新しいマスターキーをFFI経由で生成します...");
-    // Cの関数を呼び出して新しいマスターキーを生成
     final mk = _nativeKeyService.generateMasterKey();
     if (mk != null) {
       await _secureStorage.write(
@@ -45,57 +35,74 @@ class KeyManagementService {
     return null;
   }
 
-  void _startPeriodicKeyGeneration(Uint8List masterKey) {
-    print("⏰ 10分毎の定期的な鍵生成を開始します。");
-    _generateAndStoreKey(masterKey); // まず初回実行
-    _timer = Timer.periodic(
-      const Duration(minutes: 10),
-          (_) => _generateAndStoreKey(masterKey),
+  Future<Uint8List?> getPublicKeyForAdvertise({
+    Duration validity = const Duration(minutes: 10),
+  }) async {
+    final masterKey = await _ensureMasterKey();
+    if (masterKey == null) {
+      print("🚨 マスターキーがないため、公開鍵を取得できません。");
+      return null;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final slotMillis = validity.inMilliseconds;
+    final slotStartTime = (now ~/ slotMillis) * slotMillis;
+
+    final db = await DatabaseHelper.getDatabase();
+
+    print("🔍 DBから有効な鍵を検索します...");
+    final existingKeys = await db.query(
+      'generated_keys',
+      where: 'generate_time = ? AND expire_time > ?',
+      whereArgs: [slotStartTime, now],
+      limit: 1,
     );
-  }
 
-  Future<void> _generateAndStoreKey(Uint8List masterKey) async {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    await _generateKeyAt(masterKey, timestamp);
-  }
+    if (existingKeys.isNotEmpty) {
+      final key = existingKeys.first['pubkey_ecd'] as Uint8List;
+      print("✅ 有効な鍵をDBから発見。再利用します。");
+      return key;
+    }
 
-  // ★ 鍵導出ロジックをFFI呼び出しに変更
-  Future<void> _generateKeyAt(Uint8List masterKey, int timestamp) async {
-    print("⚙️ 鍵ペアをFFI経由で導出します (Timestamp: $timestamp)...");
-
-    // Cの関数を呼び出して鍵ペアを導出
-    final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, timestamp);
+    print("⚠️ 有効な鍵なし。新しい鍵を生成します...");
+    final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMillis);
 
     if (keyPair == null) {
       print("🚨 FFI経由での鍵生成に失敗しました。");
-      return;
+      return null;
     }
 
-    final db = await DatabaseHelper.getDatabase();
+    final expireTime = slotStartTime + slotMillis;
+
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
-      'generate_time': timestamp,
-      'expire_time': timestamp + Duration(days: 30).inMilliseconds,
+      'generate_time': slotStartTime,
+      'expire_time': expireTime,
     });
+    print("💾 新しい鍵を生成し、DBに保存しました。");
 
-    print("🔐 鍵生成成功 (via FFI)");
-    print("   公開鍵 (Base64): ${base64.encode(keyPair.publicKey)}");
+    return keyPair.publicKey;
   }
 
-  Future<Uint8List?> prepareCurrentPublicKeyForAdvertise() async {
-    final masterKey = await _ensureMasterKey();
-    if (masterKey == null) return null;
+  // --- デバッグ用のメソッド ---
 
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now);
+  /// デバッグ用の高品質なダミー鍵ペアを生成して返す
+  KeyPair? generateDummyKeyPair() {
+    final random = Random.secure();
+    final dummyMasterKey = Uint8List.fromList(List<int>.generate(32, (_) => random.nextInt(256)));
+    final randomTimestamp = DateTime.now().subtract(Duration(days: random.nextInt(30))).millisecondsSinceEpoch;
+    const slotMillis = 10 * 60 * 1000;
 
-    if (keyPair != null) {
-      print("📦 アドバタイズ用の公開鍵をFFI経由で生成: ${base64.encode(keyPair.publicKey)}");
-      return keyPair.publicKey;
-    }
+    return _nativeKeyService.deriveNewKeyPair(dummyMasterKey, randomTimestamp, slotMillis);
+  }
 
-    print("🚨 アドバタイズ用の鍵生成に失敗しました。");
-    return null;
+  Future<String?> getMasterKeyBase64() {
+    return _secureStorage.read(key: _masterKeyAlias);
+  }
+
+  Future<void> deleteMasterKey() {
+    print("🔑 マスターキーを削除します。");
+    return _secureStorage.delete(key: _masterKeyAlias);
   }
 }

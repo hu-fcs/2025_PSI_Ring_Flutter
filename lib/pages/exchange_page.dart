@@ -122,16 +122,17 @@ class _ExchangePageState extends State<ExchangePage> {
     });
   }
 
-  // This method is corrected to handle nulls.
   void toggleExchange(bool value) async {
     setState(() {
       isExchanging = value;
     });
     if (value) {
       final keyManager = KeyManagementService();
-      final pubkey = await keyManager.prepareCurrentPublicKeyForAdvertise();
+      // ▼▼▼ ここを新しいメソッド名に修正 ▼▼▼
+      final pubkey = await keyManager.getPublicKeyForAdvertise(
+        validity: const Duration(minutes: 10),
+      );
 
-      // Check if the public key is not null before using it.
       if (pubkey != null) {
         print("📡 アドバタイズ予定公開鍵: ${base64.encode(pubkey)}");
         // TODO: Implement actual BLE advertising with the public key here.
