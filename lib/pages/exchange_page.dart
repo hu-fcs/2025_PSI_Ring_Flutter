@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../generated/hello.pbgrpc.dart';
 import '../boringssl_service.dart';
+import '../key_management_service.dart';
 
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
@@ -17,7 +18,6 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
-  // ... (他の変数は変更なし)
   bool isExchanging = false;
   bool isServerRunning = false;
   bool isClientConnected = false;
@@ -42,13 +42,11 @@ class _ExchangePageState extends State<ExchangePage> {
     fetchLocalIp();
   }
 
-  // BoringSSLライブラリのRAND_bytes関数をテストする
   void checkBoringSSL() {
     if (Platform.isAndroid) {
       try {
         final service = BoringSSLService();
         setState(() {
-          // 新しいテスト関数を呼び出す
           _boringSSLVersion = service.testRandomBytes();
         });
       } catch (e) {
@@ -63,13 +61,13 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
-  // ... (他の関数は変更なし)
   void generateDisplayName() {
     final random = Random();
     setState(() {
       displayName = '${adjectives[random.nextInt(adjectives.length)]}${nouns[random.nextInt(nouns.length)]}';
     });
   }
+
   Future<void> fetchLocalIp() async {
     try {
       final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
@@ -93,6 +91,7 @@ class _ExchangePageState extends State<ExchangePage> {
       });
     }
   }
+
   Future<void> startGrpcServer() async {
     if (grpcServer != null) return;
     grpcServer = Server.create(
@@ -111,6 +110,7 @@ class _ExchangePageState extends State<ExchangePage> {
       isServerRunning = true;
     });
   }
+
   Future<void> stopGrpcServer() async {
     if (grpcServer != null) {
       await grpcServer!.shutdown();
@@ -121,12 +121,31 @@ class _ExchangePageState extends State<ExchangePage> {
       latestClientName = null;
     });
   }
-  void toggleExchange(bool value) {
+
+  // This method is corrected to handle nulls.
+  void toggleExchange(bool value) async {
     setState(() {
       isExchanging = value;
     });
+    if (value) {
+      final keyManager = KeyManagementService();
+      final pubkey = await keyManager.prepareCurrentPublicKeyForAdvertise();
+
+      // Check if the public key is not null before using it.
+      if (pubkey != null) {
+        print("📡 アドバタイズ予定公開鍵: ${base64.encode(pubkey)}");
+        // TODO: Implement actual BLE advertising with the public key here.
+      } else {
+        print("🚨 アドバタイズ用の公開鍵が取得できませんでした。");
+      }
+    } else {
+      // TODO: Stop BLE advertising here.
+      print("🛑 Advertising stopped.");
+    }
   }
+
   void startScan(BuildContext context) async {
+    // Assuming '/scanner' route exists and handles QR code scanning.
     final result = await Navigator.pushNamed(context, '/scanner', arguments: {'displayName': displayName});
     if (result != null && result is String) {
       setState(() {
@@ -135,6 +154,7 @@ class _ExchangePageState extends State<ExchangePage> {
       });
     }
   }
+
   @override
   void dispose() {
     grpcServer?.shutdown();
@@ -143,7 +163,6 @@ class _ExchangePageState extends State<ExchangePage> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (buildメソッドの上部は変更なし)
     final grpcInfoJson = serverIp != null ? jsonEncode({'ip': serverIp, 'port': serverPort}) : '';
 
     return Scaffold(
@@ -159,92 +178,91 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: checkBoringSSL,
-              child: const Text('BoringSSLのRAND_bytesをテスト'), // ボタンのテキストを更新
-            ),
-            const SizedBox(height: 20),
-
-            if (_boringSSLVersion != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade100,
-                  borderRadius: BorderRadius.circular(8.0),
-                  border: Border.all(color: Colors.green.shade300),
-                ),
-                child: Text(
-                  'テスト結果: $_boringSSLVersion', // 表示テキストを更新
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade800,
-                  ),
-                ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: checkBoringSSL,
+                child: const Text('BoringSSLのRAND_bytesをテスト'),
               ),
-            const SizedBox(height: 20),
-
-            // ... (以下のUIは変更なし)
-            Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            SwitchListTile(
-              title: const Text('アドバタイズ'),
-              subtitle: Text(isExchanging ? 'アドバタイズ中' : '停止中'),
-              value: isExchanging,
-              onChanged: toggleExchange,
-              secondary: Icon(Icons.bluetooth, color: isExchanging ? Colors.blue : Colors.grey),
-            ),
-            SwitchListTile(
-              title: const Text('gRPCサーバ'),
-              subtitle: Text(isServerRunning ? '起動中' : '停止中'),
-              value: isServerRunning,
-              onChanged: (value) async {
-                if (value) {
-                  await startGrpcServer();
-                } else {
-                  await stopGrpcServer();
-                }
-              },
-              secondary: Icon(Icons.wifi, color: isServerRunning ? Colors.green : Colors.grey),
-            ),
-            const SizedBox(height: 20),
-            if (isServerRunning)
-              serverIp != null
-                  ? Column(
-                children: [
-                  Center(
-                    child: QrImageView(data: grpcInfoJson, version: QrVersions.auto, size: 200.0),
+              const SizedBox(height: 20),
+              if (_boringSSLVersion != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: BorderRadius.circular(8.0),
+                    border: Border.all(color: Colors.green.shade300),
                   ),
-                  const SizedBox(height: 10),
-                  const Text('サーバ起動中！', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('IPアドレス: $serverIp'),
-                  Text('ポート番号: $serverPort'),
-                ],
-              )
-                  : const Text('⚠️ IPアドレス取得失敗', style: TextStyle(color: Colors.red)),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () => startScan(context),
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('QRコードをスキャンして接続'),
-            ),
-            const SizedBox(height: 20),
-            if (isClientConnected)
-              Text('クライアント接続成功: $connectedInfo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            if (latestClientName != null)
-              Text('接続完了：Hello, $latestClientName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          ],
+                  child: Text(
+                    'テスト結果: $_boringSSLVersion',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 20),
+              Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              SwitchListTile(
+                title: const Text('アドバタイズ'),
+                subtitle: Text(isExchanging ? 'アドバタイズ中' : '停止中'),
+                value: isExchanging,
+                onChanged: toggleExchange,
+                secondary: Icon(Icons.bluetooth, color: isExchanging ? Colors.blue : Colors.grey),
+              ),
+              SwitchListTile(
+                title: const Text('gRPCサーバ'),
+                subtitle: Text(isServerRunning ? '起動中' : '停止中'),
+                value: isServerRunning,
+                onChanged: (value) async {
+                  if (value) {
+                    await startGrpcServer();
+                  } else {
+                    await stopGrpcServer();
+                  }
+                },
+                secondary: Icon(Icons.wifi, color: isServerRunning ? Colors.green : Colors.grey),
+              ),
+              const SizedBox(height: 20),
+              if (isServerRunning)
+                serverIp != null
+                    ? Column(
+                  children: [
+                    Center(
+                      child: QrImageView(data: grpcInfoJson, version: QrVersions.auto, size: 200.0),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('サーバ起動中！', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text('IPアドレス: $serverIp'),
+                    Text('ポート番号: $serverPort'),
+                  ],
+                )
+                    : const Text('⚠️ IPアドレス取得失敗', style: TextStyle(color: Colors.red)),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () => startScan(context),
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text('QRコードをスキャンして接続'),
+              ),
+              const SizedBox(height: 20),
+              if (isClientConnected)
+                Text('クライアント接続成功: $connectedInfo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              if (latestClientName != null)
+                Text('接続完了：Hello, $latestClientName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ... (HelloServiceImplは変更なし)
+// gRPC Service Implementation
 class HelloServiceImpl extends HelloServiceBase {
   final String serverDisplayName;
   final void Function(String clientName) onClientConnected;

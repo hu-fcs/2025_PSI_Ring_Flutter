@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_secure_storage: ^9.0.0
+  pointycastle: ^3.7.4
   cupertino_icons: ^1.0.8
   sqflite: ^2.4.2
   sqflite_common_ffi: ^2.3.0
@@ -16,15 +18,17 @@ dependencies:
   qr_flutter: ^4.1.0
   grpc: ^3.2.4
   protobuf: ^2.1.0
-  flutter_localizations: # ✅ ここ修正
+  flutter_localizations:
     sdk: flutter
-  intl: ^0.19.0  # ✅ 日本語ローカライズに必要（まだなければ追加）
+  intl: ^0.19.0
+  ffi: ^2.1.0
 
 dev_dependencies:
   protoc_plugin: ^20.0.1
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  ffigen: ^11.0.0
 
 flutter:
   uses-material-design: true
@@ -36,3 +40,11 @@ flutter:
     - family: NotoSansJP
       fonts:
         - asset: assets/fonts/NotoSansJP-Medium.ttf
+
+ffigen:
+  name: NativeKeyBindings
+  description: Bindings for the native key derivation library.
+  output: 'lib/native_key_bindings.dart'
+  headers:
+    entry-points:
+      - 'src/native/key_derivation.h'

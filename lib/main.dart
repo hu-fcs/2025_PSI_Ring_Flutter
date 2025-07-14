@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart'; // デスクトップ対応のため追加
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'pages/exchange_page.dart';
 import 'pages/debug_page.dart';
-import 'pages/scanner_page.dart'; // ← スキャナページを使用するためにインポート
+import 'pages/scanner_page.dart';
+import 'key_management_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,10 @@ void main() async {
 
   // アセットから初期データベースを読み込む
   await loadPrepopulatedDatabase();
+
+  // KeyManagementServiceを初期化して鍵生成を開始
+  final keyService = KeyManagementService();
+  await keyService.init();
 
   // アプリを起動
   runApp(const MyApp());
