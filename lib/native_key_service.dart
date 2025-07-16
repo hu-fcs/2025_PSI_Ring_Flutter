@@ -71,4 +71,26 @@ class NativeKeyService {
       calloc.free(pubKeyPtr);
     }
   }
+
+  // --- ここから新しいメソッド ---
+
+  /// Cの 'create_ring_signature' 関数を呼び出す
+  int createRingSignature(
+      Pointer<Char> msg,
+      int msgLen,
+      Pointer<Uint8> privateKey,
+      Pointer<Uint8> ringPublicKeys,
+      int ringSize,
+      Pointer<Uint8> signatureOut,
+      ) {
+    return _bindings.create_ring_signature(
+      msg,
+      msgLen,
+      privateKey,
+      ringPublicKeys,
+      ringSize,
+      signatureOut,
+    );
+  }
+// --- ここまで新しいメソッド ---
 }

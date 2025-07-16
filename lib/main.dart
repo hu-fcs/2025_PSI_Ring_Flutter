@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data'; // 追加！
 import 'package:flutter/material.dart';
@@ -67,16 +66,18 @@ Future<void> loadPrepopulatedDatabase() async {
     )
   ''');
 
-  // 初期キーが空ならダミーを挿入
-  final existing = await db.query('ecd_keys');
-  if (existing.isEmpty) {
-    await db.insert('ecd_keys', {
-      'key_ecd': Uint8List.fromList(List<int>.filled(17, 0xAB)), // ← 修正：BLOBとして保存
-      'lat': 34567890,
-      'lon': 135123456,
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    });
-  }
+  // --- ★★★ 問題のコードをここから削除 ★★★ ---
+  // // 初期キーが空ならダミーを挿入
+  // final existing = await db.query('ecd_keys');
+  // if (existing.isEmpty) {
+  //   await db.insert('ecd_keys', {
+  //     'key_ecd': Uint8List.fromList(List<int>.filled(17, 0xAB)),
+  //     'lat': 34567890,
+  //     'lon': 135123456,
+  //     'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+  //   });
+  // }
+  // --- ★★★ ここまで削除 ★★★ ---
 }
 
 // アプリ全体のルートウィジェット

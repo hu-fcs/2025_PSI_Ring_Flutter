@@ -85,7 +85,44 @@ class KeyManagementService {
     return keyPair.publicKey;
   }
 
-  // --- デバッグ用のメソッド ---
+  // --- ★ここから新しいメソッド★ ---
+
+  /// DBから最新の生成済み鍵ペアを取得する
+  Future<KeyPair?> getLatestKeyPair() async {
+    final db = await DatabaseHelper.getDatabase();
+    // 有効期限が最新の鍵を取得する
+    final results = await db.query(
+      'generated_keys',
+      orderBy: 'expire_time DESC',
+      limit: 1,
+    );
+
+    if (results.isNotEmpty) {
+      final row = results.first;
+      final seckey = row['seckey_ecd'] as Uint8List?;
+      final pubkey = row['pubkey_ecd'] as Uint8List?;
+      if (seckey != null && pubkey != null) {
+        return KeyPair(seckey, pubkey);
+      }
+    }
+    // 鍵がない場合は、アドバタイズ用の鍵を生成してそれを返す
+    print("最新の鍵ペアがDBにないため、新規生成を試みます。");
+    final pubkey = await getPublicKeyForAdvertise();
+    if (pubkey != null) {
+      // 再度DBから取得
+      return getLatestKeyPair();
+    }
+    return null;
+  }
+
+  /// DBから収集済みのすべての公開鍵を取得する
+  Future<List<Uint8List>> getAllCollectedPublicKeys() async {
+    final db = await DatabaseHelper.getDatabase();
+    final results = await db.query('ecd_keys', columns: ['key_ecd']);
+    return results.map((row) => row['key_ecd'] as Uint8List).toList();
+  }
+
+  // --- ★ここまで新しいメソッド★ ---
 
   /// デバッグ用の高品質なダミー鍵ペアを生成して返す
   KeyPair? generateDummyKeyPair() {
