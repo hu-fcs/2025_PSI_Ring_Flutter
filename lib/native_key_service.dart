@@ -16,20 +16,15 @@ class NativeKeyService {
   late final NativeKeyBindings _bindings;
 
   NativeKeyService() {
-    // CMakeLists.txtで設定したライブラリ名に合わせる
     const libName = 'psiring_auth';
-
-    // プラットフォームに応じてライブラリ名を決定
     final dylib = Platform.isAndroid || Platform.isLinux
-        ? DynamicLibrary.open('lib$libName.so') // libpsiring_auth.so
+        ? DynamicLibrary.open('lib$libName.so')
         : (Platform.isWindows
-        ? DynamicLibrary.open('$libName.dll') // psiring_auth.dll
-        : DynamicLibrary.process()); // For macOS/iOS
-
+        ? DynamicLibrary.open('$libName.dll')
+        : DynamicLibrary.process());
     _bindings = NativeKeyBindings(dylib);
   }
 
-  /// Cの 'generate_master_key' 関数を呼び出す
   Uint8List? generateMasterKey() {
     final keyPtr = calloc<Uint8>(32);
     try {
@@ -43,7 +38,6 @@ class NativeKeyService {
     }
   }
 
-  /// Cの 'derive_keypair_from_timestamp' 関数を呼び出す
   KeyPair? deriveNewKeyPair(Uint8List masterKey, int timestamp, int slotMs) {
     final masterKeyPtr = calloc<Uint8>(masterKey.length);
     final privKeyPtr = calloc<Uint8>(32);
@@ -72,9 +66,6 @@ class NativeKeyService {
     }
   }
 
-  // --- ここから新しいメソッド ---
-
-  /// Cの 'create_ring_signature' 関数を呼び出す
   int createRingSignature(
       Pointer<Char> msg,
       int msgLen,
@@ -92,5 +83,24 @@ class NativeKeyService {
       signatureOut,
     );
   }
-// --- ここまで新しいメソッド ---
+
+  // --- ★ここから新しいメソッド★ ---
+
+  /// Cの 'verify_ring_signature' 関数を呼び出す
+  int verifyRingSignature(
+      Pointer<Char> msg,
+      int msgLen,
+      Pointer<Uint8> signature,
+      Pointer<Uint8> ringPublicKeys,
+      int ringSize,
+      ) {
+    return _bindings.verify_ring_signature(
+      msg,
+      msgLen,
+      signature,
+      ringPublicKeys,
+      ringSize,
+    );
+  }
+// --- ★ここまで新しいメソッド★ ---
 }

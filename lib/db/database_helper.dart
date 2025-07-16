@@ -23,9 +23,13 @@ class DatabaseHelper {
 
     // DBが存在しない場合、assets/empty_ecd.db をコピー
     if (!await File(path).exists()) {
-      final data = await rootBundle.load('assets/empty_ecd.db'); // アセット読み込み
-      final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
-      await File(path).writeAsBytes(bytes, flush: true); // 書き込み
+      try {
+        final data = await rootBundle.load('assets/empty_ecd.db'); // アセット読み込み
+        final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+        await File(path).writeAsBytes(bytes, flush: true); // 書き込み
+      } catch (e) {
+        print("assetsからのDBコピーに失敗: $e");
+      }
     }
 
     // データベースを開いて、テーブルがなければ作成
@@ -42,36 +46,15 @@ class DatabaseHelper {
       )
     ''');
 
-    // 収集された鍵（他者の公開鍵など）を格納するテーブル
+    // ★★★ ecd_keysテーブルにid列を追加した最終形 ★★★
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ecd_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         key_ecd BLOB NOT NULL,
         lat INTEGER NOT NULL,
         lon INTEGER NOT NULL,
         ts INTEGER NOT NULL
       )
     ''');
-  }
-
-  // デバッグ用：収集鍵のダミーデータを挿入
-  static Future<void> insertDummyCollected() async {
-    final db = await getDatabase();
-    await db.insert('ecd_keys', {
-      'key_ecd': List<int>.generate(17, (i) => i), // 0〜16の疑似鍵データ
-      'lat': 12345678,
-      'lon': 87654321,
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000, // UNIX時間（秒）
-    });
-  }
-
-  // デバッグ用：生成鍵のダミーデータを挿入
-  static Future<void> insertDummyGenerated() async {
-    final db = await getDatabase();
-    await db.insert('generated_keys', {
-      'seckey_ecd': List<int>.generate(17, (i) => 100 + i), // 擬似秘密鍵
-      'pubkey_ecd': List<int>.generate(16, (i) => 200 - i), // 擬似公開鍵
-      'generate_time': DateTime.now().millisecondsSinceEpoch, // 生成時刻
-      'expire_time': DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch, // 30日後が期限
-    });
   }
 }

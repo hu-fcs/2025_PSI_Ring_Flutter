@@ -19,8 +19,7 @@ class NativeKeyBindings {
       ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) lookup,
       ) : _lookup = lookup;
 
-  // ... (既存のWindows向け定義などがあれば、そのまま残してください) ...
-  // ★ ffigenが生成した不要な定義は削除しても構いません
+  // ... (既存の定義) ...
 
   int generate_master_key(ffi.Pointer<ffi.Uint8> out_master_key_32b) {
     return _generate_master_key(out_master_key_32b);
@@ -62,11 +61,9 @@ class NativeKeyBindings {
       int Function(ffi.Pointer<ffi.Uint8>, int, int,
           ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint8>)>();
 
-  // --- ★ここから新しい定義★ ---
-
   int create_ring_signature(
       ffi.Pointer<ffi.Char> msg,
-      int msg_len, // ffi.SizeはIntPtrと同じサイズなのでintで代用可能
+      int msg_len,
       ffi.Pointer<ffi.Uint8> signer_priv_key_32b,
       ffi.Pointer<ffi.Uint8> ring_pub_keys,
       int ring_size,
@@ -101,8 +98,36 @@ class NativeKeyBindings {
           int,
           ffi.Pointer<ffi.Uint8>)>();
 
+  // --- ★ここから新しい定義★ ---
+
+  /// @brief リング署名を検証する。
+  int verify_ring_signature(
+      ffi.Pointer<ffi.Char> msg,
+      int msg_len,
+      ffi.Pointer<ffi.Uint8> signature,
+      ffi.Pointer<ffi.Uint8> ring_pub_keys,
+      int ring_size,
+      ) {
+    return _verify_ring_signature(
+      msg,
+      msg_len,
+      signature,
+      ring_pub_keys,
+      ring_size,
+    );
+  }
+
+  late final _verify_ring_signaturePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Int)>>('verify_ring_signature');
+  late final _verify_ring_signature = _verify_ring_signaturePtr.asFunction<
+      int Function(ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>, int)>();
+
 // --- ★ここまで新しい定義★ ---
 }
-
-// Cの 'size_t' はDartの 'int' に対応
-typedef size_t = ffi.IntPtr;
