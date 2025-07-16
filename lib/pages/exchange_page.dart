@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:grpc/grpc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import 'package:faker/faker.dart';
+
 import '../generated/hello.pbgrpc.dart';
-// import '../boringssl_service.dart'; // 不要になったので削除
 import '../key_management_service.dart';
 
 class ExchangePage extends StatefulWidget {
@@ -27,16 +27,6 @@ class _ExchangePageState extends State<ExchangePage> {
   String displayName = '';
   String? latestClientName;
   Server? grpcServer;
-  // ★ 以下のサービスと変数は不要になったので削除
-  // final KeyManagementService _keyManagementService = KeyManagementService();
-  // String? _boringSSLVersion;
-
-  final List<String> adjectives = [
-    'Blue', 'Silent', 'Swift', 'Bright', 'Lucky', 'Misty', 'Fierce', 'Brave'
-  ];
-  final List<String> nouns = [
-    'Tiger', 'River', 'Falcon', 'Shadow', 'Mountain', 'Wind', 'Ocean', 'Flame'
-  ];
 
   @override
   void initState() {
@@ -45,16 +35,36 @@ class _ExchangePageState extends State<ExchangePage> {
     fetchLocalIp();
   }
 
+  // ★★★ 20文字以内の名前ができるまで再生成するロジックを追加 ★★★
   void generateDisplayName() {
-    final random = Random();
+    final faker = Faker();
+    String newName;
+
+    do {
+      // 1. ランダムな「色」と「動物」を生成
+      String color = faker.color.commonColor();
+      final String animal = faker.animal.name();
+
+      // 2. 色の頭文字を大文字に変換
+      if (color.isNotEmpty) {
+        color = '${color[0].toUpperCase()}${color.substring(1)}';
+      }
+
+      // 3. 組み合わせて仮の名前を作成
+      newName = '$color${animal.replaceAll(' ', '')}';
+
+    } while (newName.length > 20); // 4. 文字数が20文字を超えていたらループ
+
+    // 5. 条件に合う名前が確定したらstateを更新
     setState(() {
-      displayName = '${adjectives[random.nextInt(adjectives.length)]}${nouns[random.nextInt(nouns.length)]}';
+      displayName = newName;
     });
   }
 
   Future<void> fetchLocalIp() async {
     try {
-      final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
+      final interfaces =
+      await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
       for (final interface in interfaces) {
         for (final addr in interface.addresses) {
           final ip = addr.address;
@@ -111,7 +121,6 @@ class _ExchangePageState extends State<ExchangePage> {
       isExchanging = value;
     });
     if (value) {
-      // ★ インスタンスを直接生成するように変更
       final keyManager = KeyManagementService();
       final pubkey = await keyManager.getPublicKeyForAdvertise(
         validity: const Duration(minutes: 10),
@@ -127,7 +136,8 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   void startScan(BuildContext context) async {
-    final result = await Navigator.pushNamed(context, '/scanner', arguments: {'displayName': displayName});
+    final result =
+    await Navigator.pushNamed(context, '/scanner', arguments: {'displayName': displayName});
     if (result != null && result is String) {
       setState(() {
         connectedInfo = result;
@@ -163,9 +173,19 @@ class _ExchangePageState extends State<ExchangePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // ★★★ デバッグ用ボタンと関連ウィジェットをここから削除 ★★★
               const SizedBox(height: 20),
-              Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: '新しい仮名を生成',
+                    onPressed: generateDisplayName,
+                  ),
+                ],
+              ),
               const SizedBox(height: 20),
               SwitchListTile(
                 title: const Text('アドバタイズ'),
@@ -193,7 +213,8 @@ class _ExchangePageState extends State<ExchangePage> {
                     ? Column(
                   children: [
                     Center(
-                      child: QrImageView(data: grpcInfoJson, version: QrVersions.auto, size: 200.0),
+                      child:
+                      QrImageView(data: grpcInfoJson, version: QrVersions.auto, size: 200.0),
                     ),
                     const SizedBox(height: 10),
                     const Text('サーバ起動中！', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -210,9 +231,11 @@ class _ExchangePageState extends State<ExchangePage> {
               ),
               const SizedBox(height: 20),
               if (isClientConnected)
-                Text('クライアント接続成功: $connectedInfo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Text('クライアント接続成功: $connectedInfo',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               if (latestClientName != null)
-                Text('接続完了：Hello, $latestClientName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Text('接続完了：Hello, $latestClientName',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
             ],
           ),
         ),
