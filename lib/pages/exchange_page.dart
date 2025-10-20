@@ -126,7 +126,7 @@ class _ExchangePageState extends State<ExchangePage> {
         validity: const Duration(minutes: 10),
       );
       if (pubkey != null) {
-        print("📡 アドバタイズ予定公開鍵: ${base64.encode(pubkey)}");
+        print("📡 アドバタイズ予定公開鍵: ${pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
       } else {
         print("🚨 アドバタイズ用の公開鍵が取得できませんでした。");
       }

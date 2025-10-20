@@ -489,7 +489,7 @@ class _DebugPageState extends State<DebugPage>
                 ),
                 const SizedBox(height: 4),
                 FutureBuilder<String?>(
-                  future: _keyManager.getMasterKeyBase64(),
+                  future: _keyManager.getMasterKeyHex(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const SizedBox(height: 20, child: LinearProgressIndicator());

@@ -28,7 +28,7 @@ class KeyManagementService {
         key: _masterKeyAlias,
         value: base64Encode(mk),
       );
-      print("🔑 マスターキーを新規生成 (via FFI): ${base64.encode(mk)}");
+      print("🔑 マスターキーを新規生成 (via FFI): ${mk.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
       return mk;
     }
     print("🚨 マスターキーの生成に失敗しました。");
@@ -136,6 +136,18 @@ class KeyManagementService {
 
   Future<String?> getMasterKeyBase64() {
     return _secureStorage.read(key: _masterKeyAlias);
+  }
+
+  Future<String?> getMasterKeyHex() async {
+    final base64Value = await _secureStorage.read(key: _masterKeyAlias);
+    if (base64Value == null) return null;
+
+    // Base64 → バイト列
+    final bytes = base64.decode(base64Value);
+
+    // バイト列 → HEX文字列（1バイト=2文字）
+    final hexString = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return hexString;
   }
 
   Future<void> deleteMasterKey() {
