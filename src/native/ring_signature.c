@@ -16,6 +16,7 @@
 
 // --- 内部ヘルパー関数 ---
 
+// 入力: 圧縮形式(33B)の公開鍵を EVP_PKEY に変換
 static EVP_PKEY* pkey_from_pub_bytes(const uint8_t* pub_key_bytes, BN_CTX* ctx) {
     EVP_PKEY* pkey = NULL;
     EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
@@ -40,7 +41,7 @@ static EVP_PKEY* pkey_from_pub_bytes(const uint8_t* pub_key_bytes, BN_CTX* ctx) 
 
 static void hash_for_ring(const char *msg, size_t msg_len, const EC_POINT *point, const EC_GROUP *group, BIGNUM *result, BN_CTX *ctx) {
     size_t len = EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, NULL, 0, ctx);
-    unsigned char *buf = malloc(len);
+    unsigned char *buf = (unsigned char*)malloc(len);
     if (!buf) return;
     EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, buf, len, ctx);
     uint8_t digest[HASH_LEN];
@@ -71,6 +72,7 @@ EXPORT int create_ring_signature(const char* msg, size_t msg_len, const uint8_t*
     BIGNUM* priv_bn = NULL;
     EVP_PKEY** ring_pkeys = NULL;
     const EC_GROUP* group = NULL;
+    const BIGNUM *order = NULL;
     BIGNUM** c_values = NULL;
     BIGNUM** s_values = NULL;
     EC_POINT* L = NULL;
@@ -81,9 +83,9 @@ EXPORT int create_ring_signature(const char* msg, size_t msg_len, const uint8_t*
     BN_CTX_start(ctx);
 
     priv_bn = BN_bin2bn(signer_priv_key_32b, PRIV_KEY_LEN, NULL);
-    ring_pkeys = calloc(ring_size, sizeof(EVP_PKEY*));
-    c_values = calloc(ring_size, sizeof(BIGNUM*));
-    s_values = calloc(ring_size, sizeof(BIGNUM*));
+    ring_pkeys = (EVP_PKEY**)calloc(ring_size, sizeof(EVP_PKEY*));
+    c_values = (BIGNUM**)calloc(ring_size, sizeof(BIGNUM*));
+    s_values = (BIGNUM**)calloc(ring_size, sizeof(BIGNUM*));
     if (!priv_bn || !ring_pkeys || !c_values || !s_values) { LOGE("メモリ確保失敗 1"); goto cleanup; }
 
     for (int i = 0; i < ring_size; ++i) {
@@ -91,18 +93,19 @@ EXPORT int create_ring_signature(const char* msg, size_t msg_len, const uint8_t*
         if (!ring_pkeys[i]) { LOGE("pkey_from_pub_bytes 失敗 (index: %d)", i); goto cleanup; }
     }
     group = EC_KEY_get0_group(EVP_PKEY_get0_EC_KEY(ring_pkeys[0]));
-    const BIGNUM *order = EC_GROUP_get0_order(group);
+    order = EC_GROUP_get0_order(group);
     L = EC_POINT_new(group);
     if (!L) { LOGE("EC_POINT_new 失敗"); goto cleanup; }
 
-    // --- 署名者インデックスを探す ---
+    // --- 署名者インデックスを探す（圧縮形式で比較） ---
     {
         uint8_t temp_pub_buf[PUB_KEY_LEN];
         EC_POINT* temp_pub_point = EC_POINT_new(group);
         if (!temp_pub_point) { LOGE("EC_POINT_new 失敗 (temp)"); goto cleanup; }
         EC_POINT_mul(group, temp_pub_point, priv_bn, NULL, NULL, ctx);
-        EC_POINT_point2oct(group, temp_pub_point, POINT_CONVERSION_UNCOMPRESSED, temp_pub_buf, PUB_KEY_LEN, ctx);
+        size_t wrote = EC_POINT_point2oct(group, temp_pub_point, POINT_CONVERSION_COMPRESSED, temp_pub_buf, PUB_KEY_LEN, ctx);
         EC_POINT_free(temp_pub_point);
+        if (wrote != PUB_KEY_LEN) { LOGE("point2oct 圧縮出力長が不正: %zu", wrote); goto cleanup; }
         for (int i = 0; i < ring_size; ++i) {
             if (memcmp(temp_pub_buf, ring_pub_keys + i * PUB_KEY_LEN, PUB_KEY_LEN) == 0) {
                 signer_idx = i;
@@ -124,6 +127,7 @@ EXPORT int create_ring_signature(const char* msg, size_t msg_len, const uint8_t*
 
     // 2. 署名者の位置でチェーンを繋ぐためのαをランダムに選択
     BIGNUM* alpha = BN_CTX_get(ctx);
+    if (!alpha) { LOGE("BN_CTX_get 失敗 (alpha)"); goto cleanup; }
     BN_rand_range(alpha, order);
     EC_POINT_mul(group, L, alpha, NULL, NULL, ctx); // L = G * alpha
 
@@ -138,7 +142,8 @@ EXPORT int create_ring_signature(const char* msg, size_t msg_len, const uint8_t*
         next_idx = (current_idx + 1) % ring_size;
 
         const EC_POINT* P = EC_KEY_get0_public_key(EVP_PKEY_get0_EC_KEY(ring_pkeys[current_idx]));
-        EC_POINT_mul(group, L, s_values[current_idx], P, c_values[current_idx], ctx); // L' = G*s_i + P_i*c_i
+        // L' = G*s_i + P_i*c_i
+        if (!EC_POINT_mul(group, L, s_values[current_idx], P, c_values[current_idx], ctx)) { LOGE("EC_POINT_mul 失敗"); goto cleanup; }
 
         c_values[next_idx] = BN_new();
         if (!c_values[next_idx]) { LOGE("BN_new 失敗 (c_values loop)"); goto cleanup; }
@@ -197,8 +202,8 @@ EXPORT int verify_ring_signature(const char* msg, size_t msg_len, const uint8_t*
     ctx = BN_CTX_new();
     if (!ctx) goto cleanup;
 
-    ring_pkeys = calloc(ring_size, sizeof(EVP_PKEY*));
-    s_values = calloc(ring_size, sizeof(BIGNUM*));
+    ring_pkeys = (EVP_PKEY**)calloc(ring_size, sizeof(EVP_PKEY*));
+    s_values = (BIGNUM**)calloc(ring_size, sizeof(BIGNUM*));
     if (!ring_pkeys || !s_values) goto cleanup;
 
     c0 = BN_bin2bn(signature, HASH_LEN, NULL);
@@ -217,7 +222,7 @@ EXPORT int verify_ring_signature(const char* msg, size_t msg_len, const uint8_t*
 
     for (int i = 0; i < ring_size; ++i) {
         const EC_POINT *P = EC_KEY_get0_public_key(EVP_PKEY_get0_EC_KEY(ring_pkeys[i]));
-        if (!EC_POINT_mul(group, L, s_values[i], P, C_calc, ctx)) goto cleanup;
+        if (!EC_POINT_mul(group, L, s_values[i], P, C_calc, ctx)) goto cleanup; // L = G*s_i + P_i*c_i
         hash_for_ring(msg, msg_len, L, group, C_calc, ctx);
     }
 

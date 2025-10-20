@@ -37,14 +37,14 @@ class NativeKeyBindings {
       int timestamp_ms,
       int slot_ms,
       ffi.Pointer<ffi.Uint8> out_priv_key_32b,
-      ffi.Pointer<ffi.Uint8> out_pub_key_65b,
+      ffi.Pointer<ffi.Uint8> out_pub_key_33b,
       ) {
     return _derive_keypair_from_timestamp(
       master_key,
       timestamp_ms,
       slot_ms,
       out_priv_key_32b,
-      out_pub_key_65b,
+      out_pub_key_33b,
     );
   }
 

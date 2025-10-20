@@ -23,13 +23,15 @@ int generate_master_key(uint8_t* out_master_key_32b) {
 /**
  * @brief マスターキーとタイムスタンプから鍵ペアを導出する。
  * タイムスロットの間隔を引数で指定できる。
+ *
+ * 出力する公開鍵は圧縮形式(33バイト)に変更。
  */
 int derive_keypair_from_timestamp(
         const uint8_t* master_key,
         uint64_t timestamp_ms,
         uint64_t slot_ms, // タイムスロットの間隔（ミリ秒）
         uint8_t* out_priv_key_32b,
-        uint8_t* out_pub_key_65b
+        uint8_t* out_pub_key_33b
 ) {
     // リソースへのポインタ。安全な解放処理のためNULLで初期化。
     EVP_PKEY_CTX* pctx = NULL;
@@ -51,7 +53,7 @@ int derive_keypair_from_timestamp(
     uint8_t salt[8];
     for (int i = 0; i < 8; i++) {
         // 64ビット整数をBig Endianでバイト配列に変換
-        salt[7 - i] = (slot_time >> (8 * i)) & 0xFF;
+        salt[7 - i] = (uint8_t)((slot_time >> (8 * i)) & 0xFF);
     }
 
     // 鍵の用途を識別するための固定文字列 (info)
@@ -69,6 +71,7 @@ int derive_keypair_from_timestamp(
 
     size_t derived_len = HASH_LEN;
     if (EVP_PKEY_derive(pctx, derived_priv_bytes, &derived_len) <= 0) goto cleanup;
+    if (derived_len != HASH_LEN) goto cleanup;
 
     // --- ここからEC鍵ペアの生成 ---
     // secp256r1 (NID_X9_62_prime256v1) のECキーオブジェクトを生成
@@ -93,9 +96,15 @@ int derive_keypair_from_timestamp(
 
     // --- 結果を出力バッファにコピー ---
     // 秘密鍵を32バイトの固定長でコピー
-    BN_bn2binpad(priv_bn, out_priv_key_32b, 32);
-    // 公開鍵をuncompressed形式(65バイト)でコピー
-    EC_POINT_point2oct(group, pub_point, POINT_CONVERSION_UNCOMPRESSED, out_pub_key_65b, 65, bn_ctx);
+    if (BN_bn2binpad(priv_bn, out_priv_key_32b, 32) != 32) goto cleanup;
+
+    // 公開鍵を圧縮形式(33バイト)でコピー
+    // まず必要サイズを問い合わせる（OpenSSLは必要長を返す）。
+    size_t need = EC_POINT_point2oct(group, pub_point, POINT_CONVERSION_COMPRESSED, NULL, 0, bn_ctx);
+    if (need != 33) goto cleanup; // secp256r1 圧縮は常に 33 バイト（0x02/0x03 + X座標32B）
+
+    if (EC_POINT_point2oct(group, pub_point, POINT_CONVERSION_COMPRESSED, out_pub_key_33b, 33, bn_ctx) != 33)
+        goto cleanup;
 
     ret = 1; // 全て成功
 

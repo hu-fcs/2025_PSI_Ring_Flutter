@@ -12,7 +12,7 @@
 
 // --- 定数定義 ---
 #define HASH_LEN 32
-#define PUB_KEY_LEN 65 // Uncompressed format: 0x04 + 32-byte X + 32-byte Y
+#define PUB_KEY_LEN 33 // Compressed format: 0x02/0x03 + 32-byte X
 
 // --- PSIコンテキスト管理 ---
 
@@ -53,7 +53,7 @@ EXPORT int psi_context_set_modulus(PsiContext* ctx, const uint8_t* modulus_32b);
 /**
  * @brief 公開鍵のリストをハッシュ化し、指定された秘密の値で暗号化する。
  * @param ctx PsiContextのポインタ。
- * @param pub_keys 入力: 公開鍵のリスト。 (count * PUB_KEY_LEN) バイト。
+ * @param pub_keys 入力: 圧縮形式(33B)の公開鍵のリスト。 (count * PUB_KEY_LEN) バイト。
  * @param count 入力: 公開鍵の数。
  * @param secret_32b 入力: 暗号化に用いる32バイトの秘密の値。
  * @param out_encrypted_hashes 出力: 暗号化されたハッシュのリストを格納するバッファ。(count * HASH_LEN) バイト。

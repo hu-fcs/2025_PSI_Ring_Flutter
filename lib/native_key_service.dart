@@ -41,7 +41,7 @@ class NativeKeyService {
   KeyPair? deriveNewKeyPair(Uint8List masterKey, int timestamp, int slotMs) {
     final masterKeyPtr = calloc<Uint8>(masterKey.length);
     final privKeyPtr = calloc<Uint8>(32);
-    final pubKeyPtr = calloc<Uint8>(65);
+    final pubKeyPtr = calloc<Uint8>(33);
 
     try {
       masterKeyPtr.asTypedList(masterKey.length).setAll(0, masterKey);
@@ -55,7 +55,7 @@ class NativeKeyService {
       if (result == 1) {
         return KeyPair(
           Uint8List.fromList(privKeyPtr.asTypedList(32)),
-          Uint8List.fromList(pubKeyPtr.asTypedList(65)),
+          Uint8List.fromList(pubKeyPtr.asTypedList(33)),
         );
       }
       return null;

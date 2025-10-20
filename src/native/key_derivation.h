@@ -21,7 +21,7 @@ EXPORT int generate_master_key(
  * @param timestamp_ms     入力: 鍵導出の元となるタイムスタンプ（ミリ秒）。
  * @param slot_ms          入力: タイムスロットの間隔（ミリ秒）。
  * @param out_priv_key_32b 出力: 生成された32バイトの秘密鍵を格納するバッファ。
- * @param out_pub_key_65b  出力: 生成された65バイトの公開鍵を格納するバッファ。
+ * @param out_pub_key_65b  出力: 生成された33バイトの圧縮公開鍵を格納するバッファ。
  * @return 成功した場合は 1、失敗した場合は 0。
  */
 EXPORT int derive_keypair_from_timestamp(
@@ -29,7 +29,7 @@ EXPORT int derive_keypair_from_timestamp(
         uint64_t timestamp_ms,
         uint64_t slot_ms,
         uint8_t* out_priv_key_32b,
-        uint8_t* out_pub_key_65b
+        uint8_t* out_pub_key_33b
 );
 
 #endif // KEY_DERIVATION_H

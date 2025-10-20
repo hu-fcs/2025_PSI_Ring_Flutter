@@ -17,20 +17,24 @@ struct PsiContext {
 
 // --- 内部ヘルパー関数 ---
 
+// 入力: 圧縮形式(33B)の公開鍵バイト列を EVP_PKEY に変換
 static EVP_PKEY* pkey_from_pub_bytes(const uint8_t* pub_key_bytes) {
     EVP_PKEY* pkey = NULL;
     EC_KEY* ec_key = NULL;
     const EC_GROUP* group = NULL;
     EC_POINT* pub_point = NULL;
+    BN_CTX* tmp_ctx = NULL;
 
     ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (!ec_key) goto cleanup;
 
     group = EC_KEY_get0_group(ec_key);
     pub_point = EC_POINT_new(group);
-    if (!pub_point) goto cleanup;
+    tmp_ctx = BN_CTX_new();
+    if (!pub_point || !tmp_ctx) goto cleanup;
 
-    if (!EC_POINT_oct2point(group, pub_point, pub_key_bytes, PUB_KEY_LEN, NULL)) goto cleanup;
+    // 圧縮点(33B)を EC_POINT へ復元
+    if (!EC_POINT_oct2point(group, pub_point, pub_key_bytes, PUB_KEY_LEN, tmp_ctx)) goto cleanup;
     if (!EC_KEY_set_public_key(ec_key, pub_point)) goto cleanup;
 
     pkey = EVP_PKEY_new();
@@ -44,6 +48,7 @@ static EVP_PKEY* pkey_from_pub_bytes(const uint8_t* pub_key_bytes) {
     cleanup:
     if (ec_key) EC_KEY_free(ec_key);
     if (pub_point) EC_POINT_free(pub_point);
+    if (tmp_ctx) BN_CTX_free(tmp_ctx);
     return pkey;
 }
 
@@ -52,7 +57,7 @@ static int hash_public_key(const uint8_t* pub_key_bytes, uint8_t* digest) {
     if (!pkey) return 0;
 
     unsigned char *pubkey_der = NULL;
-    int len = i2d_PublicKey(pkey, &pubkey_der);
+    int len = i2d_PublicKey(pkey, &pubkey_der); // SPKI DER で標準化
     if (len <= 0) {
         EVP_PKEY_free(pkey);
         return 0;
@@ -78,7 +83,7 @@ static void power_encrypt_single(PsiContext* ctx, const uint8_t *base_val, const
 // --- 公開APIの実装 ---
 
 EXPORT PsiContext* psi_context_new() {
-    PsiContext* ctx = malloc(sizeof(PsiContext));
+    PsiContext* ctx = (PsiContext*)malloc(sizeof(PsiContext));
     if (!ctx) return NULL;
 
     ctx->p_modulus = BN_new();
@@ -87,6 +92,7 @@ EXPORT PsiContext* psi_context_new() {
         psi_context_free(ctx);
         return NULL;
     }
+    // 256-bit セーフプライム（第2引数=ビット長）。用途に応じて固定モジュラスに差し替え可。
     if (!BN_generate_prime_ex(ctx->p_modulus, 256, 1, NULL, NULL, NULL)) {
         psi_context_free(ctx);
         return NULL;
@@ -117,10 +123,11 @@ EXPORT int hash_and_encrypt_pubkey_set(PsiContext* ctx, const uint8_t* pub_keys,
 
     uint8_t temp_hash[HASH_LEN];
     for (int i = 0; i < count; ++i) {
-        if (!hash_public_key(pub_keys + i * PUB_KEY_LEN, temp_hash)) {
+        const uint8_t* pk = pub_keys + (size_t)i * PUB_KEY_LEN;
+        if (!hash_public_key(pk, temp_hash)) {
             return 0;
         }
-        power_encrypt_single(ctx, temp_hash, secret_32b, out_encrypted_hashes + i * HASH_LEN);
+        power_encrypt_single(ctx, temp_hash, secret_32b, out_encrypted_hashes + (size_t)i * HASH_LEN);
     }
     return 1;
 }
@@ -129,7 +136,7 @@ EXPORT int encrypt_hash_set(PsiContext* ctx, const uint8_t* input_hashes, int co
     if (!ctx || !input_hashes || !secret_32b || !out_encrypted_hashes) return 0;
 
     for (int i = 0; i < count; ++i) {
-        power_encrypt_single(ctx, input_hashes + i * HASH_LEN, secret_32b, out_encrypted_hashes + i * HASH_LEN);
+        power_encrypt_single(ctx, input_hashes + (size_t)i * HASH_LEN, secret_32b, out_encrypted_hashes + (size_t)i * HASH_LEN);
     }
     return 1;
 }
