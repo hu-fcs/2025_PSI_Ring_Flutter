@@ -1,0 +1,11 @@
+ffigen:
+  name: NativeKeyBindings
+  description: Bindings for src/native/key_derivation.h
+  output: lib/native_key_bindings.dart
+
+  headers:
+    entry-points:
+      - 'src/native/key_derivation.h'
+
+  compiler-opts:
+    - '-Isrc/native'
