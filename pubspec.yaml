@@ -23,6 +23,10 @@ dependencies:
   intl: ^0.19.0
   ffi: ^2.1.0
   faker: ^2.1.0
+  flutter_ble_peripheral: ^1.2.6
+  flutter_reactive_ble: ^5.3.1
+  permission_handler: ^11.3.1
+  uuid: ^4.5.1
 
 dev_dependencies:
   protoc_plugin: ^20.0.1

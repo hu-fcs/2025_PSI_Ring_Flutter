@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../ble/ble_exchange_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:grpc/grpc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-
+import 'package:permission_handler/permission_handler.dart';
 import 'package:faker/faker.dart';
 
 import '../generated/hello.pbgrpc.dart';
@@ -116,24 +117,52 @@ class _ExchangePageState extends State<ExchangePage> {
     });
   }
 
+  final _bleExchange = BleExchangeController();
   void toggleExchange(bool value) async {
     setState(() {
       isExchanging = value;
     });
-    if (value) {
-      final keyManager = KeyManagementService();
-      final pubkey = await keyManager.getPublicKeyForAdvertise(
-        validity: const Duration(minutes: 10),
-      );
-      if (pubkey != null) {
-        print("📡 アドバタイズ予定公開鍵: ${pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
+
+    // Android 専用（iOS は広告非対応運用）
+    if (!Platform.isAndroid) {
+      print("⚠️ この機能は Android 専用です。");
+      return;
+    }
+
+    try {
+      if (value) {
+        // ON: 権限チェック → OK なら広告＋スキャン開始
+        final ok = await _ensureBlePermissions();
+        if (!ok) {
+          print("🚨 必要な権限が許可されていません。設定から許可してください。");
+          setState(() => isExchanging = false);
+          return;
+        }
+
+        await _bleExchange.toggleExchange(); // start
+
+        // （既存ロギングは維持）
+        // final keyManager = KeyManagementService();
+        // final pubkey = await keyManager.getPublicKeyForAdvertise(
+        //   validity: const Duration(minutes: 10),
+        // );
+        // if (pubkey != null) {
+        //   print("📡 アドバタイズ予定公開鍵: ${pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
+        // } else {
+        //   print("🚨 アドバタイズ用の公開鍵が取得できませんでした。");
+        // }
       } else {
-        print("🚨 アドバタイズ用の公開鍵が取得できませんでした。");
+        // OFF: 広告＋スキャン停止
+        await _bleExchange.toggleExchange(); // stop
+        print("🛑 Advertising & scanning stopped.");
       }
-    } else {
-      print("🛑 Advertising stopped.");
+    } catch (e) {
+      print("❌ toggleExchange error: $e");
+      // 失敗時はUI状態を戻す
+      setState(() => isExchanging = !value);
     }
   }
+
 
   void startScan(BuildContext context) async {
     final result =
@@ -241,6 +270,34 @@ class _ExchangePageState extends State<ExchangePage> {
         ),
       ),
     );
+  }
+
+  Future<bool> _ensureBlePermissions() async {
+    if (!Platform.isAndroid) return false;
+
+    // Android 12+ 個別権限 + Android 10–11向け位置情報
+    final perms = <Permission>[
+      Permission.bluetoothAdvertise,
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ];
+
+    // 既に全部OKならそのまま
+    final alreadyAllGranted = await Future.wait(perms.map((p) async => (await p.status).isGranted))
+        .then((list) => list.every((v) => v));
+    if (alreadyAllGranted) return true;
+
+    // まとめて要求
+    final result = await perms.request();
+
+    // 少なくとも BLE の3権限が許可されているか確認
+    for (final p in [Permission.bluetoothAdvertise, Permission.bluetoothScan, Permission.bluetoothConnect]) {
+      if (!(result[p]?.isGranted ?? false)) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 
