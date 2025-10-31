@@ -29,35 +29,80 @@ class BleAdvertiser {
   Uint8List? _payloadBack;  // [1B hdr + 16B]
   int? _lastSeq2;           // 直近に適用した seq2
 
+  // start()が呼ばれたかを追跡
+  bool _isStarted = false;
+
+  // ★ start()で使う設定をクラス変数として保持
+  final _settings = AdvertiseSettings(
+    advertiseMode: AdvertiseMode.advertiseModeLowLatency,
+    txPowerLevel: AdvertiseTxPower.advertiseTxPowerHigh,
+    connectable: false,
+    timeout: 0,
+  );
+
   bool get isAdvertising => _isAdvertising;
+
+  // ★★★ ロジック修正 (stop/start の代わりに start() を再利用) ★★★
+  Future<void> _rotateAndSend(Timer? timer) async {
+    try {
+      // 1. 10分境界チェック (タイマー経由の場合のみ)
+      if (timer != null) {
+        final nowSeq2 = currentTenMinSeq2();
+        if (_lastSeq2 == null || nowSeq2 != _lastSeq2) {
+          if (kDebugMode) print('BLE_AD: 10分境界を検出。ペイロードを再生成します。');
+          await _preparePayloadsForCurrentSeq();
+          // 鍵が変わったので、必ず part 0 から送る
+          _sendFrontNext = true;
+        }
+      }
+
+      // 2. 送信内容を決定し、フラグを反転
+      final bool sendThisTimeIsFront = _sendFrontNext;
+      _sendFrontNext = !_sendFrontNext; // 次回のために反転
+
+      final payload = sendThisTimeIsFront ? _payloadFront : _payloadBack;
+      if (payload == null) throw StateError('payload not prepared');
+
+      final data = AdvertiseData(
+        includeDeviceName: false,
+        manufacturerId: _companyId,
+        manufacturerData: payload,
+      );
+
+      // 3. 最初の呼び出し(timer==null)も、タイマー経由も、
+      //    すべて 'start()' を呼ぶ。
+      //    stop() を呼ばない限り、MACアドレスは変更されないはず。
+      if (!_isStarted) {
+        // 初回呼び出し (start()から)
+        await _peripheral.start(advertiseData: data, advertiseSettings: _settings);
+        _isStarted = true;
+        if (kDebugMode) print('BLE_AD: 🚀 Advertising started (Part ${sendThisTimeIsFront ? 0 : 1}).');
+      } else {
+        // 2回目以降 (タイマーから)
+        // ★★★ ここを 'start()' に修正 ★★★
+        await _peripheral.start(advertiseData: data, advertiseSettings: _settings);
+        if (kDebugMode) {
+          print('BLE_AD: 📡 Advertising updated via start() (Part ${sendThisTimeIsFront ? 0 : 1}).');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) print('BLE_AD: ❌ advertise rotate/update failed: $e');
+      // "already advertising" のようなエラーが出た場合、ここを stop/start に戻す必要がある
+    }
+  }
 
   Future<void> start() async {
     if (_isAdvertising) return;
 
     await _preparePayloadsForCurrentSeq();
+    _sendFrontNext = true; // 必ず front から
+    _isStarted = false;    // start() 未呼び出し状態に
 
-    _sendFrontNext = true;
-    await _startOnce(isFront: true);
+    // 1. 初回の _rotateAndSend を手動で呼び出し (start() を実行させる)
+    await _rotateAndSend(null);
 
-    _rotateTimer = Timer.periodic(_rotateInterval, (_) async {
-      try {
-        // 10分境界チェック：seq2 変化時は鍵＆ヘッダを再生成
-        final nowSeq2 = currentTenMinSeq2();
-        if (_lastSeq2 == null || nowSeq2 != _lastSeq2) {
-          await _peripheral.stop();
-          await _preparePayloadsForCurrentSeq();
-        }
-
-        await _peripheral.stop();
-        await Future.delayed(const Duration(milliseconds: 80));
-
-        final nextIsFront = _sendFrontNext;
-        _sendFrontNext = !_sendFrontNext;
-        await _startOnce(isFront: nextIsFront);
-      } catch (e) {
-        if (kDebugMode) print('❌ advertise rotate failed: $e');
-      }
-    });
+    // 2. 2回目以降の _rotateAndSend をタイマーで設定
+    _rotateTimer = Timer.periodic(_rotateInterval, _rotateAndSend);
 
     _isAdvertising = true;
   }
@@ -68,12 +113,15 @@ class BleAdvertiser {
     _rotateTimer = null;
     await _peripheral.stop();
     _isAdvertising = false;
+    _isStarted = false; // 停止
+    if (kDebugMode) print('BLE_AD: 🛑 Advertising stopped.');
   }
+  // ★★★ 修正ここまで ★★★
 
   /// 現在の seq2 に合わせて鍵を取得し、ヘッダ付与した payload を準備
   Future<void> _preparePayloadsForCurrentSeq() async {
     final chunks = await _repo.getPublicKeyForAdvertise().catchError((e, st) {
-      if (kDebugMode) print('❌ getPublicKeyForAdvertise failed: $e');
+      if (kDebugMode) print('BLE_AD: ❌ getPublicKeyForAdvertise failed: $e');
       throw e;
     });
 
@@ -95,26 +143,7 @@ class BleAdvertiser {
     _payloadFront = Uint8List.fromList([hdrFront, ...frontBody16]);
     _payloadBack  = Uint8List.fromList([hdrBack,  ...backBody16]);
     _lastSeq2 = seq2;
-  }
 
-  /// 1 回分のアドバタイズを開始（manufacturerDataに [1B hdr + 16B] を載せる）
-  Future<void> _startOnce({required bool isFront}) async {
-    final payload = isFront ? _payloadFront : _payloadBack;
-    if (payload == null) throw StateError('payload not prepared');
-
-    final settings = AdvertiseSettings(
-      advertiseMode: AdvertiseMode.advertiseModeLowLatency,
-      txPowerLevel: AdvertiseTxPower.advertiseTxPowerHigh,
-      connectable: false,
-      timeout: 0,
-    );
-
-    final data = AdvertiseData(
-      includeDeviceName: false,
-      manufacturerId: _companyId,
-      manufacturerData: payload,
-    );
-
-    await _peripheral.start(advertiseData: data, advertiseSettings: settings);
+    if (kDebugMode) print('BLE_AD: 🔑 Payloads prepared for seq2=$seq2');
   }
 }

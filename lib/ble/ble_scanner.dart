@@ -30,9 +30,19 @@ class BleScanner {
   /// 期限切れ掃除用の FIFO キュー
   final Queue<_QueueEntry> _queue = Queue<_QueueEntry>();
 
+  /// ★ アドバタイザーとIDを合わせる
+  static const int _companyId = 0x00E0;
+
+  /// ★ バイト配列を16進数文字列に変換するヘルパー
+  String _bytesToHex(Uint8List bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
   Future<void> start() async {
     if (_isScanning) return;
     _isScanning = true;
+
+    if (kDebugMode) print('BLE_SCAN: 🚀 スキャン開始...');
 
     // スキャン開始（UUIDフィルタ無し＝全受信）
     _sub = _ble
@@ -42,7 +52,7 @@ class BleScanner {
       requireLocationServicesEnabled: false,
     )
         .listen(_onDiscover, onError: (e, st) {
-      if (kDebugMode) print('❌ scan error: $e');
+      if (kDebugMode) print('BLE_SCAN: ❌ scan error: $e');
     });
 
     // 1分ごとに期限切れ掃除
@@ -61,38 +71,69 @@ class BleScanner {
     _queue.clear();
 
     _isScanning = false;
+    if (kDebugMode) print('BLE_SCAN: 🛑 スキャン停止。');
   }
 
   // -------------------- internal --------------------
 
   void _onDiscover(DiscoveredDevice d) async {
     final md = d.manufacturerData;
-    if (md.isEmpty) return;
+    final deviceId = d.id;
 
-    // 期待フォーマット: [1B header] + 16B body
-    if (md.length < 1 + 16) return;
+    // --- ここからログ追加 ---
 
-    final header = md[0];
-    final body16 = Uint8List.fromList(md.sublist(1, 17));
+    // 1. manufacturerData を持つデバイスをすべてログに出力
+    if (md.isEmpty) {
+      // mdが空のログは大量に出る可能性があるので、必要ならコメント解除
+      // if (kDebugMode) print('BLE_SCAN: [$deviceId] Discovered empty md');
+      return;
+    }
+    if (kDebugMode) {
+      print('BLE_SCAN: [$deviceId] Discovered md: ${_bytesToHex(md)}');
+    }
 
-    final seq2 = BleHdr.parseSeq2(header);     // 0..3
-    final part = BleHdr.parsePart(header);     // 0=front,1=back
-    final yp   = BleHdr.parseYParity(header);  // 0/1
-    final ver  = BleHdr.parseVer(header);      // 0..15
-
-    if (ver != BleHdr.currentVer) {
-      // 将来拡張：受理バージョンを広げたい場合は条件を変更
-      if (kDebugMode) print('ℹ️ ignore different ver=$ver from ${d.id}');
+    // 2. カンパニーIDのチェック（前回の修正）
+    const int expectedLength = 2 + 17; // ID 2B + Payload 17B
+    if (md.length < expectedLength) {
+      if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. md length ${md.length} < $expectedLength');
       return;
     }
 
+    final int receivedId = md[0] | (md[1] << 8); // リトルエンディアン
+    if (receivedId != _companyId) {
+      if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. Company ID ${receivedId.toRadixString(16)} != ${_companyId.toRadixString(16)}');
+      return;
+    }
+
+    if (kDebugMode) print('BLE_SCAN: [$deviceId] ✅ Company ID OK.');
+
+    // 3. ペイロードとヘッダの解析ログ
+    final header = md[2];
+    final body16 = Uint8List.fromList(md.sublist(3, expectedLength));
+
+    final seq2 = BleHdr.parseSeq2(header);
+    final part = BleHdr.parsePart(header);
+    final yp   = BleHdr.parseYParity(header);
+    final ver  = BleHdr.parseVer(header);
+
+    if (kDebugMode) {
+      print('BLE_SCAN: [$deviceId] Parsed Hdr(0x${header.toRadixString(16)}): seq2=$seq2, part=$part, yParity=$yp, ver=$ver');
+    }
+
+    if (ver != BleHdr.currentVer) {
+      if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. Version mismatch ver=$ver');
+      return;
+    }
+
+    // 4. 鍵の断片（HalfState）の処理ログ
     final now = DateTime.now().millisecondsSinceEpoch;
-    final key = '${d.id}|$seq2';
+    final key = '$seq2|$yp'; // デバイスIDと時間シーケンスでユニーク化
 
     var st = _halves[key];
     if (st == null) {
+      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Creating new state.');
       st = _HalfState(
-        deviceId: d.id,
+        deviceId: deviceId,
         seq2: seq2,
         yParity: yp,
         firstSeenMs: now,
@@ -100,8 +141,9 @@ class BleScanner {
       _halves[key] = st;
       _queue.addLast(_QueueEntry(key: key, firstSeenMs: now));
     } else {
-      // yParity が食い違う場合は、古い方を捨ててリセット（端末側の鍵が切り替わった可能性）
+      // yParityが食い違ったら、相手の鍵が更新されたとみなしリセット
       if (st.yParity != yp) {
+        if (kDebugMode) print('BLE_SCAN: [$key] ⚠️ yParity mismatch (old=${st.yParity}, new=$yp). Resetting state.');
         st.front16 = null;
         st.back16 = null;
         st.yParity = yp;
@@ -110,14 +152,19 @@ class BleScanner {
       }
     }
 
+    // 該当するpartを保存
     if (part == 0) {
+      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Storing part 0 (front).');
       st.front16 = body16;
     } else {
+      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Storing part 1 (back).');
       st.back16 = body16;
     }
 
-    // そろったら結合
+    // 5. 鍵の結合処理ログ
     if (st.front16 != null && st.back16 != null) {
+      if (kDebugMode) print('BLE_SCAN: [$key] 🔥 Both parts received. Attempting merge...');
+
       final firstByte = 0x02 | (st.yParity & 0x01); // 0x02 or 0x03
       final merged = Uint8List.fromList([
         firstByte,
@@ -125,28 +172,34 @@ class BleScanner {
         ...st.back16!,
       ]);
 
-      if (isValidCompressedPubkey(merged)) {
+      // 6. 結合後の検証とDB保存ログ
+      final bool isValid = isValidCompressedPubkey(merged);
+      if (kDebugMode) print('BLE_SCAN: [$key] Merged key (${merged.length}B): ${_bytesToHex(merged)}');
+      if (kDebugMode) print('BLE_SCAN: [$key] Validation result: $isValid');
+
+      if (isValid) {
         try {
+          if (kDebugMode) print('BLE_SCAN: [$key] 💾 Inserting into DB...');
           await EcdKeysDao.instance.insertCollected(
             pubkey33: merged,
-            ts: now,   // debug_page が秒精度なら (now ~/ 1000) に変更
-            latE6: 0,  // ecd_keys が NOT NULL なら 0 を入れておく
+            ts: now,   // ecd_keys_dao は ms のまま受け取っている
+            latE6: 0,
             lonE6: 0,
           );
           if (kDebugMode) {
-            print('✅ saved to ecd_keys from ${d.id} seq2=$seq2 (len=${merged.length})');
+            print('BLE_SCAN: [$key] ✅ DB insert success.');
           }
         } catch (e) {
-          if (kDebugMode) print('❌ DB insert failed: $e');
+          if (kDebugMode) print('BLE_SCAN: [$key] ❌ DB insert failed: $e');
         }
-      } else {
-        if (kDebugMode) print('⚠️ invalid merged key from ${d.id}');
       }
 
-      // 片付け（この seq2 の片割れを破棄）
+      // 処理完了（成功・失敗問わず）したら、このキーの断片は削除
       _halves.remove(key);
-      // Queue からの削除は怠惰に：GCスイープ時に存在確認してスキップ
+      if (kDebugMode) print('BLE_SCAN: [$key] 🧹 State cleared after processing.');
     }
+
+    // --- ログ追加ここまで ---
 
     // 入力トリガで軽く掃除（過剰ならコメントアウト可）
     _gcSweep();
@@ -157,10 +210,13 @@ class BleScanner {
     while (_queue.isNotEmpty) {
       final head = _queue.first;
       if ((now - head.firstSeenMs) >= _halfTtl.inMilliseconds) {
-        _queue.removeFirst();
-        _halves.remove(head.key);
+        final removedKey = _queue.removeFirst().key;
+        // _halves にまだ残っていたら（＝片割れが見つからないまま期限切れ）削除
+        if (_halves.remove(removedKey) != null) {
+          if (kDebugMode) print('BLE_SCAN: [$removedKey] 🗑️ GC Sweep: Removed expired half-state.');
+        }
       } else {
-        break;
+        break; // キューの先頭がまだ有効期限内なら終了
       }
     }
   }
