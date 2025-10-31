@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/services.dart' show rootBundle;
+// import 'package:flutter/services.dart' show rootBundle; // 削除 (rootBundleを使わないため)
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -14,26 +14,19 @@ class DatabaseHelper {
   // データベースを開いてインスタンスを返す
   static Future<Database> getDatabase() async {
     final path = await _getDbPath();
-    return openDatabase(path); // 既に存在していれば開くだけ
+    // openDatabase は、ファイルが存在しない場合、
+    // 自動的に作成してから開くため、これだけでOK
+    return openDatabase(path);
   }
 
-  // 初期化処理：初回起動時のDBコピーやテーブル作成などを行う
+  // 初期化処理：テーブル作成などを行う
   static Future<void> initDatabase() async {
     final path = await _getDbPath();
 
-    // DBが存在しない場合、assets/empty_ecd.db をコピー
-    if (!await File(path).exists()) {
-      try {
-        final data = await rootBundle.load('assets/empty_ecd.db'); // アセット読み込み
-        final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
-        await File(path).writeAsBytes(bytes, flush: true); // 書き込み
-      } catch (e) {
-        print("assetsからのDBコピーに失敗: $e");
-      }
-    }
-
-    // データベースを開いて、テーブルがなければ作成
+    // データベースを開く (この時点でファイルがなければ新規作成される)
     final db = await openDatabase(path);
+
+    // 存在しない場合のみテーブルを作成する (IF NOT EXISTS)
 
     // 生成された鍵（自前で生成したECD鍵）を格納するテーブル
     await db.execute('''
@@ -46,11 +39,11 @@ class DatabaseHelper {
       )
     ''');
 
-    // ★★★ ecd_keysテーブルにid列を追加した最終形 ★★★
+    // 収集された鍵のテーブル (UNIQUE 制約付き)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ecd_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key_ecd BLOB NOT NULL,
+        key_ecd BLOB NOT NULL UNIQUE,
         lat INTEGER NOT NULL,
         lon INTEGER NOT NULL,
         ts INTEGER NOT NULL
