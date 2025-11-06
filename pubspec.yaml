@@ -23,6 +23,11 @@ dependencies:
   intl: ^0.19.0
   ffi: ^2.1.0
   faker: ^2.1.0
+  flutter_ble_peripheral: ^1.2.6
+  flutter_reactive_ble: ^5.3.1
+  permission_handler: ^11.3.1
+  uuid: ^4.5.1
+  flutter_launcher_icons: ^0.13.1
 
 dev_dependencies:
   protoc_plugin: ^20.0.1
@@ -33,10 +38,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/empty_ecd.db
-    - assets/mykey.db
-    - assets/exchangekey.db
   fonts:
     - family: NotoSansJP
       fonts:
@@ -49,3 +50,10 @@ ffigen:
   headers:
     entry-points:
       - 'src/native/key_derivation.h'
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: assets/launcher_icon/icon.jpg
+  adaptive_icon_foreground: assets/launcher_icon/icon.jpg
+  adaptive_icon_background: "#000000"

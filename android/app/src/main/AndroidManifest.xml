@@ -1,6 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- BLE 権限（Android 12+ は個別権限が必須） -->
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+
+    <!-- Android 12+ (API 31+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+
+    <!-- Android 10〜11 でスキャンに必要な場合がある -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- BLEデバイス要件 -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
+
     <application
-        android:label="fluttersample_2025"
+        android:label="PSI Ring Match"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

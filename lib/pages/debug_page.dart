@@ -70,7 +70,6 @@ class _DebugPageState extends State<DebugPage>
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
   bool _isVerifying = false;
-  // ★★★ 進捗を整数(件数)で管理するように変更 ★★★
   final ValueNotifier<int> _progressCountNotifier = ValueNotifier(0);
 
 
@@ -118,7 +117,9 @@ class _DebugPageState extends State<DebugPage>
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    });
+    },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
   }
 
   Future<void> _insertDummyCollectedKey() async {
@@ -126,17 +127,14 @@ class _DebugPageState extends State<DebugPage>
     setState(() {});
   }
 
-  // ★★★ プログレス表示のロジックを修正 ★★★
   Future<void> _insertMultipleDummyCollectedKeys(int count) async {
     if (count <= 0) return;
 
-    // SnackBarを表示
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: ValueListenableBuilder<int>(
           valueListenable: _progressCountNotifier,
           builder: (context, currentCount, child) {
-            // 中央揃えにするためにRowでラップ
             return Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -145,26 +143,22 @@ class _DebugPageState extends State<DebugPage>
             );
           },
         ),
-        duration: Duration(seconds: (count * 0.1).ceil() + 5), // 処理時間に応じて表示時間を調整
+        duration: Duration(seconds: (count * 0.1).ceil() + 5),
       ),
     );
 
-    // 1件ずつ追加しながらプログレスを更新
     for (int i = 0; i < count; i++) {
       await _generateAndInsertSingleDummyCollectedKey();
-      // UIが更新されるように少し待機 (UIのフリーズを防ぐ)
       await Future.delayed(Duration.zero);
-      // Notifierを更新してSnackBarを再描画
       _progressCountNotifier.value = i + 1;
     }
 
-    // 完了後にUIを更新
     setState(() {});
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('✅ $count件のダミー収集鍵を挿入しました。')),
     );
-    _progressCountNotifier.value = 0; // プログレスをリセット
+    _progressCountNotifier.value = 0;
   }
 
 
@@ -182,7 +176,7 @@ class _DebugPageState extends State<DebugPage>
     setState(() {});
   }
 
-  // --- マスターキー操作 (変更なし) ---
+  // --- マスターキー操作 ---
   Future<void> _deleteMasterKey() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -207,7 +201,7 @@ class _DebugPageState extends State<DebugPage>
     }
   }
 
-  // --- 機能検証ロジック (変更なし) ---
+  // --- 機能検証ロジック ---
   void _testRandBytes() {
     try {
       final result = _boringSSLService.testRandomBytes();
@@ -285,6 +279,96 @@ class _DebugPageState extends State<DebugPage>
   }
 
   // --- ヘルパー関数 (ダイアログ) ---
+
+  /// バイト配列を完全な16進数文字列に変換する
+  String _fullHex(List<int>? bytes) {
+    if (bytes == null || bytes.isEmpty) return 'N/A';
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
+  }
+
+  /// 収集した鍵（1つ）を詳細表示するダイアログ
+  void _showFullKeyDialog(BuildContext context, String title, List<int>? keyBytes) {
+    if (keyBytes == null) return;
+    final String fullHexKey = _fullHex(keyBytes);
+    _showFullStringDialog(context, title, fullHexKey);
+  }
+
+  /// ★★★ マスターキー(String)表示用のダイアログを汎用化 ★★★
+  void _showFullStringDialog(BuildContext context, String title, String? content) {
+    if (content == null || content.isEmpty) {
+      _showErrorSnackbar("キーがありません。");
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  content,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('閉じる'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 生成した鍵ペア（2つ）を詳細表示するダイアログ
+  void _showGeneratedKeyDialog(BuildContext context, List<int>? pubKeyBytes, List<int>? secKeyBytes) {
+    final String fullHexPub = _fullHex(pubKeyBytes);
+    final String fullHexSec = _fullHex(secKeyBytes);
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('生成済み鍵ペア'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('公開鍵 (Public Key):', style: TextStyle(fontWeight: FontWeight.bold)),
+                SelectableText(
+                  fullHexPub,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                const Text('秘密鍵 (Secret Key):', style: TextStyle(fontWeight: FontWeight.bold)),
+                SelectableText(
+                  fullHexSec,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('閉じる'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
   void _showErrorSnackbar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -464,68 +548,81 @@ class _DebugPageState extends State<DebugPage>
     return "$deg° $min′ $sec″ $direction";
   }
 
-  // --- ウィジェット ---
   Widget _buildMasterKeyCard() {
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
       color: Colors.indigo.shade50,
       elevation: 4,
-      child: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 40, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+      // InkWell を Card の子にして、Card の外観（影や丸み）を維持する
+      child: FutureBuilder<String?>(
+        future: _keyManager.getMasterKeyBase64(),
+        builder: (context, snapshot) {
+          final String? masterKeyBase64 = snapshot.data;
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(12.0), // Cardの丸みに合わせる
+            onTap: () {
+              if (snapshot.connectionState == ConnectionState.done && masterKeyBase64 != null) {
+                // タップしたら、新しく作った汎用ダイアログを呼び出す
+                _showFullStringDialog(context, '🔑 マスターキー (Base64)', masterKeyBase64);
+              } else if (snapshot.connectionState == ConnectionState.done) {
+                _showErrorSnackbar("マスターキーはまだ保存されていません。");
+              }
+            },
+            child: Stack(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    const Text('🔑 マスターキー', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 8),
-                    Text('(Base64)', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 40, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    // ★★★ mainAxisSize: MainAxisSize.min, を削除 ★★★
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          const Text('🔑 マスターキー', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 8),
+                          Text('(Base64)', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      // FutureBuilder の中身は snapshot を利用して表示
+                      if (snapshot.connectionState == ConnectionState.waiting)
+                        const SizedBox(height: 20, child: LinearProgressIndicator())
+                      else if (masterKeyBase64 != null)
+                        SelectionArea(
+                          child: Text(
+                            masterKeyBase64,
+                            style: const TextStyle(fontFamily: 'monospace'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )
+                      else
+                        const Text('保存されていません', style: TextStyle(color: Colors.grey)),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                FutureBuilder<String?>(
-                  future: _keyManager.getMasterKeyHex(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const SizedBox(height: 20, child: LinearProgressIndicator());
-                    }
-                    if (snapshot.hasData && snapshot.data != null) {
-                      return SelectionArea(
-                        child: Text(
-                          snapshot.data!,
-                          style: const TextStyle(fontFamily: 'monospace'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    } else {
-                      return const Text('保存されていません', style: TextStyle(color: Colors.grey));
-                    }
-                  },
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete_forever),
+                    onPressed: _deleteMasterKey,
+                    tooltip: 'マスターキーを削除',
+                    color: Colors.red.withOpacity(0.7),
+                    splashRadius: 20,
+                  ),
                 ),
               ],
             ),
-          ),
-          Positioned(
-            top: 0,
-            right: 0,
-            child: IconButton(
-              icon: const Icon(Icons.delete_forever),
-              onPressed: _deleteMasterKey,
-              tooltip: 'マスターキーを削除',
-              color: Colors.red.withOpacity(0.7),
-              splashRadius: 20,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
+
 
   Widget _buildVerificationTab() {
     return Center(
@@ -642,46 +739,65 @@ class _DebugPageState extends State<DebugPage>
                   final row = records[index];
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: isGenerated
-                          ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Expanded(child: Text('Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}')),
-                            Expanded(child: Text('Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}')),
-                          ]),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            Expanded(child: Text('生成: ${_formatTime(row['generate_time'])}')),
-                            Expanded(child: Text('期限: ${_formatTime(row['expire_time'])}')),
-                          ]),
-                        ],
-                      )
-                          : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Center(
-                            child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text(_toDMS((row['lat'] as int) / 1e6, isLatitude: true)),
-                            ])),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text(_toDMS((row['lon'] as int) / 1e6, isLatitude: false)),
-                            ])),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text(_formatTime(row['ts'], isSecond: true)),
-                            ])),
-                          ]),
-                        ],
+                    child: InkWell( // Card の中身を InkWell で包む
+                      borderRadius: BorderRadius.circular(12.0), // Card の丸みに合わせる
+                      onTap: () {
+                        // タップ時の動作
+                        if (isGenerated) {
+                          _showGeneratedKeyDialog(
+                            context,
+                            row['pubkey_ecd'] as List<int>?,
+                            row['seckey_ecd'] as List<int>?,
+                          );
+                        } else {
+                          _showFullKeyDialog(
+                            context,
+                            '収集した鍵',
+                            row['key_ecd'] as List<int>?,
+                          );
+                        }
+                      },
+                      child: Padding( // 元々 Card が持っていた Padding を InkWell の子にする
+                        padding: const EdgeInsets.all(12.0),
+                        child: isGenerated
+                            ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Expanded(child: Text('Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}')),
+                              Expanded(child: Text('Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}')),
+                            ]),
+                            const SizedBox(height: 8),
+                            Row(children: [
+                              Expanded(child: Text('生成: ${_formatTime(row['generate_time'])}')),
+                              Expanded(child: Text('期限: ${_formatTime(row['expire_time'])}')),
+                            ]),
+                          ],
+                        )
+                            : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Center(
+                              child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(children: [
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Text(_toDMS((row['lat'] as int) / 1e6, isLatitude: true)),
+                              ])),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Text(_toDMS((row['lon'] as int) / 1e6, isLatitude: false)),
+                              ])),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Text(_formatTime(row['ts'], isSecond: true)),
+                              ])),
+                            ]),
+                          ],
+                        ),
                       ),
                     ),
                   );
