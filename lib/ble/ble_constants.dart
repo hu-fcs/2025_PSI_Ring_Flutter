@@ -1,21 +1,17 @@
 // lib/ble/ble_constants.dart
 import 'dart:typed_data';
 
-/// 33B 圧縮公開鍵を 17B(front) + 16B(back) に分割したもの。
-/// front[0] は 0x02/0x03（yParityビットを持つ先頭バイト）。
-class BleKeyChunks {
-  final Uint8List front; // 17B (pubkey[0..16])
-  final Uint8List back;  // 16B (pubkey[17..32])
-  BleKeyChunks({required this.front, required this.back});
-}
+// ★ UUID関連のインポートと定義をすべて削除
+// import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
-/// 1B ヘッダ：
+/// 1B ヘッダ： (★ 2パケット構成、ManufacturerData版)
 /// bit7-6: seq2 (2bit, floor(UNIX/600) & 0b11)
-/// bit5   : part (0=front, 1=back)
-/// bit4-1 : ver  (4bit, 現行=1)
+/// bit5   : part (1bit, 0=front, 1=back)
+/// bit4-1 : ver  (4bit, 現行=6)
 /// bit0   : yParity (0x02→0, 0x03→1)
 class BleHdr {
-  static const int currentVer = 1;
+  // ★ バージョンを 6 に更新 (Manufacturer ID + 2-part + 31B payload)
+  static const int currentVer = 6;
 
   static int make({
     required int seq2,   // 0..3

@@ -7,8 +7,8 @@ class KeyAdvertiseRepository {
   KeyAdvertiseRepository() : _kms = KeyManagementService();
   final KeyManagementService _kms;
 
-  /// KMSが返す 33B 圧縮公開鍵を取得 → 17B/16B に分割して返す。
-  Future<BleKeyChunks> getPublicKeyForAdvertise({Duration? validity}) async {
+  /// KMSが返す 33B 圧縮公開鍵をそのまま返す (★ 処理内容を変更)
+  Future<Uint8List> getPublicKeyForAdvertise({Duration? validity}) async {
     final Uint8List? pubKey33 = await _kms.getPublicKeyForAdvertise(
       validity: validity ?? const Duration(minutes: 10),
     );
@@ -19,9 +19,7 @@ class KeyAdvertiseRepository {
       throw StateError('Invalid compressed public key (expected 33 bytes starting with 0x02/0x03).');
     }
 
-    // 33B -> front 17B (0..16), back 16B (17..32)
-    final front = Uint8List.fromList(pubKey33.sublist(0, 17));
-    final back  = Uint8List.fromList(pubKey33.sublist(17));
-    return BleKeyChunks(front: front, back: back);
+    // 33バイトの鍵をそのまま返す
+    return pubKey33;
   }
 }
