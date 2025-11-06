@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:grpc/grpc.dart';
-import '../generated/hello.pbgrpc.dart';
+// import 'package:grpc/grpc.dart'; // gRPC機能削除
+// import '../generated/hello.pbgrpc.dart'; // gRPC機能削除
 
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key});
@@ -18,17 +18,17 @@ class _ScannerPageState extends State<ScannerPage> {
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController = TextEditingController();
 
-  // 接続先情報（スキャン時のみ保持）
   String? ipToConnect;
   int? portToConnect;
 
   @override
   Widget build(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    final String displayName = args?['displayName'] ?? 'UnknownName';
+    // --- 仮名機能削除 ---
+    // final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    // final String displayName = args?['displayName'] ?? 'UnknownName';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('サーバに接続する')),
+      appBar: AppBar(title: const Text('サーバをスキャン')), // 「に接続する」を削除
       body: Stack(
         children: [
           if (!isManualInputMode)
@@ -50,8 +50,7 @@ class _ScannerPageState extends State<ScannerPage> {
                         portToConnect = port;
                       });
 
-                      // QRスキャン時だけ確認ポップアップを出す
-                      _confirmAndConnect(ip, port, displayName);
+                      _confirmAndConnect(ip, port); // displayName 引数を削除
                     } catch (e) {
                       print('QRデコードエラー: $e');
                       if (mounted) {
@@ -88,8 +87,7 @@ class _ScannerPageState extends State<ScannerPage> {
                         final ip = ipController.text.trim();
                         final int? port = int.tryParse(portController.text.trim());
                         if (ip.isNotEmpty && port != null) {
-                          // 手入力時は即接続
-                          connectAndSendHello(ip, port, displayName);
+                          connectAndSendHello(ip, port); // displayName 引数を削除
                         }
                       },
                       child: const Text('接続する'),
@@ -118,13 +116,12 @@ class _ScannerPageState extends State<ScannerPage> {
     );
   }
 
-  // スキャン時だけ確認してから接続する
-  Future<void> _confirmAndConnect(String ip, int port, String displayName) async {
+  Future<void> _confirmAndConnect(String ip, int port) async { // displayName 引数を削除
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('接続確認'),
-        content: Text('IPアドレス: $ip\nポート: $port\nに接続しますか？'),
+        title: const Text('スキャン成功'), // 「接続確認」から変更
+        content: Text('IPアドレス: $ip\nポート: $port\n(gRPC機能は現在無効です)'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -139,7 +136,7 @@ class _ScannerPageState extends State<ScannerPage> {
     );
 
     if (confirmed == true) {
-      connectAndSendHello(ip, port, displayName);
+      connectAndSendHello(ip, port); // displayName 引数を削除
     } else {
       setState(() {
         ipToConnect = null;
@@ -148,41 +145,51 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  // gRPC接続処理
-  Future<void> connectAndSendHello(String ip, int port, String displayName) async {
+  // gRPC接続処理 (ロジックを削除し、ダミーの待機と戻り値に変更)
+  Future<void> connectAndSendHello(String ip, int port) async { // displayName 引数を削除
     setState(() {
       isConnecting = true;
     });
 
     showConnectingDialog(ip, port);
 
-    final channel = ClientChannel(
-      ip,
-      port: port,
-      options: const ChannelOptions(credentials: ChannelCredentials.insecure()),
-    );
-    final stub = HelloServiceClient(channel);
+    // --- gRPC接続ロジックを削除 ---
+    // final channel = ClientChannel(...);
+    // final stub = HelloServiceClient(channel);
+    // try {
+    //   final response = await stub.sayHello(...);
+    //   ...
+    // } catch (e) {
+    //   ...
+    // } finally {
+    //   await channel.shutdown();
+    //   ...
+    // }
 
+    // ★★★ 代わりにダミーの処理を追加 ★★★
     try {
-      final response = await stub.sayHello(HelloRequest(name: displayName));
-      Navigator.of(context, rootNavigator: true).pop(); // 接続中ダイアログを閉じる
+      print('--- gRPC機能は無効化されています ---');
+      print('DEMO: $ip:$port に接続シミュレーション...');
+      // 接続デモ用に1秒待機
+      await Future.delayed(const Duration(seconds: 1));
+
       if (mounted) {
-        Navigator.pop(context, response.message);
+        Navigator.of(context, rootNavigator: true).pop(); // 接続中ダイアログを閉じる
+        Navigator.pop(context, "スキャン完了 (gRPC無効)"); // ダミーの戻り値
       }
     } catch (e) {
-      print('❌ gRPC接続エラー: $e');
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        Navigator.pop(context, '接続失敗');
+        Navigator.pop(context, 'スキャン失敗');
       }
     } finally {
-      await channel.shutdown();
       setState(() {
         isConnecting = false;
         ipToConnect = null;
         portToConnect = null;
       });
     }
+    // ★★★ 修正ここまで ★★★
   }
 
   // 接続中のプログレス表示
@@ -191,13 +198,13 @@ class _ScannerPageState extends State<ScannerPage> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text('接続中...'),
+        title: const Text('処理中...'), // 「接続中」から変更
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 20),
-            Text('IPアドレス: $ip\nポート: $port\nに接続しています'),
+            Text('IPアドレス: $ip\nポート: $port\n(gRPC機能は無効です)'),
           ],
         ),
       ),
