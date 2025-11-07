@@ -1,8 +1,9 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-// import 'package:grpc/grpc.dart'; // gRPC機能削除
-// import '../generated/hello.pbgrpc.dart'; // gRPC機能削除
+
+import '../grpc/psi_client.dart';
 
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key});
@@ -12,202 +13,193 @@ class ScannerPage extends StatefulWidget {
 }
 
 class _ScannerPageState extends State<ScannerPage> {
+  final _client = PsiGrpcClient();
+
   bool isConnecting = false;
   bool isManualInputMode = false;
 
   final TextEditingController ipController = TextEditingController();
-  final TextEditingController portController = TextEditingController();
+  final TextEditingController portController = TextEditingController(text: '50051');
 
   String? ipToConnect;
   int? portToConnect;
 
   @override
-  Widget build(BuildContext context) {
-    // --- 仮名機能削除 ---
-    // final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    // final String displayName = args?['displayName'] ?? 'UnknownName';
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('サーバをスキャン')), // 「に接続する」を削除
-      body: Stack(
-        children: [
-          if (!isManualInputMode)
-            MobileScanner(
-              onDetect: (BarcodeCapture capture) async {
-                if (isConnecting || ipToConnect != null) return;
-
-                final List<Barcode> barcodes = capture.barcodes;
-                if (barcodes.isNotEmpty) {
-                  final String? code = barcodes.first.rawValue;
-                  if (code != null) {
-                    try {
-                      final Map<String, dynamic> grpcInfo = jsonDecode(code);
-                      final String ip = grpcInfo['ip'];
-                      final int port = grpcInfo['port'];
-
-                      setState(() {
-                        ipToConnect = ip;
-                        portToConnect = port;
-                      });
-
-                      _confirmAndConnect(ip, port); // displayName 引数を削除
-                    } catch (e) {
-                      print('QRデコードエラー: $e');
-                      if (mounted) {
-                        Navigator.pop(context, '無効なQRコード');
-                      }
-                    }
-                  }
-                }
-              },
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('手動入力', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: ipController,
-                    decoration: const InputDecoration(labelText: 'IPアドレス (例: 192.168.1.8)'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: portController,
-                    decoration: const InputDecoration(labelText: 'ポート番号 (例: 50051)'),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 20),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        final ip = ipController.text.trim();
-                        final int? port = int.tryParse(portController.text.trim());
-                        if (ip.isNotEmpty && port != null) {
-                          connectAndSendHello(ip, port); // displayName 引数を削除
-                        }
-                      },
-                      child: const Text('接続する'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (!isConnecting)
-            Positioned(
-              bottom: 30,
-              left: 20,
-              right: 20,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    isManualInputMode = !isManualInputMode;
-                  });
-                },
-                icon: Icon(isManualInputMode ? Icons.qr_code : Icons.edit_location_alt),
-                label: Text(isManualInputMode ? 'QRコードをスキャン' : '手動でIPを入力'),
-              ),
-            ),
-        ],
-      ),
-    );
+  void dispose() {
+    ipController.dispose();
+    portController.dispose();
+    super.dispose();
   }
 
-  Future<void> _confirmAndConnect(String ip, int port) async { // displayName 引数を削除
-    final confirmed = await showDialog<bool>(
+  Future<void> _confirmAndConnect(String ip, int port) async {
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('スキャン成功'), // 「接続確認」から変更
-        content: Text('IPアドレス: $ip\nポート: $port\n(gRPC機能は現在無効です)'),
+      builder: (_) => AlertDialog(
+        title: const Text('接続確認'),
+        content: Text('サーバ: $ip:$port に接続しますか？'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('OK'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('接続')),
         ],
       ),
     );
 
-    if (confirmed == true) {
-      connectAndSendHello(ip, port); // displayName 引数を削除
-    } else {
-      setState(() {
-        ipToConnect = null;
-        portToConnect = null;
-      });
-    }
-  }
+    if (ok != true) return;
 
-  // gRPC接続処理 (ロジックを削除し、ダミーの待機と戻り値に変更)
-  Future<void> connectAndSendHello(String ip, int port) async { // displayName 引数を削除
-    setState(() {
-      isConnecting = true;
-    });
+    setState(() => isConnecting = true);
 
-    showConnectingDialog(ip, port);
-
-    // --- gRPC接続ロジックを削除 ---
-    // final channel = ClientChannel(...);
-    // final stub = HelloServiceClient(channel);
-    // try {
-    //   final response = await stub.sayHello(...);
-    //   ...
-    // } catch (e) {
-    //   ...
-    // } finally {
-    //   await channel.shutdown();
-    //   ...
-    // }
-
-    // ★★★ 代わりにダミーの処理を追加 ★★★
-    try {
-      print('--- gRPC機能は無効化されています ---');
-      print('DEMO: $ip:$port に接続シミュレーション...');
-      // 接続デモ用に1秒待機
-      await Future.delayed(const Duration(seconds: 1));
-
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // 接続中ダイアログを閉じる
-        Navigator.pop(context, "スキャン完了 (gRPC無効)"); // ダミーの戻り値
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        Navigator.pop(context, 'スキャン失敗');
-      }
-    } finally {
-      setState(() {
-        isConnecting = false;
-        ipToConnect = null;
-        portToConnect = null;
-      });
-    }
-    // ★★★ 修正ここまで ★★★
-  }
-
-  // 接続中のプログレス表示
-  void showConnectingDialog(String ip, int port) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('処理中...'), // 「接続中」から変更
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 20),
-            Text('IPアドレス: $ip\nポート: $port\n(gRPC機能は無効です)'),
-          ],
-        ),
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      await _client.connect(ip, port);
+      final pong = await _client.ping('hello');
+      // ignore: avoid_print
+      print('Client received: $pong');
+
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('接続成功: $pong')),
+        );
+        Navigator.pop(context, '接続成功: $pong');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('接続失敗: $e');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('接続失敗: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isConnecting = false);
+    }
+  }
+
+  Future<void> _connectManual() async {
+    final ip = ipController.text.trim();
+    final port = int.tryParse(portController.text) ?? 50051;
+    if (ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('IP を入力してください')),
+      );
+      return;
+    }
+    await _confirmAndConnect(ip, port);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('サーバをスキャン'),
+        actions: [
+          IconButton(
+            tooltip: isManualInputMode ? 'カメラで読み取る' : '手入力する',
+            onPressed: () => setState(() => isManualInputMode = !isManualInputMode),
+            icon: Icon(isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard),
+          ),
+        ],
       ),
+      body: isManualInputMode ? _buildManual() : _buildScanner(),
+    );
+  }
+
+  Widget _buildManual() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        TextField(
+          controller: ipController,
+          decoration: const InputDecoration(
+            labelText: 'IPアドレス',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: portController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'ポート番号',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: isConnecting ? null : _connectManual,
+          icon: const Icon(Icons.link),
+          label: const Text('接続'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScanner() {
+    return Stack(
+      children: [
+        MobileScanner(
+          onDetect: (capture) {
+            if (isConnecting) return;
+            final barcodes = capture.barcodes;
+            for (final barcode in barcodes) {
+              final code = barcode.rawValue;
+              if (code == null) continue;
+
+              try {
+                final Map<String, dynamic> grpcInfo = jsonDecode(code);
+                final String ip = grpcInfo['ip'];
+                final int port = grpcInfo['port'];
+
+                setState(() {
+                  ipToConnect = ip;
+                  portToConnect = port;
+                });
+
+                _confirmAndConnect(ip, port);
+                break; // 1つ処理したら抜ける
+              } catch (e) {
+                // ignore: avoid_print
+                print('QRデコードエラー: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('QRコードの形式が不正です')),
+                  );
+                }
+              }
+            }
+          },
+        ),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('カメラに QR をかざしてください'),
+                  if (ipToConnect != null && portToConnect != null) ...[
+                    const SizedBox(height: 8),
+                    Text('検出: $ipToConnect:$portToConnect'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
