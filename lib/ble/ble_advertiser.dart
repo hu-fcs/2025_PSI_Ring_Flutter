@@ -34,7 +34,7 @@ class BleAdvertiser {
 
   bool _isStarted = false;
 
-  static const Duration _rotateInterval = Duration(milliseconds: 600);
+  static const Duration _rotateInterval = Duration(milliseconds: 500);
 
   final _settings = AdvertiseSettings(
     advertiseMode: AdvertiseMode.advertiseModeLowLatency,
