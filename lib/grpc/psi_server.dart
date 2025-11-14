@@ -1,16 +1,57 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
-// 生成コード（lib/proto/generated）を相対インポート
 import '../proto/generated/psi.pbgrpc.dart';
+import '../key_management_service.dart';
 
 class PsiServiceImpl extends PsiServiceBase {
+  final KeyManagementService _keyService = KeyManagementService();
+
+  String _bytesToHex(Uint8List bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
+    print('[SERVER] ping() called');   // ★必須ログ
     final msg = request.msg;
-    // 疎通確認ログ
-    // ignore: avoid_print
     print('[gRPC Server] Ping received: $msg');
+
+    try {
+      final Map<String, dynamic> reqJson = jsonDecode(msg);
+
+      if (reqJson['type'] == 'key_sync') {
+        final List<dynamic> clientKeys = (reqJson['keys'] as List?) ?? const [];
+        print('[gRPC Server] 🔑 Received ${clientKeys.length} keys from client');
+
+        for (var i = 0; i < clientKeys.length; i++) {
+          print('[gRPC Server]   client key[$i]: ${clientKeys[i]}');
+        }
+
+        // サーバ側の鍵を取得
+        final generated = await _keyService.getAllGeneratedPublicKeys();
+        final collected = await _keyService.getAllCollectedPublicKeys();
+        final all = <Uint8List>[...generated, ...collected];
+
+        final serverKeys = all.map(_bytesToHex).toList();
+        print('[gRPC Server] 🔑 Sending ${serverKeys.length} keys back to client');
+
+        for (var i = 0; i < serverKeys.length; i++) {
+          print('[gRPC Server]   server key[$i]: ${serverKeys[i]}');
+        }
+
+        final respJson = jsonEncode({
+          'type': 'key_sync_resp',
+          'keys': serverKeys,
+        });
+
+        return PingResp()..msg = respJson;
+      }
+    } catch (e) {
+      print('[gRPC Server] JSON decode error: $e');
+    }
+
     return PingResp()..msg = 'pong: $msg';
   }
 }
@@ -22,22 +63,24 @@ class PsiGrpcServer {
   bool get isRunning => _server != null;
   int? get port => _port;
 
-  /// [port] に 0 を渡すと空きポートにバインドします（推奨: 指定ポートが被る可能性があるなら0）
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
+
     final server = Server(
       [PsiServiceImpl()],
-      const <Interceptor>[], // 監査や認証を入れる場合はここに
+      const <Interceptor>[],
       CodecRegistry(codecs: const [GzipCodec(), IdentityCodec()]),
     );
+
     await server.serve(
-      address: InternetAddress.anyIPv4, // LAN内からアクセス可能
+      address: InternetAddress.anyIPv4,
       port: port,
     );
+
     _server = server;
-    _port = server.port!;
-    // ignore: avoid_print
-    print('[gRPC Server] started on 0.0.0.0:${_port!}');
+    _port = server.port;
+
+    print('[gRPC Server] started on 0.0.0.0:${_port}');
     return _port!;
   }
 
@@ -47,7 +90,6 @@ class PsiGrpcServer {
     _port = null;
     if (s != null) {
       await s.shutdown();
-      // ignore: avoid_print
       print('[gRPC Server] stopped');
     }
   }

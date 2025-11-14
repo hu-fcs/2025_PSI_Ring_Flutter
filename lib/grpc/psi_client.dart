@@ -1,6 +1,6 @@
+import 'dart:convert';
 import 'package:grpc/grpc.dart';
 
-// 生成コード（lib/proto/generated）を相対インポート
 import '../proto/generated/psi.pbgrpc.dart';
 
 class PsiGrpcClient {
@@ -10,34 +10,77 @@ class PsiGrpcClient {
   bool get isConnected => _stub != null;
 
   Future<void> connect(String host, int port) async {
-    await disconnect(); // 再接続時の後始末
-    _channel = ClientChannel(
-      host,
-      port: port,
-      options: const ChannelOptions(
-        // ローカルLAN前提なのでまずは平文。後でTLSに変更可能
-        credentials: ChannelCredentials.insecure(),
-        idleTimeout: Duration(seconds: 30),
-      ),
-    );
-    _stub = PsiServiceClient(_channel!);
+    print('[CLIENT] trying to connect to $host:$port');  // ★ログ必須
+
+    try {
+      await disconnect();
+
+      _channel = ClientChannel(
+        host,
+        port: port,
+        options: const ChannelOptions(
+          credentials: ChannelCredentials.insecure(),
+          idleTimeout: Duration(seconds: 30),
+        ),
+      );
+
+      _stub = PsiServiceClient(_channel!);
+      print('[CLIENT] connect() success');
+    } catch (e) {
+      print('[CLIENT] connect() ERROR = $e');
+      rethrow;
+    }
   }
 
   Future<String> ping(String msg) async {
     final stub = _stub;
-    if (stub == null) {
-      throw StateError('Client not connected');
+    if (stub == null) throw StateError('Client not connected');
+
+    print('[CLIENT] sending ping payload: $msg');
+
+    try {
+      final resp = await stub.ping(PingReq()..msg = msg);
+      print('[CLIENT] got ping response: ${resp.msg}');
+      return resp.msg;
+    } catch (e) {
+      print('[CLIENT] ping() ERROR = $e');
+      rethrow;
     }
-    final resp = await stub.ping(PingReq()..msg = msg);
-    return resp.msg;
+  }
+
+  Future<List<String>> exchangeKeys(List<String> myKeysHex) async {
+    if (_stub == null) throw StateError('Client not connected');
+
+    final payload = jsonEncode({
+      'type': 'key_sync',
+      'keys': myKeysHex,
+    });
+
+    print('[CLIENT] exchangeKeys() sending ${myKeysHex.length} keys');
+
+    try {
+      final resp = await ping(payload);
+
+      final json = jsonDecode(resp);
+      if (json['type'] == 'key_sync_resp') {
+        final list = (json['keys'] as List?) ?? const [];
+        print('[CLIENT] received ${list.length} keys from server');
+        return List<String>.from(list);
+      }
+
+      print('[CLIENT] unexpected response: $resp');
+      return [resp];
+    } catch (e) {
+      print('[CLIENT] exchangeKeys ERROR = $e');
+      rethrow;
+    }
   }
 
   Future<void> disconnect() async {
     try {
       await _channel?.shutdown();
-    } finally {
-      _channel = null;
-      _stub = null;
-    }
+    } catch (_) {}
+    _channel = null;
+    _stub = null;
   }
 }

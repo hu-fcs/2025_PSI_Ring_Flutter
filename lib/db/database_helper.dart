@@ -50,4 +50,18 @@ class DatabaseHelper {
       )
     ''');
   }
+
+  Future<int> getTotalKeyCount() async {
+    final db = await getDatabase();
+    final generated = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM generated_keys'),
+    ) ?? 0;
+
+    final collected = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM ecd_keys'),
+    ) ?? 0;
+
+    return generated + collected;
+  }
+
 }
