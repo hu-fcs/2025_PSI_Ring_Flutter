@@ -8,7 +8,7 @@ import 'package:pointycastle/export.dart' as pc;
 import 'ble_constants.dart';
 import 'key_advertise_repository.dart';
 
-/// 2パート(front/back)を Manufacturer Data で交互送信する Advertiser。 (★ 仕様変更)
+/// 2パート(front/back)を Manufacturer Data で交互送信する Advertiser。
 ///
 /// 31B Manufacturer Data (ペイロード) 構成:
 /// - [0]   : 1B ヘッダ (seq2, part, ver, yParity)
@@ -20,14 +20,14 @@ class BleAdvertiser {
   final _peripheral = FlutterBlePeripheral();
   final _repo = KeyAdvertiseRepository();
 
-  // ★★★ Manufacturer ID を 0xFFFF (未割り当て) に変更 ★★★
+  // Manufacturer ID を 0xFFFF (未割り当て)
   static const int _companyId = 0xFFFF;
 
   bool _isAdvertising = false;
   Timer? _rotateTimer;
   bool _sendFrontNext = true;
 
-  // ★ 2パート分のペイロード (31B x 2)
+  // 2パート分のペイロード (31B x 2)
   Uint8List? _payloadFront;
   Uint8List? _payloadBack;
   int? _lastSeq2;
@@ -49,6 +49,17 @@ class BleAdvertiser {
     if (!_isAdvertising) return;
 
     try {
+      // -----------------------------------------------------------------------
+      // 【修正箇所】開始済みの場合、次の start を呼ぶ前に必ず stop し、少し待機する
+      // これを行わないと Android では 'TOO_MANY_ADVERTISERS' エラーでクラッシュします。
+      // -----------------------------------------------------------------------
+      if (_isStarted) {
+        await _peripheral.stop();
+        // OSがリソースを解放する時間を稼ぐ (100ms程度が安全圏)
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // 10分ごとの鍵更新チェック
       if (_isStarted) {
         final nowSeq2 = currentTenMinSeq2();
         if (_lastSeq2 == null || nowSeq2 != _lastSeq2) {
@@ -59,16 +70,14 @@ class BleAdvertiser {
       }
 
       final Uint8List? payload;
-      // ★★★ ここを修正 ★★★
       final int partSent = _sendFrontNext ? 0 : 1;
 
-      if (_sendFrontNext) { // 'sendThisTimeIsFront' ではなく '_sendFrontNext' を使う
+      if (_sendFrontNext) {
         payload = _payloadFront;
       } else {
         payload = _payloadBack;
       }
       _sendFrontNext = !_sendFrontNext; // 次回のために反転
-      // ★★★ 修正ここまで ★★★
 
       if (payload == null) throw StateError('payload not prepared');
 
@@ -78,6 +87,7 @@ class BleAdvertiser {
         manufacturerData: payload, // 31Bのペイロード
       );
 
+      // 新しいアドバタイズセットを開始
       await _peripheral.start(advertiseData: data, advertiseSettings: _settings);
 
       if (!_isStarted) {
@@ -85,12 +95,19 @@ class BleAdvertiser {
         if (kDebugMode) print('BLE_AD: 🚀 Advertising started (Part $partSent).');
       } else {
         if (kDebugMode) {
-          print('BLE_AD: 📡 Advertising updated via start() (Part $partSent).');
+          // 実際には update ではなく restart している状態
+          print('BLE_AD: 📡 Advertising rotated (Part $partSent).');
         }
       }
 
     } catch (e) {
       if (kDebugMode) print('BLE_AD: ❌ advertise rotate/update failed: $e');
+
+      // エラー発生時は安全のため stop を試みてクリーンアップする
+      try {
+        await _peripheral.stop();
+      } catch (_) {}
+
     } finally {
       if (_isAdvertising) {
         _rotateTimer = Timer(_rotateInterval, _rotateAndSend);
@@ -100,6 +117,11 @@ class BleAdvertiser {
 
   Future<void> start() async {
     if (_isAdvertising) return;
+
+    // 開始前にも念のため停止を呼んでおく
+    try {
+      await _peripheral.stop();
+    } catch (_) {}
 
     _isAdvertising = true;
     await _preparePayloadsForCurrentSeq();
