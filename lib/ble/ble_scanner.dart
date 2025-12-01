@@ -4,22 +4,16 @@ import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'ble_constants.dart';
 import 'ecd_keys_dao.dart';
 
-/// 2パート(front/back)の鍵断片をメモリ上で管理し、揃ったら結合するスキャナ。 (★ 仕様変更)
-/// - Manufacturer Data (31B) を前提
-/// - [1Bヘッダ + 4B鍵ID + 16Bデータ + 10Bパディング]
-/// - key = "$seq2|$keyIdHex" で断片を保持
 class BleScanner {
-  final _ble = FlutterReactiveBle();
-  StreamSubscription<DiscoveredDevice>? _sub;
+  StreamSubscription<List<ScanResult>>? _sub;
   Timer? _gcTimer;
 
-  // ★★★ Manufacturer ID を 0xFFFF に変更 ★★★
   static const int _companyId = 0xFFFF;
 
   bool _isScanning = false;
@@ -40,28 +34,47 @@ class BleScanner {
     return hash.sublist(0, 4);
   }
 
+  // --------------------------------------------------------
+  // START SCAN (flutter_blue_plus 2.0.2 compatible)
+  // --------------------------------------------------------
   Future<void> start() async {
     if (_isScanning) return;
     _isScanning = true;
 
-    if (kDebugMode) print('BLE_SCAN: 🚀 スキャン開始 (Company ID: 0xFFFF)...');
+    if (kDebugMode) print('BLE_SCAN: 🚀 startScan() called.');
 
-    // ★★★ 128bit UUID スキャンをやめ、全スキャンに戻す ★★★
-    _sub = _ble
-        .scanForDevices(
-      withServices: [], // 全デバイスをスキャン
-      scanMode: ScanMode.lowLatency,
-      requireLocationServicesEnabled: false,
-    )
-        .listen(_onDiscover, onError: (e, st) {
-      if (kDebugMode) print('BLE_SCAN: ❌ scan error: $e');
-    });
+    // 念のため停止 (修正: .instance を削除)
+    await FlutterBluePlus.stopScan();
+
+    // ★ 新 API：startScan は void (修正: .instance を削除)
+    await FlutterBluePlus.startScan(
+      androidScanMode: AndroidScanMode.lowLatency,
+    );
+
+    // ★ 結果は scanResults から取得
+    _sub = FlutterBluePlus.scanResults.listen(
+          (results) {
+        for (final r in results) {
+          _onDiscover(r);
+        }
+      },
+      onError: (e) {
+        if (kDebugMode) print('BLE_SCAN: scanResults error: $e');
+      },
+    );
 
     _gcTimer = Timer.periodic(const Duration(minutes: 1), (_) => _gcSweep());
   }
 
+  // --------------------------------------------------------
+  // STOP SCAN
+  // --------------------------------------------------------
   Future<void> stop() async {
     if (!_isScanning) return;
+
+    // (修正: .instance を削除)
+    await FlutterBluePlus.stopScan();
+
     await _sub?.cancel();
     _sub = null;
 
@@ -72,67 +85,54 @@ class BleScanner {
     _queue.clear();
 
     _isScanning = false;
-    if (kDebugMode) print('BLE_SCAN: 🛑 スキャン停止。');
+
+    if (kDebugMode) print('BLE_SCAN: 🛑 stopScan() called.');
   }
 
-  // -------------------- internal --------------------
+  // --------------------------------------------------------
+  // DISCOVERY HANDLER
+  // --------------------------------------------------------
+  void _onDiscover(ScanResult r) async {
+    final adv = r.advertisementData;
+    // 最新版では remoteId.str で正しいですが、
+    // もし古いバージョンを使っている場合は r.device.id.id になる可能性があります
+    final deviceId = r.device.remoteId.str;
 
-  void _onDiscover(DiscoveredDevice d) async {
-    // ★★★ Manufacturer Data を使うように変更 ★★★
-    final Uint8List? payload = d.manufacturerData;
-    final deviceId = d.id;
+    if (!adv.manufacturerData.containsKey(_companyId)) return;
 
-    if (payload == null || payload.isEmpty) return;
+    final data = adv.manufacturerData[_companyId]!;
+    final payload = Uint8List.fromList(data);
 
-    // ★ 期待するペイロード長を (ID 2B + Data 31B) = 33B に変更
-    // (注: flutter_reactive_ble は ID(2B) と Data(31B) を結合して返す)
-    const int expectedLength = 2 + 31;
-    if (payload.length < expectedLength) {
-      // if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. payload length ${payload.length} < $expectedLength');
-      return;
-    }
+    final fullPayload = Uint8List.fromList([
+      _companyId & 0xff,
+      (_companyId >> 8) & 0xff,
+      ...payload,
+    ]);
 
-    // ★ Manufacturer ID のチェック
-    final int receivedId = payload[0] | (payload[1] << 8); // リトルエンディアン
-    if (receivedId != _companyId) {
-      // if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. Company ID ${receivedId.toRadixString(16)} != ${_companyId.toHexString(16)}');
-      return;
-    }
+    const expectedLength = 2 + 31;
+    if (fullPayload.length < expectedLength) return;
 
-    // 3. ペイロードとヘッダの解析 (★ 構成変更)
-    // (ID 2B をスキップした 31B がペイロード本体)
-    final header = payload[2];
-    // ★ 鍵ID (4B)
-    final keyIdBytes = Uint8List.fromList(payload.sublist(3, 7)); // 2+1 .. 2+5
+    final receivedId = fullPayload[0] | (fullPayload[1] << 8);
+    if (receivedId != _companyId) return;
+
+    final header = fullPayload[2];
+    final keyIdBytes = Uint8List.fromList(fullPayload.sublist(3, 7));
     final keyIdHex = _bytesToHex(keyIdBytes);
-    // ★ データ本体 (16B)
-    final body16 = Uint8List.fromList(payload.sublist(7, 23)); // 2+5 .. 2+21
+    final body16 = Uint8List.fromList(fullPayload.sublist(7, 23));
 
     final seq2 = BleHdr.parseSeq2(header);
     final part = BleHdr.parsePart(header);
-    final yp   = BleHdr.parseYParity(header);
-    final ver  = BleHdr.parseVer(header);
+    final yp = BleHdr.parseYParity(header);
+    final ver = BleHdr.parseVer(header);
 
-    if (kDebugMode) {
-      print('BLE_SCAN: [$deviceId] Parsed Hdr(0x${header.toRadixString(16)}): keyId=$keyIdHex, seq2=$seq2, part=$part, yParity=$yp, ver=$ver');
-    }
+    if (ver != BleHdr.currentVer) return;
+    if (part > 1) return;
 
-    if (ver != BleHdr.currentVer) {
-      if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. Version mismatch ver=$ver (expected ${BleHdr.currentVer})');
-      return;
-    }
-    if (part > 1) { // 2, 3 は無視
-      if (kDebugMode) print('BLE_SCAN: [$deviceId] ⚠️ Ignoring. Invalid part $part');
-      return;
-    }
-
-    // 4. 鍵の断片（HalfState）の処理
     final now = DateTime.now().millisecondsSinceEpoch;
     final key = '$seq2|$keyIdHex';
 
     var st = _halves[key];
     if (st == null) {
-      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Creating new state.');
       st = _HalfState(
         keyId: keyIdBytes,
         seq2: seq2,
@@ -143,7 +143,6 @@ class BleScanner {
       _queue.addLast(_QueueEntry(key: key, firstSeenMs: now));
     } else {
       if (st.yParity != yp) {
-        if (kDebugMode) print('BLE_SCAN: [$key] ⚠️ yParity mismatch (old=${st.yParity}, new=$yp). Resetting state.');
         st.resetParts();
         st.yParity = yp;
         st.firstSeenMs = now;
@@ -152,63 +151,34 @@ class BleScanner {
     }
 
     if (part == 0) {
-      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Storing part 0 (front).');
-      st.front16 = body16; // 16B
+      st.front16 = body16;
     } else {
-      if (kDebugMode) print('BLE_SCAN: [$key] ℹ️ Storing part 1 (back).');
-      st.back16 = body16; // 16B
+      st.back16 = body16;
     }
 
-    // 5. 鍵の結合処理 (★ 2パートチェック)
     if (st.front16 != null && st.back16 != null) {
-      if (kDebugMode) print('BLE_SCAN: [$key] 🔥 Both parts received. Attempting merge...');
-
-      final firstByte = 0x02 | (st.yParity & 0x01);
-
-      // ★ 33B = [0x02/03 (1B)] + [Front (16B)] + [Back (16B)]
       final merged = Uint8List.fromList([
-        firstByte,
+        0x02 | (st.yParity & 0x01),
         ...st.front16!,
         ...st.back16!,
       ]);
 
-      final bool isValid = isValidCompressedPubkey(merged);
-      if (kDebugMode) print('BLE_SCAN: [$key] Merged key (${merged.length}B): ${_bytesToHex(merged)}');
-      if (kDebugMode) print('BLE_SCAN: [$key] Validation (length 33B): $isValid');
-
-      if (!isValid) {
-        _halves.remove(key);
-        return;
-      }
-
-      // ★★★ ハッシュ検証 (誤結合防止) ★★★
+      final valid = isValidCompressedPubkey(merged);
       final receivedHash = st.keyId;
       final calculatedHash = _getKeyHashId(merged);
 
-      bool isHashValid = listEquals(receivedHash, calculatedHash);
-      if (kDebugMode) {
-        print('BLE_SCAN: [$key] Hash Validation: $isHashValid (Received: ${_bytesToHex(receivedHash)}, Calc: ${_bytesToHex(calculatedHash)})');
-      }
-
-      if (isValid && isHashValid) {
+      if (valid && listEquals(receivedHash, calculatedHash)) {
         try {
-          if (kDebugMode) print('BLE_SCAN: [$key] 💾 Inserting into DB...');
           await EcdKeysDao.instance.insertCollected(
             pubkey33: merged,
             ts: now,
             latE6: 0,
             lonE6: 0,
           );
-          if (kDebugMode) {
-            print('BLE_SCAN: [$key] ✅ DB insert success.');
-          }
-        } catch (e) {
-          if (kDebugMode) print('BLE_SCAN: [$key] ❌ DB insert failed: $e');
-        }
+        } catch (_) {}
       }
 
       _halves.remove(key);
-      if (kDebugMode) print('BLE_SCAN: [$key] 🧹 State cleared after processing.');
     }
 
     _gcSweep();
@@ -219,10 +189,7 @@ class BleScanner {
     while (_queue.isNotEmpty) {
       final head = _queue.first;
       if ((now - head.firstSeenMs) >= _halfTtl.inMilliseconds) {
-        final removedKey = _queue.removeFirst().key;
-        if (_halves.remove(removedKey) != null) {
-          if (kDebugMode) print('BLE_SCAN: [$removedKey] 🗑️ GC Sweep: Removed expired half-state.');
-        }
+        _halves.remove(_queue.removeFirst().key);
       } else {
         break;
       }
@@ -230,7 +197,6 @@ class BleScanner {
   }
 }
 
-// ★ 2パート保持
 class _HalfState {
   _HalfState({
     required this.keyId,
@@ -239,13 +205,13 @@ class _HalfState {
     required this.firstSeenMs,
   });
 
-  final Uint8List keyId; // 4B
+  final Uint8List keyId;
   final int seq2;
   int yParity;
   int firstSeenMs;
 
-  Uint8List? front16; // 16B
-  Uint8List? back16; // 16B
+  Uint8List? front16;
+  Uint8List? back16;
 
   void resetParts() {
     front16 = null;
