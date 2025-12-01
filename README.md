@@ -101,4 +101,7 @@ sequenceDiagram
 | `VerifyRingSignature` | リング署名を検証する                           | `const std::vector<std::string>& publicKeys`,<br>`const std::string& message`,<br>`const std::vector<uint8_t>& signature` | `bool` 検証成功なら`true`                           |
 
 ---
-## 
+## protoのビルドコマンド
+```agsl
+protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
+```
