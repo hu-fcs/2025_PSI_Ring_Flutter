@@ -1,105 +1,128 @@
-///
-//  Generated code. Do not modify.
-//  source: psi.proto
+// This is a generated file - do not edit.
 //
-// @dart = 2.12
-// ignore_for_file: annotate_overrides,camel_case_types,constant_identifier_names,directives_ordering,library_prefixes,non_constant_identifier_names,prefer_final_fields,return_of_invalid_type,unnecessary_const,unnecessary_import,unnecessary_this,unused_import,unused_shown_name
+// Generated from psi.proto.
+
+// @dart = 3.3
+
+// ignore_for_file: annotate_overrides, camel_case_types, comment_references
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, prefer_relative_imports
 
 import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-class PingReq extends $pb.GeneratedMessage {
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(const $core.bool.fromEnvironment('protobuf.omit_message_names') ? '' : 'PingReq', package: const $pb.PackageName(const $core.bool.fromEnvironment('protobuf.omit_message_names') ? '' : 'psi'), createEmptyInstance: create)
-    ..aOS(1, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'msg')
-    ..hasRequiredFields = false
-  ;
+export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
-  PingReq._() : super();
+class PingReq extends $pb.GeneratedMessage {
   factory PingReq({
     $core.String? msg,
   }) {
-    final _result = create();
-    if (msg != null) {
-      _result.msg = msg;
-    }
-    return _result;
+    final result = create();
+    if (msg != null) result.msg = msg;
+    return result;
   }
-  factory PingReq.fromBuffer($core.List<$core.int> i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromBuffer(i, r);
-  factory PingReq.fromJson($core.String i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromJson(i, r);
-  @$core.Deprecated(
-  'Using this can add significant overhead to your binary. '
-  'Use [GeneratedMessageGenericExtensions.deepCopy] instead. '
-  'Will be removed in next major version')
-  PingReq clone() => PingReq()..mergeFromMessage(this);
-  @$core.Deprecated(
-  'Using this can add significant overhead to your binary. '
-  'Use [GeneratedMessageGenericExtensions.rebuild] instead. '
-  'Will be removed in next major version')
-  PingReq copyWith(void Function(PingReq) updates) => super.copyWith((message) => updates(message as PingReq)) as PingReq; // ignore: deprecated_member_use
+
+  PingReq._();
+
+  factory PingReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory PingReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PingReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'msg')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PingReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PingReq copyWith(void Function(PingReq) updates) =>
+      super.copyWith((message) => updates(message as PingReq)) as PingReq;
+
+  @$core.override
   $pb.BuilderInfo get info_ => _i;
+
   @$core.pragma('dart2js:noInline')
   static PingReq create() => PingReq._();
+  @$core.override
   PingReq createEmptyInstance() => create();
-  static $pb.PbList<PingReq> createRepeated() => $pb.PbList<PingReq>();
   @$core.pragma('dart2js:noInline')
-  static PingReq getDefault() => _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PingReq>(create);
+  static PingReq getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PingReq>(create);
   static PingReq? _defaultInstance;
 
   @$pb.TagNumber(1)
   $core.String get msg => $_getSZ(0);
   @$pb.TagNumber(1)
-  set msg($core.String v) { $_setString(0, v); }
+  set msg($core.String value) => $_setString(0, value);
   @$pb.TagNumber(1)
   $core.bool hasMsg() => $_has(0);
   @$pb.TagNumber(1)
-  void clearMsg() => clearField(1);
+  void clearMsg() => $_clearField(1);
 }
 
 class PingResp extends $pb.GeneratedMessage {
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(const $core.bool.fromEnvironment('protobuf.omit_message_names') ? '' : 'PingResp', package: const $pb.PackageName(const $core.bool.fromEnvironment('protobuf.omit_message_names') ? '' : 'psi'), createEmptyInstance: create)
-    ..aOS(1, const $core.bool.fromEnvironment('protobuf.omit_field_names') ? '' : 'msg')
-    ..hasRequiredFields = false
-  ;
-
-  PingResp._() : super();
   factory PingResp({
     $core.String? msg,
   }) {
-    final _result = create();
-    if (msg != null) {
-      _result.msg = msg;
-    }
-    return _result;
+    final result = create();
+    if (msg != null) result.msg = msg;
+    return result;
   }
-  factory PingResp.fromBuffer($core.List<$core.int> i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromBuffer(i, r);
-  factory PingResp.fromJson($core.String i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromJson(i, r);
-  @$core.Deprecated(
-  'Using this can add significant overhead to your binary. '
-  'Use [GeneratedMessageGenericExtensions.deepCopy] instead. '
-  'Will be removed in next major version')
-  PingResp clone() => PingResp()..mergeFromMessage(this);
-  @$core.Deprecated(
-  'Using this can add significant overhead to your binary. '
-  'Use [GeneratedMessageGenericExtensions.rebuild] instead. '
-  'Will be removed in next major version')
-  PingResp copyWith(void Function(PingResp) updates) => super.copyWith((message) => updates(message as PingResp)) as PingResp; // ignore: deprecated_member_use
+
+  PingResp._();
+
+  factory PingResp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory PingResp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PingResp',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'msg')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PingResp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PingResp copyWith(void Function(PingResp) updates) =>
+      super.copyWith((message) => updates(message as PingResp)) as PingResp;
+
+  @$core.override
   $pb.BuilderInfo get info_ => _i;
+
   @$core.pragma('dart2js:noInline')
   static PingResp create() => PingResp._();
+  @$core.override
   PingResp createEmptyInstance() => create();
-  static $pb.PbList<PingResp> createRepeated() => $pb.PbList<PingResp>();
   @$core.pragma('dart2js:noInline')
-  static PingResp getDefault() => _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PingResp>(create);
+  static PingResp getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PingResp>(create);
   static PingResp? _defaultInstance;
 
   @$pb.TagNumber(1)
   $core.String get msg => $_getSZ(0);
   @$pb.TagNumber(1)
-  set msg($core.String v) { $_setString(0, v); }
+  set msg($core.String value) => $_setString(0, value);
   @$pb.TagNumber(1)
   $core.bool hasMsg() => $_has(0);
   @$pb.TagNumber(1)
-  void clearMsg() => clearField(1);
+  void clearMsg() => $_clearField(1);
 }
 
+const $core.bool _omitFieldNames =
+    $core.bool.fromEnvironment('protobuf.omit_field_names');
+const $core.bool _omitMessageNames =
+    $core.bool.fromEnvironment('protobuf.omit_message_names');

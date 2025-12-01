@@ -69,8 +69,9 @@ class PsiGrpcServer {
     final server = Server(
       [PsiServiceImpl()],
       const <Interceptor>[],
-      CodecRegistry(codecs: const [GzipCodec(), IdentityCodec()]),
     );
+
+
 
     await server.serve(
       address: InternetAddress.anyIPv4,

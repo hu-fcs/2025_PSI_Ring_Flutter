@@ -1,35 +1,53 @@
-///
-//  Generated code. Do not modify.
-//  source: psi.proto
+// This is a generated file - do not edit.
 //
-// @dart = 2.12
-// ignore_for_file: annotate_overrides,camel_case_types,constant_identifier_names,directives_ordering,library_prefixes,non_constant_identifier_names,prefer_final_fields,return_of_invalid_type,unnecessary_const,unnecessary_import,unnecessary_this,unused_import,unused_shown_name
+// Generated from psi.proto.
+
+// @dart = 3.3
+
+// ignore_for_file: annotate_overrides, camel_case_types, comment_references
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, prefer_relative_imports
 
 import 'dart:async' as $async;
-
 import 'dart:core' as $core;
 
 import 'package:grpc/service_api.dart' as $grpc;
+import 'package:protobuf/protobuf.dart' as $pb;
+
 import 'psi.pb.dart' as $0;
+
 export 'psi.pb.dart';
 
+@$pb.GrpcServiceName('psi.PsiService')
 class PsiServiceClient extends $grpc.Client {
+  /// The hostname for this service.
+  static const $core.String defaultHost = '';
+
+  /// OAuth scopes needed for the client.
+  static const $core.List<$core.String> oauthScopes = [
+    '',
+  ];
+
+  PsiServiceClient(super.channel, {super.options, super.interceptors});
+
+  $grpc.ResponseFuture<$0.PingResp> ping(
+    $0.PingReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$ping, request, options: options);
+  }
+
+  // method descriptors
+
   static final _$ping = $grpc.ClientMethod<$0.PingReq, $0.PingResp>(
       '/psi.PsiService/Ping',
       ($0.PingReq value) => value.writeToBuffer(),
-      ($core.List<$core.int> value) => $0.PingResp.fromBuffer(value));
-
-  PsiServiceClient($grpc.ClientChannel channel,
-      {$grpc.CallOptions? options,
-      $core.Iterable<$grpc.ClientInterceptor>? interceptors})
-      : super(channel, options: options, interceptors: interceptors);
-
-  $grpc.ResponseFuture<$0.PingResp> ping($0.PingReq request,
-      {$grpc.CallOptions? options}) {
-    return $createUnaryCall(_$ping, request, options: options);
-  }
+      $0.PingResp.fromBuffer);
 }
 
+@$pb.GrpcServiceName('psi.PsiService')
 abstract class PsiServiceBase extends $grpc.Service {
   $core.String get $name => 'psi.PsiService';
 
@@ -44,8 +62,8 @@ abstract class PsiServiceBase extends $grpc.Service {
   }
 
   $async.Future<$0.PingResp> ping_Pre(
-      $grpc.ServiceCall call, $async.Future<$0.PingReq> request) async {
-    return ping(call, await request);
+      $grpc.ServiceCall $call, $async.Future<$0.PingReq> $request) async {
+    return ping($call, await $request);
   }
 
   $async.Future<$0.PingResp> ping($grpc.ServiceCall call, $0.PingReq request);
