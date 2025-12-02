@@ -88,10 +88,19 @@ class _ExchangePageState extends State<ExchangePage> {
   // ==========================================================
   // ★ BLE の ON/OFF を切り替え
   // ==========================================================
+  Future<bool> _ensureLocationPermissions() async {
+    // 許可を求める（拒否されても OK）
+    await Permission.location.request();
+
+    // 許可されていれば true、拒否なら false
+    return await Permission.location.isGranted;
+  }
+
   Future<void> _toggleBleExchange() async {
     if (!_bleRunning) {
-      final ok = await _ensureBlePermissions();
-      if (!ok) {
+      // BLE の権限チェック（これは必須）
+      final bleOk = await _ensureBlePermissions();
+      if (!bleOk) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Bluetooth の権限が必要です')),
@@ -99,11 +108,15 @@ class _ExchangePageState extends State<ExchangePage> {
         }
         return;
       }
+
+      // ★ 位置情報権限は optional のため、拒否されても BLE を開始する
+      await _ensureLocationPermissions();
     }
 
     await _ble.toggleExchange();
     if (mounted) setState(() {});
   }
+
 
   // ==========================================================
   // ★ 正しい Wi-Fi IPv4 を取得（wlan0 のみ使用）
