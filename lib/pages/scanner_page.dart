@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:grpc/grpc.dart';
-import '../generated/hello.pbgrpc.dart';
+
+import '../grpc/psi_client.dart';
+import '../key_management_service.dart';
 
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key});
@@ -12,195 +15,280 @@ class ScannerPage extends StatefulWidget {
 }
 
 class _ScannerPageState extends State<ScannerPage> {
+  final _client = PsiGrpcClient();
+  final _keyService = KeyManagementService();
+
   bool isConnecting = false;
   bool isManualInputMode = false;
+  bool _isProcessingScan = false;
 
   final TextEditingController ipController = TextEditingController();
-  final TextEditingController portController = TextEditingController();
+  final TextEditingController portController =
+  TextEditingController(text: '50051');
 
-  // 接続先情報（スキャン時のみ保持）
   String? ipToConnect;
   int? portToConnect;
 
+  final MobileScannerController _scannerController =
+  MobileScannerController();
+
   @override
-  Widget build(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    final String displayName = args?['displayName'] ?? 'UnknownName';
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('サーバに接続する')),
-      body: Stack(
-        children: [
-          if (!isManualInputMode)
-            MobileScanner(
-              onDetect: (BarcodeCapture capture) async {
-                if (isConnecting || ipToConnect != null) return;
-
-                final List<Barcode> barcodes = capture.barcodes;
-                if (barcodes.isNotEmpty) {
-                  final String? code = barcodes.first.rawValue;
-                  if (code != null) {
-                    try {
-                      final Map<String, dynamic> grpcInfo = jsonDecode(code);
-                      final String ip = grpcInfo['ip'];
-                      final int port = grpcInfo['port'];
-
-                      setState(() {
-                        ipToConnect = ip;
-                        portToConnect = port;
-                      });
-
-                      // QRスキャン時だけ確認ポップアップを出す
-                      _confirmAndConnect(ip, port, displayName);
-                    } catch (e) {
-                      print('QRデコードエラー: $e');
-                      if (mounted) {
-                        Navigator.pop(context, '無効なQRコード');
-                      }
-                    }
-                  }
-                }
-              },
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('手動入力', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: ipController,
-                    decoration: const InputDecoration(labelText: 'IPアドレス (例: 192.168.1.8)'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: portController,
-                    decoration: const InputDecoration(labelText: 'ポート番号 (例: 50051)'),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 20),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        final ip = ipController.text.trim();
-                        final int? port = int.tryParse(portController.text.trim());
-                        if (ip.isNotEmpty && port != null) {
-                          // 手入力時は即接続
-                          connectAndSendHello(ip, port, displayName);
-                        }
-                      },
-                      child: const Text('接続する'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (!isConnecting)
-            Positioned(
-              bottom: 30,
-              left: 20,
-              right: 20,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  setState(() {
-                    isManualInputMode = !isManualInputMode;
-                  });
-                },
-                icon: Icon(isManualInputMode ? Icons.qr_code : Icons.edit_location_alt),
-                label: Text(isManualInputMode ? 'QRコードをスキャン' : '手動でIPを入力'),
-              ),
-            ),
-        ],
-      ),
-    );
+  void dispose() {
+    ipController.dispose();
+    portController.dispose();
+    _scannerController.dispose();
+    super.dispose();
   }
 
-  // スキャン時だけ確認してから接続する
-  Future<void> _confirmAndConnect(String ip, int port, String displayName) async {
-    final confirmed = await showDialog<bool>(
+  /// バイト列を16進文字列へ
+  String _bytesToHex(Uint8List bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+  /// ----------------------------------------------------------------------
+  ///  接続確認 → gRPC 接続 の本体
+  /// ----------------------------------------------------------------------
+  Future<void> _confirmAndConnect(String ip, int port) async {
+    // ★ まずカメラ停止（この時点で背景は静止）
+    await _scannerController.stop();
+
+    // ---- 接続確認ダイアログ ----
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
         title: const Text('接続確認'),
-        content: Text('IPアドレス: $ip\nポート: $port\nに接続しますか？'),
+        content: Text('サーバ: $ip:$port に接続しますか？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('キャンセル'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('OK'),
+            child: const Text('接続'),
           ),
         ],
       ),
     );
 
-    if (confirmed == true) {
-      connectAndSendHello(ip, port, displayName);
-    } else {
-      setState(() {
-        ipToConnect = null;
-        portToConnect = null;
-      });
+    // キャンセルされたら再開して終了
+    if (ok != true) {
+      _isProcessingScan = false;
+      _scannerController.start();
+      return;
     }
-  }
 
-  // gRPC接続処理
-  Future<void> connectAndSendHello(String ip, int port, String displayName) async {
-    setState(() {
-      isConnecting = true;
-    });
-
-    showConnectingDialog(ip, port);
-
-    final channel = ClientChannel(
-      ip,
-      port: port,
-      options: const ChannelOptions(credentials: ChannelCredentials.insecure()),
-    );
-    final stub = HelloServiceClient(channel);
-
-    try {
-      final response = await stub.sayHello(HelloRequest(name: displayName));
-      Navigator.of(context, rootNavigator: true).pop(); // 接続中ダイアログを閉じる
-      if (mounted) {
-        Navigator.pop(context, response.message);
-      }
-    } catch (e) {
-      print('❌ gRPC接続エラー: $e');
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        Navigator.pop(context, '接続失敗');
-      }
-    } finally {
-      await channel.shutdown();
-      setState(() {
-        isConnecting = false;
-        ipToConnect = null;
-        portToConnect = null;
-      });
-    }
-  }
-
-  // 接続中のプログレス表示
-  void showConnectingDialog(String ip, int port) {
+    // ---- ローディング表示（確認ダイアログが完全に閉じてから表示）----
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('接続中...'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 20),
-            Text('IPアドレス: $ip\nポート: $port\nに接続しています'),
-          ],
-        ),
+      barrierColor: Colors.black.withOpacity(0.1), // 暗くなりすぎない
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    setState(() => isConnecting = true);
+
+    try {
+      print('[CLIENT] trying to connect to $ip:$port');
+      await _client.connect(ip, port);
+      print('[CLIENT] connect() success');
+
+      final generated = await _keyService.getAllGeneratedPublicKeys();
+      final collected = await _keyService.getAllCollectedPublicKeys();
+      final all = [...generated, ...collected];
+      final myKeysHex = all.map(_bytesToHex).toList();
+
+      print('🔑 [Client] sending ${myKeysHex.length} keys to $ip:$port');
+      for (var i = 0; i < myKeysHex.length; i++) {
+        print('🔑 [Client]   my key[$i]: ${myKeysHex[i]}');
+      }
+
+      final remoteKeys = await _client.exchangeKeys(myKeysHex);
+
+      print('📥 [Client] received ${remoteKeys.length} keys from server');
+
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '鍵交換成功: 送信 ${myKeysHex.length} 件 / 受信 ${remoteKeys.length} 件',
+            ),
+          ),
+        );
+
+        Navigator.pop(context, '鍵交換成功');
+      }
+    } catch (e) {
+      print('[CLIENT] exchangeKeys ERROR: $e');
+
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('接続または鍵交換に失敗: $e')),
+        );
+      }
+
+      _isProcessingScan = false;
+      _scannerController.start();
+    } finally {
+      if (mounted) setState(() => isConnecting = false);
+    }
+  }
+
+  /// 手入力で接続
+  Future<void> _connectManual() async {
+    final ip = ipController.text.trim();
+    final port = int.tryParse(portController.text) ?? 50051;
+
+    if (ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('IP を入力してください')),
+      );
+      return;
+    }
+
+    _isProcessingScan = true;
+    await _scannerController.stop();
+    await _confirmAndConnect(ip, port);
+  }
+
+  /// QR検出
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (isConnecting || _isProcessingScan) return;
+
+    final barcodes = capture.barcodes;
+
+    for (final barcode in barcodes) {
+      final raw = barcode.rawValue;
+      if (raw == null) continue;
+
+      _isProcessingScan = true;
+
+      try {
+        await _scannerController.stop();
+
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        final ip = map['ip'];
+        final port = map['port'];
+
+        ipToConnect = ip;
+        portToConnect = port;
+
+        await _confirmAndConnect(ip, port);
+      } catch (e) {
+        print('QR decode error: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('QRコードの形式が不正です')),
+        );
+
+        _isProcessingScan = false;
+        _scannerController.start();
+      }
+
+      break;
+    }
+  }
+
+  /// ----------------------------------------------------------------------
+  /// UI
+  /// ----------------------------------------------------------------------
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('サーバをスキャン'),
+        actions: [
+          IconButton(
+            tooltip: isManualInputMode ? 'カメラで読み取る' : '手入力する',
+            onPressed: () {
+              setState(() => isManualInputMode = !isManualInputMode);
+              if (isManualInputMode) {
+                _scannerController.stop();
+              } else {
+                _isProcessingScan = false;
+                _scannerController.start();
+              }
+            },
+            icon: Icon(
+              isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard,
+            ),
+          ),
+        ],
       ),
+
+      body: isManualInputMode ? _buildManual() : _buildScanner(),
+    );
+  }
+
+  /// 手入力UI
+  Widget _buildManual() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        TextField(
+          controller: ipController,
+          decoration: const InputDecoration(
+            labelText: 'IPアドレス',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: portController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'ポート番号',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: isConnecting ? null : _connectManual,
+          icon: const Icon(Icons.link),
+          label: const Text('接続'),
+        ),
+      ],
+    );
+  }
+
+  /// カメラスキャナUI
+  Widget _buildScanner() {
+    return Stack(
+      children: [
+        MobileScanner(
+          controller: _scannerController,
+          onDetect: _onDetect,
+        ),
+
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('カメラに QR をかざしてください'),
+                  if (ipToConnect != null && portToConnect != null) ...[
+                    const SizedBox(height: 8),
+                    Text('検出: $ipToConnect:$portToConnect'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

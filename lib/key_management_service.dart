@@ -81,11 +81,8 @@ class KeyManagementService {
       'expire_time': expireTime,
     });
     print("💾 新しい鍵を生成し、DBに保存しました。");
-
     return keyPair.publicKey;
   }
-
-  // --- ★ここから新しいメソッド★ ---
 
   /// DBから最新の生成済み鍵ペアを取得する
   Future<KeyPair?> getLatestKeyPair() async {
@@ -115,6 +112,13 @@ class KeyManagementService {
     return null;
   }
 
+  /// DBから生成済みのすべての公開鍵を取得する
+  Future<List<Uint8List>> getAllGeneratedPublicKeys() async {
+    final db = await DatabaseHelper.getDatabase();
+    final results = await db.query('generated_keys', columns: ['pubkey_ecd']);
+    return results.map((row) => row['pubkey_ecd'] as Uint8List).toList();
+  }
+
   /// DBから収集済みのすべての公開鍵を取得する
   Future<List<Uint8List>> getAllCollectedPublicKeys() async {
     final db = await DatabaseHelper.getDatabase();
@@ -138,7 +142,8 @@ class KeyManagementService {
     return _secureStorage.read(key: _masterKeyAlias);
   }
 
-  Future<String?> getMasterKeyHex() async {
+  Future<String?> getMasterKeyHexString() async {
+    // Base64文字列で保存されているマスターキーを取得
     final base64Value = await _secureStorage.read(key: _masterKeyAlias);
     if (base64Value == null) return null;
 

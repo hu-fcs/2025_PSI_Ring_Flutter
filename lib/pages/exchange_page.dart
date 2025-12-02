@@ -1,15 +1,15 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io'; // ★ NetworkInterface を使うために必要
+
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../ble/ble_exchange_controller.dart';
-import 'package:flutter/material.dart';
-import 'package:grpc/grpc.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:faker/faker.dart';
-
-import '../generated/hello.pbgrpc.dart';
+import '../grpc/psi_server.dart';
 import '../key_management_service.dart';
+import '../db/database_helper.dart';
+import 'debug_page.dart';
 
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
@@ -19,296 +19,293 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
-  bool isExchanging = false;
-  bool isServerRunning = false;
-  bool isClientConnected = false;
-  String? serverIp;
-  final int serverPort = 50051;
-  String? connectedInfo;
-  String displayName = '';
-  String? latestClientName;
-  Server? grpcServer;
+  // ===== BLE 近接交換 =====
+  final _ble = BleExchangeController();
+  bool get _bleRunning => _ble.isRunning;
 
-  @override
-  void initState() {
-    super.initState();
-    generateDisplayName();
-    fetchLocalIp();
+  // ===== gRPC サーバ =====
+  PsiGrpcServer? _grpcServer;
+  bool get _grpcRunning => _grpcServer?.isRunning == true;
+  String? _serverIp;
+  int _serverPort = 50051;
+
+  // ===== DB / 鍵 =====
+  final _keyService = KeyManagementService();
+  final _db = DatabaseHelper();
+
+  // ==========================================================
+  // ★ 常に DB から最新の鍵数を取得する
+  // ==========================================================
+  Future<bool> _hasAnyKey() async {
+    final count = await _db.getTotalKeyCount();
+    return count > 0;
   }
 
-  // ★★★ 20文字以内の名前ができるまで再生成するロジックを追加 ★★★
-  void generateDisplayName() {
-    final faker = Faker();
-    String newName;
+  // ==========================================================
+  // ★ 鍵なし警告ダイアログ
+  // ==========================================================
+  Future<bool> _requireKeyWarning() async {
+    final hasKey = await _hasAnyKey();
+    if (hasKey) return true;
 
-    do {
-      // 1. ランダムな「色」と「動物」を生成
-      String color = faker.color.commonColor();
-      final String animal = faker.animal.name();
-
-      // 2. 色の頭文字を大文字に変換
-      if (color.isNotEmpty) {
-        color = '${color[0].toUpperCase()}${color.substring(1)}';
-      }
-
-      // 3. 組み合わせて仮の名前を作成
-      newName = '$color${animal.replaceAll(' ', '')}';
-
-    } while (newName.length > 20); // 4. 文字数が20文字を超えていたらループ
-
-    // 5. 条件に合う名前が確定したらstateを更新
-    setState(() {
-      displayName = newName;
-    });
-  }
-
-  Future<void> fetchLocalIp() async {
-    try {
-      final interfaces =
-      await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
-      for (final interface in interfaces) {
-        for (final addr in interface.addresses) {
-          final ip = addr.address;
-          if (ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
-            setState(() {
-              serverIp = ip;
-            });
-            return;
-          }
-        }
-      }
-      setState(() {
-        serverIp = null;
-      });
-    } catch (e) {
-      setState(() {
-        serverIp = null;
-      });
-    }
-  }
-
-  Future<void> startGrpcServer() async {
-    if (grpcServer != null) return;
-    grpcServer = Server.create(
-      services: [
-        HelloServiceImpl(displayName, (clientName) {
-          setState(() {
-            latestClientName = clientName;
-          });
-        })
-      ],
-      codecRegistry: CodecRegistry(codecs: const [GzipCodec(), IdentityCodec()]),
-      interceptors: const <Interceptor>[],
-    );
-    await grpcServer!.serve(port: serverPort, address: '0.0.0.0');
-    setState(() {
-      isServerRunning = true;
-    });
-  }
-
-  Future<void> stopGrpcServer() async {
-    if (grpcServer != null) {
-      await grpcServer!.shutdown();
-      grpcServer = null;
-    }
-    setState(() {
-      isServerRunning = false;
-      latestClientName = null;
-    });
-  }
-
-  final _bleExchange = BleExchangeController();
-  void toggleExchange(bool value) async {
-    setState(() {
-      isExchanging = value;
-    });
-
-    // Android 専用（iOS は広告非対応運用）
-    if (!Platform.isAndroid) {
-      print("⚠️ この機能は Android 専用です。");
-      return;
-    }
-
-    try {
-      if (value) {
-        // ON: 権限チェック → OK なら広告＋スキャン開始
-        final ok = await _ensureBlePermissions();
-        if (!ok) {
-          print("🚨 必要な権限が許可されていません。設定から許可してください。");
-          setState(() => isExchanging = false);
-          return;
-        }
-
-        await _bleExchange.toggleExchange(); // start
-
-        // （既存ロギングは維持）
-        // final keyManager = KeyManagementService();
-        // final pubkey = await keyManager.getPublicKeyForAdvertise(
-        //   validity: const Duration(minutes: 10),
-        // );
-        // if (pubkey != null) {
-        //   print("📡 アドバタイズ予定公開鍵: ${pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
-        // } else {
-        //   print("🚨 アドバタイズ用の公開鍵が取得できませんでした。");
-        // }
-      } else {
-        // OFF: 広告＋スキャン停止
-        await _bleExchange.toggleExchange(); // stop
-        print("🛑 Advertising & scanning stopped.");
-      }
-    } catch (e) {
-      print("❌ toggleExchange error: $e");
-      // 失敗時はUI状態を戻す
-      setState(() => isExchanging = !value);
-    }
-  }
-
-
-  void startScan(BuildContext context) async {
-    final result =
-    await Navigator.pushNamed(context, '/scanner', arguments: {'displayName': displayName});
-    if (result != null && result is String) {
-      setState(() {
-        connectedInfo = result;
-        isClientConnected = true;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    grpcServer?.shutdown();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final grpcInfoJson = serverIp != null ? jsonEncode({'ip': serverIp, 'port': serverPort}) : '';
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('鍵交換画面'),
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('鍵がありません'),
+        content: const Text(
+          '顔見知り確認のための鍵がありません。\n'
+              'まずは BLE 近接交換を行ってください。',
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'デバッグへ',
-            onPressed: () => Navigator.pushNamed(context, '/debug'),
-          )
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text('仮名：$displayName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon: const Icon(Icons.refresh),
-                    tooltip: '新しい仮名を生成',
-                    onPressed: generateDisplayName,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              SwitchListTile(
-                title: const Text('アドバタイズ'),
-                subtitle: Text(isExchanging ? 'アドバタイズ中' : '停止中'),
-                value: isExchanging,
-                onChanged: toggleExchange,
-                secondary: Icon(Icons.bluetooth, color: isExchanging ? Colors.blue : Colors.grey),
-              ),
-              SwitchListTile(
-                title: const Text('gRPCサーバ'),
-                subtitle: Text(isServerRunning ? '起動中' : '停止中'),
-                value: isServerRunning,
-                onChanged: (value) async {
-                  if (value) {
-                    await startGrpcServer();
-                  } else {
-                    await stopGrpcServer();
-                  }
-                },
-                secondary: Icon(Icons.wifi, color: isServerRunning ? Colors.green : Colors.grey),
-              ),
-              const SizedBox(height: 20),
-              if (isServerRunning)
-                serverIp != null
-                    ? Column(
-                  children: [
-                    Center(
-                      child:
-                      QrImageView(data: grpcInfoJson, version: QrVersions.auto, size: 200.0),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text('サーバ起動中！', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('IPアドレス: $serverIp'),
-                    Text('ポート番号: $serverPort'),
-                  ],
-                )
-                    : const Text('⚠️ IPアドレス取得失敗', style: TextStyle(color: Colors.red)),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                onPressed: () => startScan(context),
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text('QRコードをスキャンして接続'),
-              ),
-              const SizedBox(height: 20),
-              if (isClientConnected)
-                Text('クライアント接続成功: $connectedInfo',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              if (latestClientName != null)
-                Text('接続完了：Hello, $latestClientName',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            ],
-          ),
-        ),
-      ),
     );
+
+    return false;
   }
 
+  // ==========================================================
+  // ★ BLE 権限チェック
+  // ==========================================================
   Future<bool> _ensureBlePermissions() async {
-    if (!Platform.isAndroid) return false;
-
-    // Android 12+ 個別権限 + Android 10–11向け位置情報
     final perms = <Permission>[
       Permission.bluetoothAdvertise,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
     ];
+    final statuses = await perms.request();
 
-    // 既に全部OKならそのまま
-    final alreadyAllGranted = await Future.wait(perms.map((p) async => (await p.status).isGranted))
-        .then((list) => list.every((v) => v));
-    if (alreadyAllGranted) return true;
-
-    // まとめて要求
-    final result = await perms.request();
-
-    // 少なくとも BLE の3権限が許可されているか確認
-    for (final p in [Permission.bluetoothAdvertise, Permission.bluetoothScan, Permission.bluetoothConnect]) {
-      if (!(result[p]?.isGranted ?? false)) {
-        return false;
-      }
+    for (final p in perms) {
+      if (!(statuses[p]?.isGranted ?? false)) return false;
     }
     return true;
   }
-}
 
-class HelloServiceImpl extends HelloServiceBase {
-  final String serverDisplayName;
-  final void Function(String clientName) onClientConnected;
-  HelloServiceImpl(this.serverDisplayName, this.onClientConnected);
+  // ==========================================================
+  // ★ BLE の ON/OFF を切り替え
+  // ==========================================================
+  Future<void> _toggleBleExchange() async {
+    if (!_bleRunning) {
+      final ok = await _ensureBlePermissions();
+      if (!ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Bluetooth の権限が必要です')),
+          );
+        }
+        return;
+      }
+    }
+
+    await _ble.toggleExchange();
+    if (mounted) setState(() {});
+  }
+
+  // ==========================================================
+  // ★ 正しい Wi-Fi IPv4 を取得（wlan0 のみ使用）
+  // ==========================================================
+  Future<String?> _getLocalWifiIp() async {
+    try {
+      final interfaces = await NetworkInterface.list();
+
+      for (var interface in interfaces) {
+        if (interface.name == 'wlan0') {
+          for (var addr in interface.addresses) {
+            if (addr.type == InternetAddressType.IPv4) {
+              return addr.address; // ★ 正しい IPv4 を返す
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ==========================================================
+  // ★ gRPC サーバ開始
+  // ==========================================================
+  Future<void> _startGrpcServer() async {
+    if (!await _requireKeyWarning()) return;
+
+    if (_grpcRunning) return;
+
+    final ip = await _getLocalWifiIp();
+    if (ip == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ローカル IP が取得できません（同じ Wi-Fi に接続してください）'),
+        ),
+      );
+      return;
+    }
+
+    final server = PsiGrpcServer();
+    final port = await server.start(port: _serverPort);
+
+    setState(() {
+      _grpcServer = server;
+      _serverIp = ip;
+      _serverPort = port;
+    });
+
+    print('✅ gRPC Server started on $_serverIp:$_serverPort');
+  }
+
+  Future<void> _stopGrpcServer() async {
+    final s = _grpcServer;
+    _grpcServer = null;
+    setState(() {});
+    await s?.stop();
+  }
+
+  // ==========================================================
+  // ★ ScannerPage 起動前にも鍵チェック
+  // ==========================================================
+  void _openScannerPage() async {
+    if (!await _requireKeyWarning()) return;
+    Navigator.pushNamed(context, '/scanner');
+  }
+
+  String get _qrPayload => jsonEncode({
+    'ip': _serverIp ?? '',
+    'port': _serverPort,
+  });
+
+  // ==========================================================
+  // UI
+  // ==========================================================
   @override
-  Future<HelloReply> sayHello(ServiceCall call, HelloRequest request) async {
-    print('📥 クライアントから受信: ${request.name}');
-    onClientConnected(request.name);
-    return HelloReply()..message = 'Hello!, $serverDisplayName';
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'PSI Ring Match',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            Text('通信設定', style: TextStyle(fontSize: 14)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'デバッグページ',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DebugPage()),
+              );
+            },
+          ),
+        ],
+      ),
+
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // ------------------------------------------------------
+          // BLE セクション
+          // ------------------------------------------------------
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('BLE 近接交換', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _toggleBleExchange,
+                        icon: Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
+                        label: Text(_bleRunning ? '停止' : '開始'),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
+                        style: TextStyle(
+                          color: _bleRunning ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('近くの端末と鍵を交換します。'),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ------------------------------------------------------
+          // gRPC セクション
+          // ------------------------------------------------------
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('gRPC 接続', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Switch(
+                        value: _grpcRunning,
+                        onChanged: (on) {
+                          if (on) {
+                            _startGrpcServer();
+                          } else {
+                            _stopGrpcServer();
+                          }
+                        },
+                      ),
+                      Text(_grpcRunning ? '稼働中' : '停止中'),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'QR をスキャン（接続）',
+                        icon: const Icon(Icons.qr_code_scanner),
+                        onPressed: _openScannerPage,
+                      ),
+                    ],
+                  ),
+
+                  if (_grpcRunning) ...[
+                    const SizedBox(height: 8),
+                    Text('サーバ: ${_serverIp ?? "-"} : $_serverPort'),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: QrImageView(
+                        data: _qrPayload,
+                        version: QrVersions.auto,
+                        size: 200,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('もう一方の端末で QR をスキャンして接続してください。'),
+                  ] else ...[
+                    const SizedBox(height: 8),
+                    const Text('ON にすると接続用の QR が表示されます。'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

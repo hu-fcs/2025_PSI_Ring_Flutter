@@ -99,3 +99,9 @@ sequenceDiagram
 | `ComputeCommonSet`    | 自分と相手のハッシュリストから共通集合を求める | `const std::vector<std::string>& myHashes`,<br>`const std::vector<std::string>& peerHashes`                               | `std::vector<std::string>` 共通ハッシュリスト       |
 | `CreateRingSignature` | リング署名を作成する                           | `const std::vector<std::string>& publicKeys`,<br>`const std::string& privateKey`,<br>`const std::string& message`         | `std::vector<uint8_t>` リング署名データ             |
 | `VerifyRingSignature` | リング署名を検証する                           | `const std::vector<std::string>& publicKeys`,<br>`const std::string& message`,<br>`const std::vector<uint8_t>& signature` | `bool` 検証成功なら`true`                           |
+
+---
+## protoのビルドコマンド
+```agsl
+protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
+```
