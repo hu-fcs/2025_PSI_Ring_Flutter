@@ -171,7 +171,7 @@ class BleScanner {
         try {
           await EcdKeysDao.instance.insertCollected(
             pubkey33: merged,
-            ts: now,
+            tms: now,
             latE6: 0,
             lonE6: 0,
           );
