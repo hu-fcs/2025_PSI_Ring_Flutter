@@ -71,8 +71,6 @@ class PsiGrpcServer {
       const <Interceptor>[],
     );
 
-
-
     await server.serve(
       address: InternetAddress.anyIPv4,
       port: port,

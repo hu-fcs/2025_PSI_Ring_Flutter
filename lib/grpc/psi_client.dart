@@ -10,24 +10,17 @@ class PsiGrpcClient {
   bool get isConnected => _stub != null;
 
   Future<void> connect(String host, int port) async {
-    print('[CLIENT] trying to connect to $host:$port');
+    print('[CLIENT] trying to connect to $host:$port');  // ★ログ必須
 
     try {
       await disconnect();
 
-      // ★ grpc 4.0.0 方式：クライアントだけ codecRegistry を持てる
       _channel = ClientChannel(
         host,
         port: port,
-        options: ChannelOptions(
+        options: const ChannelOptions(
           credentials: ChannelCredentials.insecure(),
-          idleTimeout: const Duration(seconds: 30),
-          codecRegistry: CodecRegistry(
-            codecs: [
-              GzipCodec(),
-              IdentityCodec(),
-            ],
-          ),
+          idleTimeout: Duration(seconds: 30),
         ),
       );
 
@@ -46,14 +39,7 @@ class PsiGrpcClient {
     print('[CLIENT] sending ping payload: $msg');
 
     try {
-      // ★ 呼び出し時 gzip を要求
-      final resp = await stub.ping(
-        PingReq()..msg = msg,
-        options: CallOptions(
-          compression: const GzipCodec(),
-        ),
-      );
-
+      final resp = await stub.ping(PingReq()..msg = msg);
       print('[CLIENT] got ping response: ${resp.msg}');
       return resp.msg;
     } catch (e) {
