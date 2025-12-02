@@ -66,10 +66,17 @@ class PsiGrpcServer {
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
-    final server = Server(
-      [PsiServiceImpl()],
-      const <Interceptor>[],
+    final server = Server.create(
+      services: [PsiServiceImpl()],
+      interceptors: const <Interceptor>[],
+      codecRegistry: CodecRegistry(
+        codecs: [
+          GzipCodec(),
+          IdentityCodec(),
+        ],
+      ),
     );
+
 
     await server.serve(
       address: InternetAddress.anyIPv4,

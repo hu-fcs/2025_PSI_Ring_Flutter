@@ -10,7 +10,7 @@ class PsiGrpcClient {
   bool get isConnected => _stub != null;
 
   Future<void> connect(String host, int port) async {
-    print('[CLIENT] trying to connect to $host:$port');  // ★ログ必須
+    print('[CLIENT] trying to connect to $host:$port');
 
     try {
       await disconnect();
@@ -18,9 +18,17 @@ class PsiGrpcClient {
       _channel = ClientChannel(
         host,
         port: port,
-        options: const ChannelOptions(
+        options: ChannelOptions(
           credentials: ChannelCredentials.insecure(),
-          idleTimeout: Duration(seconds: 30),
+          idleTimeout: const Duration(seconds: 30),
+
+          // ★ GzipCodec を登録（サーバーから gzip 受信できるようにする）
+          codecRegistry: CodecRegistry(
+            codecs: [
+              GzipCodec(),
+              IdentityCodec(),
+            ],
+          ),
         ),
       );
 
@@ -39,7 +47,15 @@ class PsiGrpcClient {
     print('[CLIENT] sending ping payload: $msg');
 
     try {
-      final resp = await stub.ping(PingReq()..msg = msg);
+      final resp = await stub.ping(
+        PingReq()..msg = msg,
+
+        // ★ 毎回 gzip で送信する
+        options: CallOptions(
+          compression: const GzipCodec(),
+        ),
+      );
+
       print('[CLIENT] got ping response: ${resp.msg}');
       return resp.msg;
     } catch (e) {
