@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'ble_constants.dart';
@@ -35,7 +36,7 @@ class BleScanner {
   }
 
   // --------------------------------------------------------
-  // START SCAN (flutter_blue_plus 2.0.2 compatible)
+  // START SCAN
   // --------------------------------------------------------
   Future<void> start() async {
     if (_isScanning) return;
@@ -43,15 +44,13 @@ class BleScanner {
 
     if (kDebugMode) print('BLE_SCAN: 🚀 startScan() called.');
 
-    // 念のため停止 (修正: .instance を削除)
+    // 念のため停止
     await FlutterBluePlus.stopScan();
 
-    // ★ 新 API：startScan は void (修正: .instance を削除)
     await FlutterBluePlus.startScan(
       androidScanMode: AndroidScanMode.lowLatency,
     );
 
-    // ★ 結果は scanResults から取得
     _sub = FlutterBluePlus.scanResults.listen(
           (results) {
         for (final r in results) {
@@ -72,7 +71,6 @@ class BleScanner {
   Future<void> stop() async {
     if (!_isScanning) return;
 
-    // (修正: .instance を削除)
     await FlutterBluePlus.stopScan();
 
     await _sub?.cancel();
@@ -94,8 +92,6 @@ class BleScanner {
   // --------------------------------------------------------
   void _onDiscover(ScanResult r) async {
     final adv = r.advertisementData;
-    // 最新版では remoteId.str で正しいですが、
-    // もし古いバージョンを使っている場合は r.device.id.id になる可能性があります
     final deviceId = r.device.remoteId.str;
 
     if (!adv.manufacturerData.containsKey(_companyId)) return;
@@ -156,6 +152,9 @@ class BleScanner {
       st.back16 = body16;
     }
 
+    // ------------------------------
+    // 両方のパーツが揃った場合
+    // ------------------------------
     if (st.front16 != null && st.back16 != null) {
       final merged = Uint8List.fromList([
         0x02 | (st.yParity & 0x01),
@@ -168,12 +167,33 @@ class BleScanner {
       final calculatedHash = _getKeyHashId(merged);
 
       if (valid && listEquals(receivedHash, calculatedHash)) {
+        // ------------------------------
+        // 🔥 ここで GPS 取得
+        // ------------------------------
+        int latE6 = 0;
+        int lonE6 = 0;
+
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+
+          latE6 = (pos.latitude * 1e6).round();
+          lonE6 = (pos.longitude * 1e6).round();
+        } catch (e) {
+          // 位置情報が許可されていない or GPS OFF でも問題なし
+          if (kDebugMode) print("GPS unavailable: $e");
+        }
+
+        // ------------------------------
+        // DB 保存（GPS 付き）
+        // ------------------------------
         try {
           await EcdKeysDao.instance.insertCollected(
             pubkey33: merged,
             tms: now,
-            latE6: 0,
-            lonE6: 0,
+            latE6: latE6,
+            lonE6: lonE6,
           );
         } catch (_) {}
       }
@@ -184,6 +204,9 @@ class BleScanner {
     _gcSweep();
   }
 
+  // --------------------------------------------------------
+  // GC SWEEP
+  // --------------------------------------------------------
   void _gcSweep() {
     final now = DateTime.now().millisecondsSinceEpoch;
     while (_queue.isNotEmpty) {
