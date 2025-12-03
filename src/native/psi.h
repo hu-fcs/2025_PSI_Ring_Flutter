@@ -11,77 +11,60 @@
 #endif
 
 // --- 定数定義 ---
-#define HASH_LEN 32
-#define PUB_KEY_LEN 33 // Compressed format: 0x02/0x03 + 32-byte X
+#define PUB_KEY_LEN 33 // 圧縮形式公開鍵 (0x02/0x03 + 32-byte X)
+#define PRIV_KEY_LEN 32 // 秘密スカラー長 (256ビット)
 
-// --- PSIコンテキスト管理 ---
-
-// PSI計算で使われる各種リソースを管理する不透明な構造体ポインタ
-typedef struct PsiContext PsiContext;
+// --- PSIリソース管理 ---
 
 /**
- * @brief PSI計算用のコンテキストを新規作成する。
- * @return 成功した場合はPsiContextへのポインタ、失敗した場合はNULL。
- */
-EXPORT PsiContext* psi_context_new();
-
-/**
- * @brief psi_context_newで作成したコンテキストを解放する。
- * @param ctx 解放するPsiContextのポインタ。
- */
-EXPORT void psi_context_free(PsiContext* ctx);
-
-/**
- * @brief コンテキストから内部で生成された法（modulus）を取得する。
- * @param ctx PsiContextのポインタ。
- * @param out_modulus_32b 出力: 32バイトの法の値を格納するバッファ。
+ * @brief PSI計算に必要なECCリソース（曲線の情報など）を初期化する。
+ * @note グローバルに設定されるため、PSI関数を使う前に一度だけ呼び出す必要がある。
  * @return 成功した場合は1、失敗した場合は0。
  */
-EXPORT int psi_context_get_modulus(PsiContext* ctx, uint8_t* out_modulus_32b);
+EXPORT int psi_init();
 
 /**
- * @brief 外部から法（modulus）を設定する。
- * @param ctx PsiContextのポインタ。
- * @param modulus_32b 入力: 設定する32バイトの法の値。
- * @return 成功した場合は1、失敗した場合は0。
+ * @brief psi_initで作成したリソースを解放する。
  */
-EXPORT int psi_context_set_modulus(PsiContext* ctx, const uint8_t* modulus_32b);
+EXPORT void psi_cleanup();
 
 
-// --- PSI関連関数 ---
+// --- PSI関連関数 (ECC-PSIロジック) ---
 
 /**
- * @brief 公開鍵のリストをハッシュ化し、指定された秘密の値で暗号化する。
- * @param ctx PsiContextのポインタ。
+ * @brief 公開鍵のリストを秘密の値で暗号化/再暗号化する。(ECC: P -> aP)
  * @param pub_keys 入力: 圧縮形式(33B)の公開鍵のリスト。 (count * PUB_KEY_LEN) バイト。
  * @param count 入力: 公開鍵の数。
- * @param secret_32b 入力: 暗号化に用いる32バイトの秘密の値。
- * @param out_encrypted_hashes 出力: 暗号化されたハッシュのリストを格納するバッファ。(count * HASH_LEN) バイト。
+ * @param secret_32b 入力: 暗号化に用いる32バイトの秘密の値（スカラー）。
+ * @param out_encrypted_keys 出力: 暗号化された公開鍵のリストを格納するバッファ。(count * PUB_KEY_LEN) バイト。
  * @return 成功した場合は1、失敗した場合は0。
  */
-EXPORT int hash_and_encrypt_pubkey_set(
-        PsiContext* ctx,
+EXPORT int ecc_encrypt_set(
         const uint8_t* pub_keys,
         int count,
         const uint8_t* secret_32b,
-        uint8_t* out_encrypted_hashes
+        uint8_t* out_encrypted_keys
 );
 
 /**
- * @brief ハッシュ化された値のリストを、指定された秘密の値でさらに暗号化する。
- * @param ctx PsiContextのポインタ。
- * @param input_hashes 入力: ハッシュのリスト。(count * HASH_LEN) バイト。
- * @param count 入力: ハッシュの数。
- * @param secret_32b 入力: 暗号化に用いる32バイトの秘密の値。
- * @param out_encrypted_hashes 出力: 再暗号化されたハッシュのリストを格納するバッファ。(count * HASH_LEN) バイト。
+ * @brief 二重暗号化された公開鍵リストを比較し、共通集合に対応する元の公開鍵を復元する。
+ * @param original_keys 入力: 自分の元の公開鍵リスト P。(count_a * 33B)
+ * @param my_double_set 入力: 戻ってきた二重暗号化リスト abP。(count_a * 33B)
+ * @param remote_double_set 入力: 相手から受け取った二重暗号化リスト abQ。(count_b * 33B)
+ * @param count_a 入力: 自分のリストの要素数。
+ * @param count_b 入力: 相手のリストの要素数。
+ * @param result_keys 出力: 共通集合に対応する元の公開鍵 P のリスト。(最大 count_a * 33B)
+ * @param result_count 出力: 共通集合の要素数。
  * @return 成功した場合は1、失敗した場合は0。
  */
-EXPORT int encrypt_hash_set(
-        PsiContext* ctx,
-        const uint8_t* input_hashes,
-        int count,
-        const uint8_t* secret_32b,
-        uint8_t* out_encrypted_hashes
+EXPORT int ecc_intersect_sets(
+        const uint8_t* original_keys,
+        const uint8_t* my_double_set,
+        const uint8_t* remote_double_set,
+        int count_a,
+        int count_b,
+        uint8_t* result_keys,
+        int* result_count
 );
 
 #endif // PSI_H
