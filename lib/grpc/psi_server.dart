@@ -1,5 +1,5 @@
+// psi_server.dart
 import 'dart:io';
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
@@ -9,50 +9,54 @@ import '../key_management_service.dart';
 class PsiServiceImpl extends PsiServiceBase {
   final KeyManagementService _keyService = KeyManagementService();
 
-  String _bytesToHex(Uint8List bytes) =>
+  // デバッグログ用: バイト列をHex文字列に変換
+  String _bytesToHex(List<int> bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
-    print('[SERVER] ping() called');   // ★必須ログ
+    // Pingは純粋な疎通確認用に戻します
+    print('[SERVER] ping() called');
     final msg = request.msg;
     print('[gRPC Server] Ping received: $msg');
 
-    try {
-      final Map<String, dynamic> reqJson = jsonDecode(msg);
+    return PingResp()..msg = 'pong: $msg';
+  }
 
-      if (reqJson['type'] == 'key_sync') {
-        final List<dynamic> clientKeys = (reqJson['keys'] as List?) ?? const [];
-        print('[gRPC Server] 🔑 Received ${clientKeys.length} keys from client');
+  // ★ 新規追加: 鍵交換専用RPCの実装
+  @override
+  Future<KeyExchangeResp> exchangeKeys(ServiceCall call, KeyExchangeReq request) async {
+    print('[SERVER] exchangeKeys() called');
 
-        for (var i = 0; i < clientKeys.length; i++) {
-          print('[gRPC Server]   client key[$i]: ${clientKeys[i]}');
-        }
+    // 1. クライアントから受信した鍵リスト (List<List<int>>)
+    final clientKeys = request.keys;
+    print('[gRPC Server] 🔑 Received ${clientKeys.length} keys from client');
 
-        // サーバ側の鍵を取得
-        final generated = await _keyService.getAllGeneratedPublicKeys();
-        final collected = await _keyService.getAllCollectedPublicKeys();
-        final all = <Uint8List>[...generated, ...collected];
-
-        final serverKeys = all.map(_bytesToHex).toList();
-        print('[gRPC Server] 🔑 Sending ${serverKeys.length} keys back to client');
-
-        for (var i = 0; i < serverKeys.length; i++) {
-          print('[gRPC Server]   server key[$i]: ${serverKeys[i]}');
-        }
-
-        final respJson = jsonEncode({
-          'type': 'key_sync_resp',
-          'keys': serverKeys,
-        });
-
-        return PingResp()..msg = respJson;
-      }
-    } catch (e) {
-      print('[gRPC Server] JSON decode error: $e');
+    // ログ出力 (数が多い場合は最初の数件のみ表示するなど調整してください)
+    for (var i = 0; i < clientKeys.length; i++) {
+      // 全て出すと多い場合は if (i < 5) 等で制限
+      print('[gRPC Server]   client key[$i]: ${_bytesToHex(clientKeys[i])}');
     }
 
-    return PingResp()..msg = 'pong: $msg';
+    // 2. サーバ側の鍵を取得
+    // KeyManagementServiceは Uint8List のリストを返すと想定
+    final generated = await _keyService.getAllGeneratedPublicKeys();
+    final collected = await _keyService.getAllCollectedPublicKeys();
+
+    // 3. リストを結合
+    // protobufの repeated bytes は Dartでは List<List<int>> にマッピングされます
+    // Uint8List は List<int> を実装しているため、そのまま格納可能です
+    final allServerKeys = <List<int>>[...generated, ...collected];
+
+    print('[gRPC Server] 🔑 Sending ${allServerKeys.length} keys back to client');
+
+    // ログ出力
+    for (var i = 0; i < allServerKeys.length; i++) {
+      print('[gRPC Server]   server key[$i]: ${_bytesToHex(allServerKeys[i])}');
+    }
+
+    // 4. レスポンスを返却
+    return KeyExchangeResp()..keys.addAll(allServerKeys);
   }
 }
 
@@ -76,7 +80,6 @@ class PsiGrpcServer {
         ],
       ),
     );
-
 
     await server.serve(
       address: InternetAddress.anyIPv4,
