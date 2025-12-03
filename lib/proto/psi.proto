@@ -1,6 +1,7 @@
 syntax = "proto3";
 package psi;
 
+// 疎通確認用
 message PingReq {
   string msg = 1;
 }
@@ -9,15 +10,23 @@ message PingResp {
   string msg = 1;
 }
 
+// ECC-PSI 用の鍵交換メッセージ
 message KeyExchangeReq {
-  repeated bytes keys = 1;
+  // Clientが暗号化した鍵セット (b * Q)
+  repeated bytes enc_keys = 1;
 }
 
 message KeyExchangeResp {
-  repeated bytes keys = 1;
+  // Serverが暗号化した鍵セット (a * P)
+  repeated bytes server_enc_keys = 1;
+
+  // Serverが再暗号化したClient鍵セット (a * b * Q)
+  repeated bytes client_reenc_keys = 2;
 }
 
 service PsiService {
   rpc Ping (PingReq) returns (PingResp);
+
+  // 1回のRPCで相互の暗号化鍵を交換する
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
 }

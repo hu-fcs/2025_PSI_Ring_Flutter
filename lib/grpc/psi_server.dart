@@ -1,65 +1,93 @@
-// psi_server.dart
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
-import '../key_management_service.dart';
+import '../native_key_service.dart'; // 統合されたサービスをimport
 
+/// ECC-PSI プロトコルを実装する gRPC サービス
 class PsiServiceImpl extends PsiServiceBase {
-  final KeyManagementService _keyService = KeyManagementService();
+  // Cライブラリへのアクセスポイント（統合版サービス）
+  final NativeKeyService _keyService = NativeKeyService();
+
+  // サーバー側の鍵と秘密情報（メモリ上で保持）
+  late List<Uint8List> _myKeys;     // 元の公開鍵リスト P (Server Keys)
+  late Uint8List _mySecret;         // 秘密スカラー a (Secret Scalar)
+  late List<Uint8List> _myEncKeys;  // 暗号化済み鍵リスト EncA = a * P
+
+  PsiServiceImpl() {
+    _initServerKeys();
+  }
+
+  /// サーバー起動時に鍵を生成・準備する
+  void _initServerKeys() {
+    print('[SERVER] Initializing Server Keys (ECC)...');
+
+    // 1. 秘密スカラー 'a' の生成
+    _mySecret = _keyService.generateRandomSecret();
+
+    // 2. 公開鍵リスト 'P' の生成
+    // デモ用に10個生成し、ランダムな位置に「本物の鍵」を配置する
+    int realIdx = Random().nextInt(10);
+    // メソッド名を generateKeysForPsi に変更 (NativeKeyServiceの実装に合わせる)
+    _myKeys = _keyService.generateKeysForPsi(10, realIdx);
+
+    print('[SERVER] Generated 10 keys. Real key at index $realIdx');
+    // デバッグ用（先頭バイトのみ表示など簡略化しても良い）
+    // print('[SERVER] Real Key (Hex): ${_bytesToHex(_myKeys[realIdx])}');
+
+    // 3. 事前暗号化: EncA = a * P
+    // クライアントが接続してきたらすぐに渡せるように準備しておく
+    _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
+
+    print('[SERVER] Pre-encrypted keys with secret scalar "a". Ready to exchange.');
+  }
 
   // デバッグログ用: バイト列をHex文字列に変換
   String _bytesToHex(List<int> bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
+  /// 疎通確認用
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
-    // Pingは純粋な疎通確認用に戻します
-    print('[SERVER] ping() called');
-    final msg = request.msg;
-    print('[gRPC Server] Ping received: $msg');
-
-    return PingResp()..msg = 'pong: $msg';
+    print('[SERVER] ping received: ${request.msg}');
+    return PingResp()..msg = 'pong: ${request.msg}';
   }
 
-  // ★ 新規追加: 鍵交換専用RPCの実装
+  /// 鍵交換 RPC (ECC-PSI)
+  /// Clientから b*Q を受け取り、a*P と a*b*Q を返す
   @override
   Future<KeyExchangeResp> exchangeKeys(ServiceCall call, KeyExchangeReq request) async {
-    print('[SERVER] exchangeKeys() called');
+    print('\n[SERVER] === exchangeKeys() request received ===');
 
-    // 1. クライアントから受信した鍵リスト (List<List<int>>)
-    final clientKeys = request.keys;
-    print('[gRPC Server] 🔑 Received ${clientKeys.length} keys from client');
+    // 1. クライアントから受信した暗号化鍵セット (EncB = b * Q)
+    final clientEncKeys = request.encKeys;
+    print('[SERVER] 📥 Received ${clientEncKeys.length} encrypted keys (bQ) from client.');
 
-    // ログ出力 (数が多い場合は最初の数件のみ表示するなど調整してください)
-    for (var i = 0; i < clientKeys.length; i++) {
-      // 全て出すと多い場合は if (i < 5) 等で制限
-      print('[gRPC Server]   client key[$i]: ${_bytesToHex(clientKeys[i])}');
-    }
+    // ProtobufのList<int>をUint8Listに変換
+    final List<Uint8List> encB = clientEncKeys.map((e) => Uint8List.fromList(e)).toList();
 
-    // 2. サーバ側の鍵を取得
-    // KeyManagementServiceは Uint8List のリストを返すと想定
-    final generated = await _keyService.getAllGeneratedPublicKeys();
-    final collected = await _keyService.getAllCollectedPublicKeys();
+    // 2. サーバー側で再暗号化: DoubleA = a * (b * Q) = abQ
+    // 自分の秘密スカラー 'a' を掛ける
+    final doubleA = _keyService.encryptSet(encB, _mySecret);
+    print('[SERVER] 🔒 Re-encrypted client keys (bQ -> abQ) using secret "a".');
 
-    // 3. リストを結合
-    // protobufの repeated bytes は Dartでは List<List<int>> にマッピングされます
-    // Uint8List は List<int> を実装しているため、そのまま格納可能です
-    final allServerKeys = <List<int>>[...generated, ...collected];
+    // 3. レスポンスの作成
+    // - serverEncKeys:   EncA (a * P) ... サーバーが自分の鍵を暗号化したもの
+    // - clientReencKeys: DoubleA (abQ) ... クライアントの鍵をさらに暗号化したもの
+    final resp = KeyExchangeResp()
+      ..serverEncKeys.addAll(_myEncKeys)
+      ..clientReencKeys.addAll(doubleA);
 
-    print('[gRPC Server] 🔑 Sending ${allServerKeys.length} keys back to client');
+    print('[SERVER] 📤 Sending EncA (aP) and DoubleA (abQ) back to client.');
+    print('[SERVER] === exchangeKeys() completed ===\n');
 
-    // ログ出力
-    for (var i = 0; i < allServerKeys.length; i++) {
-      print('[gRPC Server]   server key[$i]: ${_bytesToHex(allServerKeys[i])}');
-    }
-
-    // 4. レスポンスを返却
-    return KeyExchangeResp()..keys.addAll(allServerKeys);
+    return resp;
   }
 }
 
+/// gRPCサーバーの起動管理クラス
 class PsiGrpcServer {
   Server? _server;
   int? _port;
@@ -67,6 +95,7 @@ class PsiGrpcServer {
   bool get isRunning => _server != null;
   int? get port => _port;
 
+  /// サーバーを開始する
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
@@ -89,10 +118,11 @@ class PsiGrpcServer {
     _server = server;
     _port = server.port;
 
-    print('[gRPC Server] started on 0.0.0.0:${_port}');
+    print('[gRPC Server] listening on 0.0.0.0:${_port}');
     return _port!;
   }
 
+  /// サーバーを停止する
   Future<void> stop() async {
     final s = _server;
     _server = null;

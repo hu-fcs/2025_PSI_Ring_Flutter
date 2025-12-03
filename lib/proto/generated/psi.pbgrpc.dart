@@ -39,6 +39,7 @@ class PsiServiceClient extends $grpc.Client {
     return $createUnaryCall(_$ping, request, options: options);
   }
 
+  /// 1回のRPCで相互の暗号化鍵を交換する
   $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
     $0.KeyExchangeReq request, {
     $grpc.CallOptions? options,

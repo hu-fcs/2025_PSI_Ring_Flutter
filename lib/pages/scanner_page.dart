@@ -29,8 +29,7 @@ class _ScannerPageState extends State<ScannerPage> {
   String? ipToConnect;
   int? portToConnect;
 
-  final MobileScannerController _scannerController =
-  MobileScannerController();
+  final MobileScannerController _scannerController = MobileScannerController();
 
   @override
   void dispose() {
@@ -52,6 +51,7 @@ class _ScannerPageState extends State<ScannerPage> {
     await _scannerController.stop();
 
     // ---- 接続確認ダイアログ ----
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -79,6 +79,7 @@ class _ScannerPageState extends State<ScannerPage> {
     }
 
     // ---- ローディング表示（確認ダイアログが完全に閉じてから表示）----
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -93,19 +94,33 @@ class _ScannerPageState extends State<ScannerPage> {
       await _client.connect(ip, port);
       print('[CLIENT] connect() success');
 
+      // 1. 自分の鍵を収集
       final generated = await _keyService.getAllGeneratedPublicKeys();
       final collected = await _keyService.getAllCollectedPublicKeys();
       final all = [...generated, ...collected];
+      // Uint8List -> HexString
       final myKeysHex = all.map(_bytesToHex).toList();
 
-      print('🔑 [Client] sending ${myKeysHex.length} keys to $ip:$port');
+      print('\n[Scanner] 🔑 Sending ${myKeysHex.length} keys (compressed 33B) to $ip:$port');
       for (var i = 0; i < myKeysHex.length; i++) {
-        print('🔑 [Client]   my key[$i]: ${myKeysHex[i]}');
+        print('   my key[$i]: ${myKeysHex[i]}');
       }
 
-      final remoteKeys = await _client.exchangeKeys(myKeysHex);
+      // 2. ECC-PSI 実行 (暗号化通信 -> 共通集合特定)
+      // 戻り値は「共通鍵のリスト」
+      final commonKeys = await _client.exchangeKeys(myKeysHex);
 
-      print('📥 [Client] received ${remoteKeys.length} keys from server');
+      print('\n[Scanner] ✅ PSI Complete!');
+      print('         Found ${commonKeys.length} common keys.');
+
+      if (commonKeys.isNotEmpty) {
+        print('💍 [Intersection Results]');
+        for (var i = 0; i < commonKeys.length; i++) {
+          print('   common key[$i]: ${commonKeys[i]}');
+        }
+      } else {
+        print('❌ No common keys found.');
+      }
 
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
@@ -113,20 +128,25 @@ class _ScannerPageState extends State<ScannerPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '鍵交換成功: 送信 ${myKeysHex.length} 件 / 受信 ${remoteKeys.length} 件',
+              'PSI完了: 共通鍵 ${commonKeys.length} 件を発見しました',
             ),
+            backgroundColor: commonKeys.isNotEmpty ? Colors.green : Colors.grey,
           ),
         );
 
-        Navigator.pop(context, '鍵交換成功');
+        // 結果を戻り値として返す場合
+        Navigator.pop(context, 'PSI完了: ${commonKeys.length}件一致');
       }
     } catch (e) {
-      print('[CLIENT] exchangeKeys ERROR: $e');
+      print('[CLIENT] PSI/Exchange ERROR: $e');
 
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('接続または鍵交換に失敗: $e')),
+          SnackBar(
+            content: Text('接続またはPSI実行に失敗しました: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
 
@@ -167,6 +187,8 @@ class _ScannerPageState extends State<ScannerPage> {
       _isProcessingScan = true;
 
       try {
+        // カメラ停止などは _confirmAndConnect 内でも呼んでいるが、
+        // 念のためここでも呼んで重複検出を防ぐ
         await _scannerController.stop();
 
         final map = jsonDecode(raw) as Map<String, dynamic>;
@@ -179,9 +201,11 @@ class _ScannerPageState extends State<ScannerPage> {
         await _confirmAndConnect(ip, port);
       } catch (e) {
         print('QR decode error: $e');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('QRコードの形式が不正です')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('QRコードの形式が不正です')),
+          );
+        }
 
         _isProcessingScan = false;
         _scannerController.start();

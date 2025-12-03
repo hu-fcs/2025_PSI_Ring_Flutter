@@ -16,6 +16,7 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
+/// 疎通確認用
 class PingReq extends $pb.GeneratedMessage {
   factory PingReq({
     $core.String? msg,
@@ -122,12 +123,13 @@ class PingResp extends $pb.GeneratedMessage {
   void clearMsg() => $_clearField(1);
 }
 
+/// ECC-PSI 用の鍵交換メッセージ
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
-    $core.Iterable<$core.List<$core.int>>? keys,
+    $core.Iterable<$core.List<$core.int>>? encKeys,
   }) {
     final result = create();
-    if (keys != null) result.keys.addAll(keys);
+    if (encKeys != null) result.encKeys.addAll(encKeys);
     return result;
   }
 
@@ -145,7 +147,7 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
-        1, _omitFieldNames ? '' : 'keys', $pb.PbFieldType.PY)
+        1, _omitFieldNames ? '' : 'encKeys', $pb.PbFieldType.PY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -167,16 +169,19 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeReq>(create);
   static KeyExchangeReq? _defaultInstance;
 
+  /// Clientが暗号化した鍵セット (b * Q)
   @$pb.TagNumber(1)
-  $pb.PbList<$core.List<$core.int>> get keys => $_getList(0);
+  $pb.PbList<$core.List<$core.int>> get encKeys => $_getList(0);
 }
 
 class KeyExchangeResp extends $pb.GeneratedMessage {
   factory KeyExchangeResp({
-    $core.Iterable<$core.List<$core.int>>? keys,
+    $core.Iterable<$core.List<$core.int>>? serverEncKeys,
+    $core.Iterable<$core.List<$core.int>>? clientReencKeys,
   }) {
     final result = create();
-    if (keys != null) result.keys.addAll(keys);
+    if (serverEncKeys != null) result.serverEncKeys.addAll(serverEncKeys);
+    if (clientReencKeys != null) result.clientReencKeys.addAll(clientReencKeys);
     return result;
   }
 
@@ -194,7 +199,9 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
-        1, _omitFieldNames ? '' : 'keys', $pb.PbFieldType.PY)
+        1, _omitFieldNames ? '' : 'serverEncKeys', $pb.PbFieldType.PY)
+    ..p<$core.List<$core.int>>(
+        2, _omitFieldNames ? '' : 'clientReencKeys', $pb.PbFieldType.PY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -216,8 +223,13 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeResp>(create);
   static KeyExchangeResp? _defaultInstance;
 
+  /// Serverが暗号化した鍵セット (a * P)
   @$pb.TagNumber(1)
-  $pb.PbList<$core.List<$core.int>> get keys => $_getList(0);
+  $pb.PbList<$core.List<$core.int>> get serverEncKeys => $_getList(0);
+
+  /// Serverが再暗号化したClient鍵セット (a * b * Q)
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
 }
 
 const $core.bool _omitFieldNames =
