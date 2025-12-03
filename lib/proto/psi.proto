@@ -2,13 +2,22 @@ syntax = "proto3";
 package psi;
 
 message PingReq {
-string msg = 1; // "hello"
+  string msg = 1;
 }
 
 message PingResp {
-string msg = 1; // "pong: hello"
+  string msg = 1;
+}
+
+message KeyExchangeReq {
+  repeated bytes keys = 1;
+}
+
+message KeyExchangeResp {
+  repeated bytes keys = 1;
 }
 
 service PsiService {
-rpc Ping (PingReq) returns (PingResp);
+  rpc Ping (PingReq) returns (PingResp);
+  rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
 }

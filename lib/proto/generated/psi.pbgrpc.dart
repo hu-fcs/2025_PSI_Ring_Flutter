@@ -39,12 +39,24 @@ class PsiServiceClient extends $grpc.Client {
     return $createUnaryCall(_$ping, request, options: options);
   }
 
+  $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
+    $0.KeyExchangeReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$exchangeKeys, request, options: options);
+  }
+
   // method descriptors
 
   static final _$ping = $grpc.ClientMethod<$0.PingReq, $0.PingResp>(
       '/psi.PsiService/Ping',
       ($0.PingReq value) => value.writeToBuffer(),
       $0.PingResp.fromBuffer);
+  static final _$exchangeKeys =
+      $grpc.ClientMethod<$0.KeyExchangeReq, $0.KeyExchangeResp>(
+          '/psi.PsiService/ExchangeKeys',
+          ($0.KeyExchangeReq value) => value.writeToBuffer(),
+          $0.KeyExchangeResp.fromBuffer);
 }
 
 @$pb.GrpcServiceName('psi.PsiService')
@@ -59,6 +71,13 @@ abstract class PsiServiceBase extends $grpc.Service {
         false,
         ($core.List<$core.int> value) => $0.PingReq.fromBuffer(value),
         ($0.PingResp value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.KeyExchangeReq, $0.KeyExchangeResp>(
+        'ExchangeKeys',
+        exchangeKeys_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) => $0.KeyExchangeReq.fromBuffer(value),
+        ($0.KeyExchangeResp value) => value.writeToBuffer()));
   }
 
   $async.Future<$0.PingResp> ping_Pre(
@@ -67,4 +86,12 @@ abstract class PsiServiceBase extends $grpc.Service {
   }
 
   $async.Future<$0.PingResp> ping($grpc.ServiceCall call, $0.PingReq request);
+
+  $async.Future<$0.KeyExchangeResp> exchangeKeys_Pre($grpc.ServiceCall $call,
+      $async.Future<$0.KeyExchangeReq> $request) async {
+    return exchangeKeys($call, await $request);
+  }
+
+  $async.Future<$0.KeyExchangeResp> exchangeKeys(
+      $grpc.ServiceCall call, $0.KeyExchangeReq request);
 }

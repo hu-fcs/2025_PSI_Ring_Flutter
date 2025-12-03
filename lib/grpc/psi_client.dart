@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
@@ -9,8 +9,22 @@ class PsiGrpcClient {
 
   bool get isConnected => _stub != null;
 
+  // Hex文字列 -> List<int> (Bytes) 変換ヘルパー
+  List<int> _hexToBytes(String hex) {
+    final bytes = <int>[];
+    for (var i = 0; i < hex.length; i += 2) {
+      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    return bytes;
+  }
+
+  // List<int> (Bytes) -> Hex文字列 変換ヘルパー
+  String _bytesToHex(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
   Future<void> connect(String host, int port) async {
-    print('[CLIENT] trying to connect to $host:$port');
+    // 接続ログも統一感を出します
+    print('[gRPC Client] Connecting to $host:$port ...');
 
     try {
       await disconnect();
@@ -21,8 +35,6 @@ class PsiGrpcClient {
         options: ChannelOptions(
           credentials: ChannelCredentials.insecure(),
           idleTimeout: const Duration(seconds: 30),
-
-          // ★ GzipCodec を登録（サーバーから gzip 受信できるようにする）
           codecRegistry: CodecRegistry(
             codecs: [
               GzipCodec(),
@@ -33,9 +45,9 @@ class PsiGrpcClient {
       );
 
       _stub = PsiServiceClient(_channel!);
-      print('[CLIENT] connect() success');
+      print('[gRPC Client] ✅ Connected success');
     } catch (e) {
-      print('[CLIENT] connect() ERROR = $e');
+      print('[gRPC Client] ❌ Connect ERROR: $e');
       rethrow;
     }
   }
@@ -44,50 +56,58 @@ class PsiGrpcClient {
     final stub = _stub;
     if (stub == null) throw StateError('Client not connected');
 
-    print('[CLIENT] sending ping payload: $msg');
-
     try {
       final resp = await stub.ping(
         PingReq()..msg = msg,
+        options: CallOptions(
+          compression: const GzipCodec(),
+        ),
+      );
+      return resp.msg;
+    } catch (e) {
+      print('[gRPC Client] Ping ERROR: $e');
+      rethrow;
+    }
+  }
 
-        // ★ 毎回 gzip で送信する
+  // ★ サーバー側のログ形式に完全準拠
+  Future<List<String>> exchangeKeys(List<String> myKeysHex) async {
+    final stub = _stub;
+    if (stub == null) throw StateError('Client not connected');
+
+    // 1. 送信ログ（サーバーの受信ログと対になるように整形）
+    print('[gRPC Client] 🔑 Sending ${myKeysHex.length} keys to server');
+    for (var i = 0; i < myKeysHex.length; i++) {
+      print('[gRPC Client]   client key[$i]: ${myKeysHex[i]}');
+    }
+
+    try {
+      // 2. データ変換 & リクエスト作成
+      final List<List<int>> myKeysBytes = myKeysHex.map(_hexToBytes).toList();
+      final request = KeyExchangeReq()..keys.addAll(myKeysBytes);
+
+      // 3. gRPC呼び出し
+      final resp = await stub.exchangeKeys(
+        request,
         options: CallOptions(
           compression: const GzipCodec(),
         ),
       );
 
-      print('[CLIENT] got ping response: ${resp.msg}');
-      return resp.msg;
-    } catch (e) {
-      print('[CLIENT] ping() ERROR = $e');
-      rethrow;
-    }
-  }
+      // 4. 受信ログ（サーバーの送信ログと対になるように整形）
+      print('[gRPC Client] 🔑 Received ${resp.keys.length} keys from server');
 
-  Future<List<String>> exchangeKeys(List<String> myKeysHex) async {
-    if (_stub == null) throw StateError('Client not connected');
-
-    final payload = jsonEncode({
-      'type': 'key_sync',
-      'keys': myKeysHex,
-    });
-
-    print('[CLIENT] exchangeKeys() sending ${myKeysHex.length} keys');
-
-    try {
-      final resp = await ping(payload);
-
-      final json = jsonDecode(resp);
-      if (json['type'] == 'key_sync_resp') {
-        final list = (json['keys'] as List?) ?? const [];
-        print('[CLIENT] received ${list.length} keys from server');
-        return List<String>.from(list);
+      final List<String> serverKeysHex = [];
+      for (var i = 0; i < resp.keys.length; i++) {
+        final hexStr = _bytesToHex(resp.keys[i]);
+        serverKeysHex.add(hexStr);
+        print('[gRPC Client]   server key[$i]: $hexStr');
       }
 
-      print('[CLIENT] unexpected response: $resp');
-      return [resp];
+      return serverKeysHex;
+
     } catch (e) {
-      print('[CLIENT] exchangeKeys ERROR = $e');
+      print('[gRPC Client] ❌ exchangeKeys ERROR: $e');
       rethrow;
     }
   }

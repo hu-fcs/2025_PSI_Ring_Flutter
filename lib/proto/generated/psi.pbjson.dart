@@ -38,3 +38,27 @@ const PingResp$json = {
 /// Descriptor for `PingResp`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List pingRespDescriptor =
     $convert.base64Decode('CghQaW5nUmVzcBIQCgNtc2cYASABKAlSA21zZw==');
+
+@$core.Deprecated('Use keyExchangeReqDescriptor instead')
+const KeyExchangeReq$json = {
+  '1': 'KeyExchangeReq',
+  '2': [
+    {'1': 'keys', '3': 1, '4': 3, '5': 12, '10': 'keys'},
+  ],
+};
+
+/// Descriptor for `KeyExchangeReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List keyExchangeReqDescriptor =
+    $convert.base64Decode('Cg5LZXlFeGNoYW5nZVJlcRISCgRrZXlzGAEgAygMUgRrZXlz');
+
+@$core.Deprecated('Use keyExchangeRespDescriptor instead')
+const KeyExchangeResp$json = {
+  '1': 'KeyExchangeResp',
+  '2': [
+    {'1': 'keys', '3': 1, '4': 3, '5': 12, '10': 'keys'},
+  ],
+};
+
+/// Descriptor for `KeyExchangeResp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List keyExchangeRespDescriptor = $convert
+    .base64Decode('Cg9LZXlFeGNoYW5nZVJlc3ASEgoEa2V5cxgBIAMoDFIEa2V5cw==');
