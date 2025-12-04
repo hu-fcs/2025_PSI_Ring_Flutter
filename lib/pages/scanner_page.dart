@@ -118,7 +118,7 @@ class _ScannerPageState extends State<ScannerPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('PSI完了: 共通鍵 ${commonKeys.length} 件を発見しました'),
-            backgroundColor: commonKeys.isNotEmpty ? Colors.green : Colors.grey,
+            backgroundColor: commonKeys.isNotEmpty ? Colors.green : Colors.black,
           ),
         );
 
