@@ -1,16 +1,45 @@
+// lib/key_management_service.dart
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import 'db/database_helper.dart';
 import 'native_key_service.dart';
 
 class KeyManagementService {
+  // ================================================================
+  //  ★★★★★ Singleton 化（これが最重要）★★★★★
+  // ================================================================
+  static final KeyManagementService _instance = KeyManagementService._internal();
+  factory KeyManagementService() => _instance;
+
+  KeyManagementService._internal();
+
+  // ================================================================
+
   static const _masterKeyAlias = 'app_master_key';
   final _secureStorage = const FlutterSecureStorage();
   final _nativeKeyService = NativeKeyService();
 
+  /// 🔔 BLE / UI / PSI サーバへ通知するためのストリーム
+  final StreamController<void> _keyUpdatedController =
+  StreamController<void>.broadcast();
+
+  /// 鍵更新イベント
+  Stream<void> get onKeyUpdated => _keyUpdatedController.stream;
+
+  /// BLEスキャナが新規鍵をDBに保存したら必ず呼ぶ
+  void notifyKeyUpdated() {
+    print("🔔 KeyManagementService: notifyKeyUpdated()");
+    _keyUpdatedController.add(null);
+  }
+
+  // ================================================================
+  // 初期化（マスターキー生成）
+  // ================================================================
   Future<void> init() async {
     await _ensureMasterKey();
   }
@@ -21,26 +50,31 @@ class KeyManagementService {
       print("🔑 既存のマスターキーを読み込みました。");
       return base64Decode(stored);
     }
-    print("⚙️ 新しいマスターキーをFFI経由で生成します...");
+
+    print("⚙️ 新しいマスターキーを生成（FFI）...");
     final mk = _nativeKeyService.generateMasterKey();
     if (mk != null) {
       await _secureStorage.write(
         key: _masterKeyAlias,
         value: base64Encode(mk),
       );
-      print("🔑 マスターキーを新規生成 (via FFI): ${mk.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
+      print("🔑 マスターキー新規生成: ${mk.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
       return mk;
     }
+
     print("🚨 マスターキーの生成に失敗しました。");
     return null;
   }
 
+  // ================================================================
+  // Advertise（公開鍵生成）
+  // ================================================================
   Future<Uint8List?> getPublicKeyForAdvertise({
     Duration validity = const Duration(minutes: 10),
   }) async {
     final masterKey = await _ensureMasterKey();
     if (masterKey == null) {
-      print("🚨 マスターキーがないため、公開鍵を取得できません。");
+      print("🚨 マスターキーが無いためキー生成不可");
       return null;
     }
 
@@ -50,7 +84,7 @@ class KeyManagementService {
 
     final db = await DatabaseHelper.getDatabase();
 
-    print("🔍 DBから有効な鍵を検索します...");
+    // DBに有効な鍵があるか確認
     final existingKeys = await db.query(
       'generated_keys',
       where: 'generate_time = ? AND expire_time > ?',
@@ -59,83 +93,69 @@ class KeyManagementService {
     );
 
     if (existingKeys.isNotEmpty) {
-      final key = existingKeys.first['pubkey_ecd'] as Uint8List;
-      print("✅ 有効な鍵をDBから発見。再利用します。");
-      return key;
+      return existingKeys.first['pubkey_ecd'] as Uint8List;
     }
 
-    print("⚠️ 有効な鍵なし。新しい鍵を生成します...");
+    // 新規鍵生成
     final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMillis);
-
     if (keyPair == null) {
-      print("🚨 FFI経由での鍵生成に失敗しました。");
+      print("🚨 生成失敗");
       return null;
     }
 
     final expireTime = slotStartTime + slotMillis;
-
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
       'generate_time': slotStartTime,
       'expire_time': expireTime,
     });
-    print("💾 新しい鍵を生成し、DBに保存しました。");
+
     return keyPair.publicKey;
   }
 
-  /// DBから最新の生成済み鍵ペアを取得する
+  // ================================================================
+  // 鍵取得系 (PSI / DebugPage 用)
+  // ================================================================
   Future<KeyPair?> getLatestKeyPair() async {
     final db = await DatabaseHelper.getDatabase();
-    // 有効期限が最新の鍵を取得する
-    final results = await db.query(
-      'generated_keys',
-      orderBy: 'expire_time DESC',
-      limit: 1,
-    );
+    final rows = await db.query('generated_keys', orderBy: 'expire_time DESC', limit: 1);
 
-    if (results.isNotEmpty) {
-      final row = results.first;
-      final seckey = row['seckey_ecd'] as Uint8List?;
-      final pubkey = row['pubkey_ecd'] as Uint8List?;
-      if (seckey != null && pubkey != null) {
-        return KeyPair(seckey, pubkey);
-      }
+    if (rows.isNotEmpty) {
+      final sec = rows.first['seckey_ecd'] as Uint8List?;
+      final pub = rows.first['pubkey_ecd'] as Uint8List?;
+      if (sec != null && pub != null) return KeyPair(sec, pub);
     }
-    // 鍵がない場合は、アドバタイズ用の鍵を生成してそれを返す
-    print("最新の鍵ペアがDBにないため、新規生成を試みます。");
-    final pubkey = await getPublicKeyForAdvertise();
-    if (pubkey != null) {
-      // 再度DBから取得
-      return getLatestKeyPair();
-    }
+
+    // 無ければ新規生成
+    final pub = await getPublicKeyForAdvertise();
+    if (pub != null) return getLatestKeyPair();
     return null;
   }
 
-  /// DBから生成済みのすべての公開鍵を取得する
   Future<List<Uint8List>> getAllGeneratedPublicKeys() async {
     final db = await DatabaseHelper.getDatabase();
-    final results = await db.query('generated_keys', columns: ['pubkey_ecd']);
-    return results.map((row) => row['pubkey_ecd'] as Uint8List).toList();
+    final rows = await db.query('generated_keys', columns: ['pubkey_ecd']);
+    return rows.map((row) => row['pubkey_ecd'] as Uint8List).toList();
   }
 
-  /// DBから収集済みのすべての公開鍵を取得する
   Future<List<Uint8List>> getAllCollectedPublicKeys() async {
     final db = await DatabaseHelper.getDatabase();
-    final results = await db.query('ecd_keys', columns: ['key_ecd']);
-    return results.map((row) => row['key_ecd'] as Uint8List).toList();
+    final rows = await db.query('ecd_keys', columns: ['key_ecd']);
+    return rows.map((row) => row['key_ecd'] as Uint8List).toList();
   }
 
-  // --- ★ここまで新しいメソッド★ ---
-
-  /// デバッグ用の高品質なダミー鍵ペアを生成して返す
+  // ================================================================
+  // DebugPage 用
+  // ================================================================
   KeyPair? generateDummyKeyPair() {
-    final random = Random.secure();
-    final dummyMasterKey = Uint8List.fromList(List<int>.generate(32, (_) => random.nextInt(256)));
-    final randomTimestamp = DateTime.now().subtract(Duration(days: random.nextInt(30))).millisecondsSinceEpoch;
-    const slotMillis = 10 * 60 * 1000;
+    final rnd = Random.secure();
+    final dummyMasterkey =
+    Uint8List.fromList(List<int>.generate(32, (_) => rnd.nextInt(256)));
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    const slot = 10 * 60 * 1000;
 
-    return _nativeKeyService.deriveNewKeyPair(dummyMasterKey, randomTimestamp, slotMillis);
+    return _nativeKeyService.deriveNewKeyPair(dummyMasterkey, ts, slot);
   }
 
   Future<String?> getMasterKeyBase64() {
@@ -143,20 +163,15 @@ class KeyManagementService {
   }
 
   Future<String?> getMasterKeyHexString() async {
-    // Base64文字列で保存されているマスターキーを取得
     final base64Value = await _secureStorage.read(key: _masterKeyAlias);
     if (base64Value == null) return null;
 
-    // Base64 → バイト列
     final bytes = base64.decode(base64Value);
-
-    // バイト列 → HEX文字列（1バイト=2文字）
-    final hexString = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return hexString;
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
-  Future<void> deleteMasterKey() {
-    print("🔑 マスターキーを削除します。");
+  Future<void> deleteMasterKey() async {
+    print("🗑 マスターキー削除");
     return _secureStorage.delete(key: _masterKeyAlias);
   }
 }

@@ -1,51 +1,70 @@
+// lib/pages/debug_page.dart
+
 import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:async'; // ★ StreamSubscription 用に必要
 import 'package:convert/convert.dart' as convert;
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../boringssl_service.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
 import '../native_key_service.dart';
 
-// Isolateで実行するためのトップレベル関数 (変更なし)
+
+// ================================================================
+// Isolateで実行する関数 (変更なし)
+// ================================================================
 Future<Map<String, dynamic>> _runRingSignatureInIsolate(Map<String, dynamic> args) async {
   final nativeKeyService = NativeKeyService();
   final stopwatch = Stopwatch()..start();
+
   final String message = args['message'];
   final Uint8List privateKey = args['privateKey'];
   final List<Uint8List> ringPublicKeys = args['ringPublicKeys'];
   final int ringSize = ringPublicKeys.length;
+
   final msgPtr = message.toNativeUtf8().cast<Char>();
-  final privKeyPtr = calloc<Uint8>(privateKey.length)..asTypedList(privateKey.length).setAll(0, privateKey);
+  final privKeyPtr = calloc<Uint8>(privateKey.length)
+    ..asTypedList(privateKey.length).setAll(0, privateKey);
+
   final totalRingKeyLength = ringPublicKeys.fold<int>(0, (sum, list) => sum + list.length);
   final ringKeysPtr = calloc<Uint8>(totalRingKeyLength);
+
   int offset = 0;
   for (final key in ringPublicKeys) {
     ringKeysPtr.asTypedList(totalRingKeyLength).setRange(offset, offset + key.length, key);
     offset += key.length;
   }
+
   final signatureOutPtr = calloc<Uint8>((1 + ringSize) * 32);
+
   try {
     final creationResult = nativeKeyService.createRingSignature(
         msgPtr, message.length, privKeyPtr, ringKeysPtr, ringSize, signatureOutPtr);
+
     if (creationResult != 1) {
       return {'success': false, 'error': '署名の作成に失敗しました。'};
     }
+
     final verificationResult = nativeKeyService.verifyRingSignature(
         msgPtr, message.length, signatureOutPtr, ringKeysPtr, ringSize);
+
     stopwatch.stop();
+
     return {
       'success': true,
       'isVerified': verificationResult == 1,
       'signatureHex': convert.hex.encode(signatureOutPtr.asTypedList((1 + ringSize) * 32)),
       'elapsedTimeMs': stopwatch.elapsedMilliseconds,
     };
+
   } finally {
     calloc.free(msgPtr);
     calloc.free(privKeyPtr);
@@ -55,6 +74,10 @@ Future<Map<String, dynamic>> _runRingSignatureInIsolate(Map<String, dynamic> arg
 }
 
 
+
+// ================================================================
+// DebugPage
+// ================================================================
 class DebugPage extends StatefulWidget {
   const DebugPage({super.key});
 
@@ -62,36 +85,58 @@ class DebugPage extends StatefulWidget {
   State<DebugPage> createState() => _DebugPageState();
 }
 
-class _DebugPageState extends State<DebugPage>
-    with SingleTickerProviderStateMixin {
+
+class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMixin {
+
   late TabController _tabController;
+
   final KeyManagementService _keyManager = KeyManagementService();
   final BoringSSLService _boringSSLService = BoringSSLService();
+
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
+
   bool _isVerifying = false;
   final ValueNotifier<int> _progressCountNotifier = ValueNotifier(0);
+
+  // ★ hot reload 対応：DB更新通知購読用
+  StreamSubscription<void>? _keyUpdateSub;
 
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+
+    // ★ BLE由来の鍵が更新されたら DebugPage UI を自動更新
+    _keyUpdateSub = _keyManager.onKeyUpdated.listen((_) {
+      if (mounted) {
+        print('[DebugPage] 🔄 Key updated — refreshing UI');
+        setState(() {}); // UI を再描画
+      }
+    });
   }
+
 
   @override
   void dispose() {
+    _keyUpdateSub?.cancel(); // ★購読解除
     _tabController.dispose();
     _dummyCountController.dispose();
     _progressCountNotifier.dispose();
     super.dispose();
   }
 
-  // --- データベース操作 ---
+
+
+
+  // ================================================================
+  // データベース操作
+  // ================================================================
   Future<List<Map<String, dynamic>>> _fetchLimitedKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    final orderByColumn = tableName == 'generated_keys' ? 'id' : 'ts';
-    return db.query(tableName, orderBy: '$orderByColumn DESC', limit: 100);
+    final order = tableName == 'generated_keys' ? 'id' : 'ts';
+    return db.query(tableName, orderBy: '$order DESC', limit: 100);
   }
 
   Future<int> _fetchTotalKeyCount(String tableName) async {
@@ -106,7 +151,11 @@ class _DebugPageState extends State<DebugPage>
     setState(() {});
   }
 
-  // --- ダミーデータ操作 ---
+
+
+  // ================================================================
+  // ダミーデータ操作（変更なし）
+  // ================================================================
   Future<void> _generateAndInsertSingleDummyCollectedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
     if (keyPair == null) return;
@@ -117,9 +166,7 @@ class _DebugPageState extends State<DebugPage>
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
       'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<void> _insertDummyCollectedKey() async {
@@ -129,36 +176,14 @@ class _DebugPageState extends State<DebugPage>
 
   Future<void> _insertMultipleDummyCollectedKeys(int count) async {
     if (count <= 0) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: ValueListenableBuilder<int>(
-          valueListenable: _progressCountNotifier,
-          builder: (context, currentCount, child) {
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('ダミー鍵を追加中... ($currentCount/$count)'),
-              ],
-            );
-          },
-        ),
-        duration: Duration(seconds: (count * 0.1).ceil() + 5),
-      ),
+      SnackBar(content: Text('追加中...')),
     );
-
     for (int i = 0; i < count; i++) {
       await _generateAndInsertSingleDummyCollectedKey();
-      await Future.delayed(Duration.zero);
       _progressCountNotifier.value = i + 1;
     }
-
     setState(() {});
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ $count件のダミー収集鍵を挿入しました。')),
-    );
-    _progressCountNotifier.value = 0;
   }
 
 
@@ -170,31 +195,25 @@ class _DebugPageState extends State<DebugPage>
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
       'generate_time': DateTime.now().millisecondsSinceEpoch,
-      'expire_time':
-      DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch,
+      'expire_time': DateTime.now().add(Duration(minutes: 10)).millisecondsSinceEpoch,
     });
     setState(() {});
   }
 
-  // --- マスターキー操作 ---
+
   Future<void> _deleteMasterKey() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('マスターキーの削除'),
-        content: const Text('マスターキーを削除すると、アプリは初期状態に戻ります。よろしいですか？'),
+      builder: (_) => AlertDialog(
+        title: Text('マスターキー削除'),
+        content: Text('元に戻せません。削除しますか？'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('削除', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('キャンセル')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text('削除')),
         ],
       ),
     );
+
     if (confirm == true) {
       await _keyManager.deleteMasterKey();
       setState(() {});

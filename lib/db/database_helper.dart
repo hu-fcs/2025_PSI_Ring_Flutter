@@ -1,36 +1,39 @@
-import 'dart:io';
-// import 'package:flutter/services.dart' show rootBundle; // 削除 (rootBundleを使わないため)
+import 'dart:typed_data';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-// このクラスはローカルDB（SQLite）へのアクセスを提供するヘルパークラス
 class DatabaseHelper {
-  // DBファイルの保存パスを取得
-  static Future<String> _getDbPath() async {
-    final dbPath = await getDatabasesPath(); // 端末上のSQLite保存場所
-    return join(dbPath, 'my_ecd.db'); // ファイル名と結合してフルパスを返す
-  }
+  static Database? _db;
 
-  // データベースを開いてインスタンスを返す
+  // ----------------------------
+  // DB インスタンス取得
+  // ----------------------------
   static Future<Database> getDatabase() async {
-    final path = await _getDbPath();
-    // openDatabase は、ファイルが存在しない場合、
-    // 自動的に作成してから開くため、これだけでOK
-    return openDatabase(path);
+    if (_db != null) return _db!;
+
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'my_ecd.db');
+
+    _db = await openDatabase(
+      path,
+      version: 1,
+
+      // ★ 初回作成時のみテーブル作成される
+      onCreate: (Database db, int version) async {
+        await _createTables(db);
+      },
+    );
+
+    return _db!;
   }
 
-  // 初期化処理：テーブル作成などを行う
-  static Future<void> initDatabase() async {
-    final path = await _getDbPath();
-
-    // データベースを開く (この時点でファイルがなければ新規作成される)
-    final db = await openDatabase(path);
-
-    // 存在しない場合のみテーブルを作成する (IF NOT EXISTS)
-
-    // 生成された鍵（自前で生成したECD鍵）を格納するテーブル
+  // ----------------------------
+  // テーブル定義
+  // ----------------------------
+  static Future<void> _createTables(Database db) async {
+    // 生成鍵
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS generated_keys (
+      CREATE TABLE generated_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         seckey_ecd BLOB,
         pubkey_ecd BLOB,
@@ -39,9 +42,9 @@ class DatabaseHelper {
       )
     ''');
 
-    // 収集された鍵のテーブル (UNIQUE 制約付き)
+    // 収集鍵（UNIQUE）
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS ecd_keys (
+      CREATE TABLE ecd_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key_ecd BLOB NOT NULL UNIQUE,
         lat INTEGER NOT NULL,
@@ -51,17 +54,64 @@ class DatabaseHelper {
     ''');
   }
 
+  // ----------------------------
+  // 収集鍵が存在するかチェック
+  // ----------------------------
+  static Future<bool> existsCollectedKey(Uint8List key33) async {
+    final db = await getDatabase();
+    final count = Sqflite.firstIntValue(await db.rawQuery(
+      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      [key33],
+    ));
+    return (count ?? 0) > 0;
+  }
+
+  // ----------------------------
+  // 新規収集鍵 INSERT（存在しない場合のみ）
+  // ----------------------------
+  static Future<bool> insertCollectedKeyIfAbsent({
+    required Uint8List pubkey33,
+    required int tms,
+    required int latE6,
+    required int lonE6,
+  }) async {
+    final db = await getDatabase();
+
+    final exists = Sqflite.firstIntValue(await db.rawQuery(
+      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      [pubkey33],
+    ));
+
+    if ((exists ?? 0) > 0) return false;
+
+    await db.insert(
+      'ecd_keys',
+      {
+        'key_ecd': pubkey33,
+        'ts': tms ~/ 1000,
+        'lat': latE6,
+        'lon': lonE6,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    return true;
+  }
+
+
+  // ----------------------------
+  // キー合計数（任意）
+  // ----------------------------
   Future<int> getTotalKeyCount() async {
     final db = await getDatabase();
-    final generated = Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM generated_keys'),
-    ) ?? 0;
+    final generated = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM generated_keys',
+    )) ?? 0;
 
-    final collected = Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM ecd_keys'),
-    ) ?? 0;
+    final collected = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM ecd_keys',
+    )) ?? 0;
 
     return generated + collected;
   }
-
 }
