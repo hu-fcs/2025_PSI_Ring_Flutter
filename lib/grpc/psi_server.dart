@@ -8,7 +8,7 @@ import '../native_key_service.dart';
 import '../key_management_service.dart';
 
 /// ===============================================================
-///      ECC-PSI サーバ（正しい双方向 PSI 対応 + ホットリロード）
+///      ECC-PSI サーバ（FinalizePsi は結果送信しない最終版）
 /// ===============================================================
 class PsiServiceImpl extends PsiServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
@@ -16,35 +16,39 @@ class PsiServiceImpl extends PsiServiceBase {
 
   late final Future<void> _ready;
 
-  late Uint8List _mySecret;         // 秘密スカラー a
-  List<Uint8List> _myKeys = [];     // サーバの公開鍵集合 P
-  List<Uint8List> _myEncKeys = [];  // aP
+  late Uint8List _mySecret;           // 秘密スカラー a
+  List<Uint8List> _myKeys = [];       // サーバ側公開鍵 P
+  List<Uint8List> _myEncKeys = [];    // aP
 
-  // クライアント集合 Q に対する abQ を保持（intersection 用）
+  // クライアント側集合 Q → abQ
   List<Uint8List> _serverAbQ = [];
 
   PsiServiceImpl() {
     _ready = _initialize();
 
-    // BLE鍵ホットリロード
+    // BLE ホットリロード
     _kms.onKeyUpdated.listen((_) async {
-      print('[SERVER] 🔔 BLE keys updated → reloading PSI keys...');
+      print('[SERVER] 🔔 BLE keys changed → reloading PSI keys...');
       await _reloadKeys();
       print('[SERVER] 🔄 PSI keyset updated.');
     });
   }
 
+  // --------------------------------------------------------------
+  // 初期化
+  // --------------------------------------------------------------
   Future<void> _initialize() async {
-    print('[SERVER] Initializing PSI Server...');
+    print('[SERVER] === Initializing PSI Server ===');
 
-    // サーバ秘密スカラー a
     _mySecret = _keyService.generateRandomSecret();
-
     await _reloadKeys();
 
-    print('[SERVER] PSI Server ready.');
+    print('[SERVER] === PSI Server Ready ===');
   }
 
+  // --------------------------------------------------------------
+  // BLE鍵を再読み込みして aP を再計算
+  // --------------------------------------------------------------
   Future<void> _reloadKeys() async {
     final generated = await _kms.getAllGeneratedPublicKeys();
     final collected = await _kms.getAllCollectedPublicKeys();
@@ -52,22 +56,24 @@ class PsiServiceImpl extends PsiServiceBase {
 
     print('[SERVER] Loaded ${_myKeys.length} BLE keys.');
 
-    // aP を計算
     _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
-    print('[SERVER] 🔒 Recomputed aP keys.');
+    print('[SERVER] 🔒 Recomputed server aP keys.');
   }
 
   Future<void> _ensureReady() async => await _ready;
 
+  // --------------------------------------------------------------
+  // Ping
+  // --------------------------------------------------------------
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
     await _ensureReady();
     return PingResp()..msg = 'pong: ${request.msg}';
   }
 
-  /// --------------------------------------------------------------
-  /// Phase 1: bQ を受け取り abQ と aP を返す
-  /// --------------------------------------------------------------
+  // --------------------------------------------------------------
+  // Phase 1: bQ を受け取り abQ と aP を返す
+  // --------------------------------------------------------------
   @override
   Future<KeyExchangeResp> exchangeKeys(
       ServiceCall call, KeyExchangeReq request) async {
@@ -78,101 +84,92 @@ class PsiServiceImpl extends PsiServiceBase {
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
     print('[SERVER] 📥 Received ${bQ.length} bQ keys.');
 
-    // abQ = a(bQ) （クライアント集合 Q に対応）
+    // abQ = a(bQ)
     _serverAbQ = _keyService.encryptSet(bQ, _mySecret);
-
     print('[SERVER] 🔒 Computed abQ keys.');
 
     final resp = KeyExchangeResp()
-      ..serverEncKeys.addAll(_myEncKeys)    // aP（サーバ集合 P に対応）
-      ..clientReencKeys.addAll(_serverAbQ); // abQ（クライアント集合 Q に対応）
+      ..serverEncKeys.addAll(_myEncKeys)     // aP
+      ..clientReencKeys.addAll(_serverAbQ);  // abQ
 
     print('[SERVER] 📤 Sent aP and abQ.');
     return resp;
   }
 
-  /// --------------------------------------------------------------
-  /// Phase 2: クライアントから abP が送られてきたので、
-  ///          サーバ側で abP と abQ の一致を調べる
-  /// --------------------------------------------------------------
+  // --------------------------------------------------------------
+  // Phase 2: クライアント → サーバ へ abP を送信
+  //
+  // ここでサーバも PSI を完了させる。
+  // クライアントには結果を送らない（PsiDone を返す）
+  // --------------------------------------------------------------
   @override
-  Future<ServerPsiResult> finalizePsi(
+  Future<PsiDone> finalizePsi(
       ServiceCall call, ClientFinalReq request) async {
     await _ensureReady();
 
     print('\n[SERVER] === finalizePsi() called ===');
 
-    // abP（サーバ集合 P に対応。順番は _myKeys / _myEncKeys と同じ）
     final clientAbP =
     request.clientReencServerKeys.map(Uint8List.fromList).toList();
 
     print('[SERVER] 📥 Received ${clientAbP.length} abP keys.');
 
     final intersected = _computeServerIntersection(
-      serverAbQ: _serverAbQ, // abQ（クライアント集合 Q に対応）
-      clientAbP: clientAbP,  // abP（サーバ集合 P に対応）
-      originalKeys: _myKeys, // P
+      serverAbQ: _serverAbQ,
+      clientAbP: clientAbP,
+      originalKeys: _myKeys,
     );
 
+    // ---- ログ出力（結果はクライアントに送らない）----
     print('[SERVER] 🎯 PSI intersection = ${intersected.length} items.');
 
     if (intersected.isNotEmpty) {
       print('[SERVER] 💍 [Intersection Results]');
       for (int i = 0; i < intersected.length; i++) {
-        final hex = _hex(intersected[i]);
-        print('[SERVER]   common key[$i]: $hex');
+        print('[SERVER]   common key[$i]: ${_hex(intersected[i])}');
       }
     }
 
-    final resp = ServerPsiResult()..commonKeys.addAll(intersected);
-    return resp;
+    // クライアントには結果を送らない
+    return PsiDone();
   }
 
-  /// --------------------------------------------------------------
-  /// abQ と abP が一致したら共通集合。
-  ///
-  /// - serverAbQ : クライアント集合 Q の abQ（順序はクライアント側）
-  /// - clientAbP : サーバ集合 P の abP（順序は originalKeys と一致）
-  /// - originalKeys[i] : サーバ側の公開鍵 P[i]
-  ///
-  /// ロジック:
-  ///   1. abQ をセット（ハッシュセット）化
-  ///   2. 各 abP[i] が abQ セットに含まれていれば P[i] が共通要素
-  /// --------------------------------------------------------------
+  // --------------------------------------------------------------
+  // abQ と abP を比較し一致した P[i] を返す
+  // --------------------------------------------------------------
   List<Uint8List> _computeServerIntersection({
-    required List<Uint8List> serverAbQ,
-    required List<Uint8List> clientAbP,
-    required List<Uint8List> originalKeys,
+    required List<Uint8List> serverAbQ,   // abQ
+    required List<Uint8List> clientAbP,   // abP
+    required List<Uint8List> originalKeys, // P
   }) {
-    // 1. abQ をハッシュセットに（サイズ不一致でも問題なし）
     final abQSet = <String>{};
     for (final q in serverAbQ) {
       abQSet.add(_hex(q));
     }
 
-    // 2. abP と originalKeys（P）は同じインデックス対応として扱う
     final result = <Uint8List>[];
 
-    final n = originalKeys.length;
-    final m = clientAbP.length;
-    final len = n < m ? n : m; // 念のため、短い方に合わせる
+    final len = (clientAbP.length < originalKeys.length)
+        ? clientAbP.length
+        : originalKeys.length;
 
     for (int i = 0; i < len; i++) {
       final h = _hex(clientAbP[i]);
       if (abQSet.contains(h)) {
-        result.add(originalKeys[i]); // P[i] が共通鍵
+        result.add(originalKeys[i]);
       }
     }
 
     return result;
   }
 
+  // Hex 表記
   String _hex(Uint8List b) =>
       b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 }
 
 /// ===============================================================
-/// gRPC 管理
+/// gRPC Server 管理
 /// ===============================================================
 class PsiGrpcServer {
   Server? _server;
@@ -188,7 +185,7 @@ class PsiGrpcServer {
 
     final server = Server.create(
       services: [service],
-      interceptors: const <Interceptor>[],
+      interceptors: const [],
       codecRegistry: CodecRegistry(codecs: [GzipCodec(), IdentityCodec()]),
     );
 

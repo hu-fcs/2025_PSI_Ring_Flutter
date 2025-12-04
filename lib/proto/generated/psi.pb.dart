@@ -16,9 +16,7 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
-/// ------------------------------------------------------------
-/// Ping（疎通確認）
-/// ------------------------------------------------------------
+/// 疎通確認
 class PingReq extends $pb.GeneratedMessage {
   factory PingReq({
     $core.String? msg,
@@ -126,7 +124,7 @@ class PingResp extends $pb.GeneratedMessage {
 }
 
 /// ------------------------------------------------------------
-/// ECC-PSI: Phase 1 (鍵交換)
+/// ECC-PSI Phase 1
 /// ------------------------------------------------------------
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
@@ -173,7 +171,6 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeReq>(create);
   static KeyExchangeReq? _defaultInstance;
 
-  /// Client → Server : 暗号化鍵セット (b * Q)
   @$pb.TagNumber(1)
   $pb.PbList<$core.List<$core.int>> get encKeys => $_getList(0);
 }
@@ -227,17 +224,15 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeResp>(create);
   static KeyExchangeResp? _defaultInstance;
 
-  /// Server → Client : サーバ側暗号化鍵 (a * P)
   @$pb.TagNumber(1)
   $pb.PbList<$core.List<$core.int>> get serverEncKeys => $_getList(0);
 
-  /// Server → Client : サーバが再暗号化した client 鍵 (a * b * Q)
   @$pb.TagNumber(2)
   $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
 }
 
 /// ------------------------------------------------------------
-/// ECC-PSI: Phase 2 (サーバ側も共通集合を復元するためのデータ送信)
+/// ECC-PSI Phase 2
 /// ------------------------------------------------------------
 class ClientFinalReq extends $pb.GeneratedMessage {
   factory ClientFinalReq({
@@ -285,59 +280,46 @@ class ClientFinalReq extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<ClientFinalReq>(create);
   static ClientFinalReq? _defaultInstance;
 
-  /// Client → Server : クライアントが再暗号化したサーバ鍵 (a * b * P)
   @$pb.TagNumber(1)
   $pb.PbList<$core.List<$core.int>> get clientReencServerKeys => $_getList(0);
 }
 
-class ServerPsiResult extends $pb.GeneratedMessage {
-  factory ServerPsiResult({
-    $core.Iterable<$core.List<$core.int>>? commonKeys,
-  }) {
-    final result = create();
-    if (commonKeys != null) result.commonKeys.addAll(commonKeys);
-    return result;
-  }
+/// ★ Empty と同じ意味の自作メッセージ
+class PsiDone extends $pb.GeneratedMessage {
+  factory PsiDone() => create();
 
-  ServerPsiResult._();
+  PsiDone._();
 
-  factory ServerPsiResult.fromBuffer($core.List<$core.int> data,
+  factory PsiDone.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
       create()..mergeFromBuffer(data, registry);
-  factory ServerPsiResult.fromJson($core.String json,
+  factory PsiDone.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
       create()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'ServerPsiResult',
+      _omitMessageNames ? '' : 'PsiDone',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
       createEmptyInstance: create)
-    ..p<$core.List<$core.int>>(
-        1, _omitFieldNames ? '' : 'commonKeys', $pb.PbFieldType.PY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  ServerPsiResult clone() => deepCopy();
+  PsiDone clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  ServerPsiResult copyWith(void Function(ServerPsiResult) updates) =>
-      super.copyWith((message) => updates(message as ServerPsiResult))
-          as ServerPsiResult;
+  PsiDone copyWith(void Function(PsiDone) updates) =>
+      super.copyWith((message) => updates(message as PsiDone)) as PsiDone;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  static ServerPsiResult create() => ServerPsiResult._();
+  static PsiDone create() => PsiDone._();
   @$core.override
-  ServerPsiResult createEmptyInstance() => create();
+  PsiDone createEmptyInstance() => create();
   @$core.pragma('dart2js:noInline')
-  static ServerPsiResult getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<ServerPsiResult>(create);
-  static ServerPsiResult? _defaultInstance;
-
-  /// Server が計算した共通集合（サーバ視点）
-  @$pb.TagNumber(1)
-  $pb.PbList<$core.List<$core.int>> get commonKeys => $_getList(0);
+  static PsiDone getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PsiDone>(create);
+  static PsiDone? _defaultInstance;
 }
 
 const $core.bool _omitFieldNames =

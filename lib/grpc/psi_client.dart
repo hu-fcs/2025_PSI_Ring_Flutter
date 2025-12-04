@@ -1,3 +1,4 @@
+// lib/grpc/psi_client.dart
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
@@ -97,7 +98,7 @@ class PsiGrpcClient {
     print('[CLIENT] 🔑 Created encrypted keys bQ (${myEncKeys.length}).');
 
     // -------------------------------------------------------------------
-    // 3. bQ を Server へ送信
+    // 3. bQ → Server
     // -------------------------------------------------------------------
     print('[CLIENT] 📤 Sending bQ to server...');
     final req = KeyExchangeReq()..encKeys.addAll(myEncKeys);
@@ -107,18 +108,16 @@ class PsiGrpcClient {
       options: CallOptions(compression: const GzipCodec()),
     );
 
-    // aP
     final serverEncKeys =
     resp.serverEncKeys.map((e) => Uint8List.fromList(e)).toList();
 
-    // abQ
     final abQ =
     resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
 
     print('[CLIENT] 📥 Received aP=${serverEncKeys.length}, abQ=${abQ.length}.');
 
     // -------------------------------------------------------------------
-    // 4. aP → abP へ再暗号化
+    // 4. aP → abP
     // -------------------------------------------------------------------
     print('[CLIENT] 🔒 Computing abP = b(aP)...');
     final abP = _keyService.encryptSet(serverEncKeys, mySecret);
@@ -126,7 +125,7 @@ class PsiGrpcClient {
     print('[CLIENT] 🔄 Converted aP → abP.');
 
     // -------------------------------------------------------------------
-    // 5. Client 側での PSI（共通集合の抽出）
+    // 5. Client 側 PSI（共通集合）
     // -------------------------------------------------------------------
     print('[CLIENT] 🎯 Extracting PSI intersection (client-side)...');
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
@@ -134,39 +133,31 @@ class PsiGrpcClient {
     print('[CLIENT] 🎯 PSI intersection (client) = ${clientCommon.length} items.');
 
     if (clientCommon.isNotEmpty) {
-      print('[CLIENT] 💍 [Client-side Intersection Results]');
+      print('[CLIENT] 💍 [Intersection Results]');
       for (int i = 0; i < clientCommon.length; i++) {
         print('[CLIENT]   common key[$i]: ${_bytesToHex(clientCommon[i])}');
       }
     }
 
     // -------------------------------------------------------------------
-    // 6. Server にも同じ PSI 結果を得させるため abP を送る
+    // 6. abP をサーバに送る（結果は返ってこない）
     // -------------------------------------------------------------------
-    print('[CLIENT] 📤 Sending abP to server for finalizePsi()...');
+    print('[CLIENT] 📤 Sending abP to server (FinalizePsi)...');
+
     final finalReq = ClientFinalReq()
       ..clientReencServerKeys.addAll(abP);
 
-    final finalResp = await stub.finalizePsi(
+    // 戻り値は PsiDone（中身なし）
+    await stub.finalizePsi(
       finalReq,
       options: CallOptions(compression: const GzipCodec()),
     );
 
-    final serverCommon =
-    finalResp.commonKeys.map((e) => Uint8List.fromList(e)).toList();
-
-    print('[CLIENT] 🎯 PSI intersection (server-side) = ${serverCommon.length} items.');
-
-    if (serverCommon.isNotEmpty) {
-      print('[CLIENT] 💍 [Server-side Intersection Results]');
-      for (int i = 0; i < serverCommon.length; i++) {
-        print('[CLIENT]   server common key[$i]: ${_bytesToHex(serverCommon[i])}');
-      }
-    }
+    print('[CLIENT] 🔚 finalizePsi completed.');
 
     print('[CLIENT] === PSI Flow Complete ===\n');
 
-    // ★ クライアントの集合を返す（Server と一致しているはず）
+    // クライアントの PSI 結果のみ返す
     return clientCommon.map(_bytesToHex).toList();
   }
 

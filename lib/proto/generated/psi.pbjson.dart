@@ -90,14 +90,11 @@ final $typed_data.Uint8List clientFinalReqDescriptor = $convert.base64Decode(
     'Cg5DbGllbnRGaW5hbFJlcRI3ChhjbGllbnRfcmVlbmNfc2VydmVyX2tleXMYASADKAxSFWNsaW'
     'VudFJlZW5jU2VydmVyS2V5cw==');
 
-@$core.Deprecated('Use serverPsiResultDescriptor instead')
-const ServerPsiResult$json = {
-  '1': 'ServerPsiResult',
-  '2': [
-    {'1': 'common_keys', '3': 1, '4': 3, '5': 12, '10': 'commonKeys'},
-  ],
+@$core.Deprecated('Use psiDoneDescriptor instead')
+const PsiDone$json = {
+  '1': 'PsiDone',
 };
 
-/// Descriptor for `ServerPsiResult`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List serverPsiResultDescriptor = $convert.base64Decode(
-    'Cg9TZXJ2ZXJQc2lSZXN1bHQSHwoLY29tbW9uX2tleXMYASADKAxSCmNvbW1vbktleXM=');
+/// Descriptor for `PsiDone`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List psiDoneDescriptor =
+    $convert.base64Decode('CgdQc2lEb25l');
