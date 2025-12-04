@@ -1,32 +1,55 @@
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
-import '../native_key_service.dart'; // 統合されたサービスをimport
+import '../native_key_service.dart';
+import '../key_management_service.dart';
 
 class PsiGrpcClient {
   ClientChannel? _channel;
   PsiServiceClient? _stub;
 
-  // Cライブラリへのアクセスポイント（統合版サービス）
+  // PSI暗号処理
   final NativeKeyService _keyService = NativeKeyService();
+
+  // BLE鍵管理(DB)
+  final KeyManagementService _kms = KeyManagementService();
+
+  // ★ 初期化完了を保証する Future
+  late final Future<void> _ready;
 
   bool get isConnected => _stub != null;
 
-  // Hex文字列 -> List<int> 変換
-  Uint8List _hexToBytes(String hex) {
-    final bytes = <int>[];
-    for (var i = 0; i < hex.length; i += 2) {
-      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-    }
-    return Uint8List.fromList(bytes);
+  PsiGrpcClient() {
+    _ready = _initialize();
   }
 
-  // List<int> -> Hex文字列 変換
-  String _bytesToHex(List<int> bytes) =>
-      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  // ============================================================
+  // 🔧 クライアント初期化
+  //
+  //  - NativeKeyService のロード完了を保証
+  //  - BLEデータベースの準備ができたことを保証
+  // ============================================================
+  Future<void> _initialize() async {
+    print('[CLIENT] Initializing PSI client...');
 
+    // （必要ならここに KeyManagementService 側の初期化も追加可能）
+
+    print('[CLIENT] PSI client initialization complete.');
+  }
+
+  // ★ RPC 実行前に初期化完了を保証
+  Future<void> _ensureReady() async {
+    await _ready;
+  }
+
+  // --------------------------------------------------------------
+  //  gRPC 接続
+  // --------------------------------------------------------------
   Future<void> connect(String host, int port) async {
+    await _ensureReady();
+
     print('[CLIENT] Connecting to $host:$port ...');
     try {
       await disconnect();
@@ -40,6 +63,7 @@ class PsiGrpcClient {
         ),
       );
       _stub = PsiServiceClient(_channel!);
+
       print('[CLIENT] ✅ Connected success');
     } catch (e) {
       print('[CLIENT] ❌ Connect ERROR: $e');
@@ -55,29 +79,44 @@ class PsiGrpcClient {
     _stub = null;
   }
 
-  /// 鍵交換を行い、共通する鍵のリストを返す
-  /// [myKeysHex]: 自分の持っている公開鍵のHex文字列リスト
-  /// Returns: 共通集合に含まれる鍵のHex文字列リスト
-  Future<List<String>> exchangeKeys(List<String> myKeysHex) async {
+  // ================================================================
+  //  ECC-PSI 実行
+  // ================================================================
+  Future<List<String>> executePsi() async {
+    await _ensureReady(); // ★ 初期化待ち
+
     final stub = _stub;
     if (stub == null) throw StateError('Client not connected');
 
     print('\n[CLIENT] --- PSI Flow Start ---');
-    print('[CLIENT] My Keys Count: ${myKeysHex.length}');
 
-    // 1. 準備 (鍵変換 & 秘密鍵生成)
+    // ------------------------------------------------------------
+    // 1. BLE データベースから鍵集合 Q を取得する
+    // ------------------------------------------------------------
+    final generated = await _kms.getAllGeneratedPublicKeys();
+    final collected = await _kms.getAllCollectedPublicKeys();
+
+    final myKeys = [...generated, ...collected];
+    print('[CLIENT] Loaded ${myKeys.length} BLE keys for PSI.');
+
+    if (myKeys.isEmpty) {
+      print('[CLIENT] ⚠ WARNING: No BLE keys available.');
+      return [];
+    }
+
+    // ------------------------------------------------------------
+    // 2. 秘密スカラー b を生成 → bQ
+    // ------------------------------------------------------------
     final mySecret = _keyService.generateRandomSecret();
-    final List<Uint8List> myKeys = myKeysHex.map(_hexToBytes).toList();
-
-    // 2. 暗号化 (Q -> bQ)
-    // 自分の鍵リストを自分の秘密鍵で暗号化
     final myEncKeys = _keyService.encryptSet(myKeys, mySecret);
+
     print('[CLIENT] Encrypted my keys (bQ).');
 
     try {
-      // 3. 通信 (Request: bQ)
+      // ------------------------------------------------------------
+      // 3. bQ をサーバへ送信
+      // ------------------------------------------------------------
       print('[CLIENT] 📤 Sending ${myEncKeys.length} encrypted keys to server...');
-
       final request = KeyExchangeReq()..encKeys.addAll(myEncKeys);
 
       final resp = await stub.exchangeKeys(
@@ -85,34 +124,41 @@ class PsiGrpcClient {
         options: CallOptions(compression: const GzipCodec()),
       );
 
-      // Response: EncA(aP) と DoubleA(abQ)
-      final serverEncKeys = resp.serverEncKeys.map((e) => Uint8List.fromList(e)).toList();
-      final myReencKeys = resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
+      // ------------------------------------------------------------
+      // 4. aP, abQ を受信
+      // ------------------------------------------------------------
+      final serverEncKeys =
+      resp.serverEncKeys.map((e) => Uint8List.fromList(e)).toList();
 
-      print('[CLIENT] 📥 Received ${serverEncKeys.length} server keys (aP) and re-encrypted keys (abQ).');
+      final myReencKeys =
+      resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
 
-      // 4. 再暗号化 (aP -> abP)
-      // サーバーの暗号化鍵(aP)を受け取り、さらに自分の秘密鍵(b)で暗号化
+      print('[CLIENT] 📥 Received ${serverEncKeys.length} aP and ${myReencKeys.length} abQ.');
+
+      // ------------------------------------------------------------
+      // 5. aP → abP
+      // ------------------------------------------------------------
       final serverReencKeys = _keyService.encryptSet(serverEncKeys, mySecret);
+
       print('[CLIENT] 🔒 Re-encrypted server keys (aP -> abP).');
 
-      // 5. 共通集合の判定 (Intersection)
-      // - originalKeys: myKeys (Q) -> 結果として欲しい元の鍵
-      // - myDoubleSet: myReencKeys (abQ) -> サーバー経由で戻ってきた自分の二重暗号化鍵
-      // - remoteDoubleSet: serverReencKeys (abP) -> 自分で計算した相手の二重暗号化鍵
-      //
-      // 論理: abQ と abP が一致すれば、それは共通の鍵である
-      final commonKeysBytes = _keyService.intersect(myKeys, myReencKeys, serverReencKeys);
+      // ------------------------------------------------------------
+      // 6. 共通集合の抽出
+      // ------------------------------------------------------------
+      final commonKeysBytes =
+      _keyService.intersect(myKeys, myReencKeys, serverReencKeys);
 
       print('[CLIENT] ✅ PSI Complete. Found ${commonKeysBytes.length} common keys.');
 
-      // Hex文字列に戻して返す
-      final commonKeysHex = commonKeysBytes.map(_bytesToHex).toList();
-      return commonKeysHex;
+      return commonKeysBytes.map(_bytesToHex).toList();
 
     } catch (e) {
-      print('[CLIENT] ❌ exchangeKeys ERROR: $e');
+      print('[CLIENT] ❌ PSI ERROR: $e');
       rethrow;
     }
   }
+
+  // Hex変換（ログ用）
+  String _bytesToHex(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }

@@ -10,22 +10,28 @@
 #define EXPORT __attribute__((visibility("default"))) __attribute__((used))
 #endif
 
-// --- 定数定義 ---
-#define PUB_KEY_LEN 33 // 圧縮形式公開鍵 (0x02/0x03 + 32-byte X)
-#define PRIV_KEY_LEN 32 // 秘密スカラー長 (256ビット)
+// --- 定数 ---
+#define PUB_KEY_LEN 33   // 圧縮公開鍵 (0x02/0x03 + 32-byte X)
+#define PRIV_KEY_LEN 32  // 秘密スカラー長（32バイト）
 
-// --- リソース管理 ---
+// --- 初期化 / 終了 ---
 EXPORT int psi_init();
 EXPORT void psi_cleanup();
 
-// --- 鍵生成ヘルパー ---
-/**
- * @brief ダミー用のランダムな公開鍵（33バイト圧縮形式）を生成する。
- * 秘密鍵は持たない（あるいは破棄された）状態。
- */
-EXPORT int generate_random_dummy_key_bytes(uint8_t* out33b);
+// -----------------------------------------------------------
+// ECC PSI のみ提供（鍵生成は Flutter 側で行う）
+// -----------------------------------------------------------
 
-// --- PSI関連関数 (ECC-PSI) ---
+/**
+ * @brief 与えられた鍵集合 input_keys[] に対して
+ *        secret_32b を掛けて暗号化する (aP, bQ)
+ *
+ * @param input_keys  フラットな鍵配列（33 * count bytes）
+ * @param count       鍵数
+ * @param secret_32b  32バイト秘密スカラー
+ * @param out_keys    出力 (33 * count bytes)
+ * @return 1 success, 0 failure
+ */
 EXPORT int ecc_single_encrypt_set(
         const uint8_t* input_keys,
         int count,
@@ -33,6 +39,16 @@ EXPORT int ecc_single_encrypt_set(
         uint8_t* out_keys
 );
 
+/**
+ * @brief PSI の共通集合抽出 (abP vs abQ)
+ *
+ * original_keys      元の鍵 P または Q（33 * count_a）
+ * my_double_set      自分側の abP または abQ
+ * remote_double_set  相手側の abP または abQ
+ *
+ * result_keys        共通した元の鍵がここにコピーされる（33 * result_count）
+ * result_count       共通鍵数（出力）
+ */
 EXPORT int ecc_intersect_sets(
         const uint8_t* original_keys,
         const uint8_t* my_double_set,

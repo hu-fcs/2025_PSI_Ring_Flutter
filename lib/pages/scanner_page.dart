@@ -39,15 +39,15 @@ class _ScannerPageState extends State<ScannerPage> {
     super.dispose();
   }
 
-  /// バイト列を16進文字列へ
+  /// バイト列 → Hex（ログ用途）
   String _bytesToHex(Uint8List bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
   /// ----------------------------------------------------------------------
-  ///  接続確認 → gRPC 接続 の本体
+  ///  接続確認 → gRPC 接続 → PSI 実行
   /// ----------------------------------------------------------------------
   Future<void> _confirmAndConnect(String ip, int port) async {
-    // ★ まずカメラ停止（この時点で背景は静止）
+    // ★ カメラ停止（背景停止のため）
     await _scannerController.stop();
 
     // ---- 接続確認ダイアログ ----
@@ -71,19 +71,18 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
     );
 
-    // キャンセルされたら再開して終了
     if (ok != true) {
       _isProcessingScan = false;
       _scannerController.start();
       return;
     }
 
-    // ---- ローディング表示（確認ダイアログが完全に閉じてから表示）----
+    // ---- ローディング表示 ----
     if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withOpacity(0.1), // 暗くなりすぎない
+      barrierColor: Colors.black.withOpacity(0.1),
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
@@ -94,24 +93,15 @@ class _ScannerPageState extends State<ScannerPage> {
       await _client.connect(ip, port);
       print('[CLIENT] connect() success');
 
-      // 1. 自分の鍵を収集
-      final generated = await _keyService.getAllGeneratedPublicKeys();
-      final collected = await _keyService.getAllCollectedPublicKeys();
-      final all = [...generated, ...collected];
-      // Uint8List -> HexString
-      final myKeysHex = all.map(_bytesToHex).toList();
+      // ------------------------------------------------------------
+      // 2. ECC-PSI 実行（鍵DB処理は psi_client が全て担当）
+      // ------------------------------------------------------------
+      print('[Scanner] 🔍 Starting PSI...');
 
-      print('\n[Scanner] 🔑 Sending ${myKeysHex.length} keys (compressed 33B) to $ip:$port');
-      for (var i = 0; i < myKeysHex.length; i++) {
-        print('   my key[$i]: ${myKeysHex[i]}');
-      }
-
-      // 2. ECC-PSI 実行 (暗号化通信 -> 共通集合特定)
-      // 戻り値は「共通鍵のリスト」
-      final commonKeys = await _client.exchangeKeys(myKeysHex);
+      final commonKeys = await _client.executePsi();
 
       print('\n[Scanner] ✅ PSI Complete!');
-      print('         Found ${commonKeys.length} common keys.');
+      print('Found ${commonKeys.length} common keys.');
 
       if (commonKeys.isNotEmpty) {
         print('💍 [Intersection Results]');
@@ -127,14 +117,11 @@ class _ScannerPageState extends State<ScannerPage> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'PSI完了: 共通鍵 ${commonKeys.length} 件を発見しました',
-            ),
+            content: Text('PSI完了: 共通鍵 ${commonKeys.length} 件を発見しました'),
             backgroundColor: commonKeys.isNotEmpty ? Colors.green : Colors.grey,
           ),
         );
 
-        // 結果を戻り値として返す場合
         Navigator.pop(context, 'PSI完了: ${commonKeys.length}件一致');
       }
     } catch (e) {
@@ -187,8 +174,6 @@ class _ScannerPageState extends State<ScannerPage> {
       _isProcessingScan = true;
 
       try {
-        // カメラ停止などは _confirmAndConnect 内でも呼んでいるが、
-        // 念のためここでも呼んで重複検出を防ぐ
         await _scannerController.stop();
 
         final map = jsonDecode(raw) as Map<String, dynamic>;
