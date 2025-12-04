@@ -1,4 +1,5 @@
 // lib/grpc/psi_server.dart
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
@@ -6,11 +7,12 @@ import 'package:grpc/grpc.dart';
 import '../proto/generated/psi.pbgrpc.dart';
 import '../native_key_service.dart';
 import '../key_management_service.dart';
+import 'psi_client.dart'; // ★ PsiResult を使う
 
 /// ===============================================================
-///  ECC-PSI サーバ（FinalizePsi は結果送信しない軽量仕様）
-///  - BLE 更新時のみホットリロード
-///  - PSI 実行直前にも DB から最新鍵をロードする安全仕様
+///  ECC-PSI サーバ
+///  - FinalizePsi は結果を gRPC では返さない（PsiDone）
+///  - 代わりに Stream<PsiResult> で UI にイベント通知
 /// ===============================================================
 class PsiServiceImpl extends PsiServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
@@ -18,17 +20,25 @@ class PsiServiceImpl extends PsiServiceBase {
 
   late final Future<void> _ready;
 
-  late Uint8List _mySecret;       // 秘密スカラー a
-  List<Uint8List> _myKeys = [];   // サーバの公開鍵 P
-  List<Uint8List> _myEncKeys = []; // aP
+  late Uint8List _mySecret;          // 秘密スカラー a
+  List<Uint8List> _myKeys = [];      // P（generated + collected）
+  List<Uint8List> _myEncKeys = [];   // aP
 
-  // クライアント集合 Q に対応する abQ を保持
+  // ★ 自分が「生成した」鍵のみ HEX で保持（顔見知り判定用）
+  List<String> _myGeneratedKeysHex = [];
+
+  // クライアント集合 Q に対する abQ
   List<Uint8List> _serverAbQ = [];
+
+  // ★ PSI完了イベント（共通集合 + 顔見知り判定をまとめて通知）
+  final StreamController<PsiResult> _psiEventController =
+  StreamController<PsiResult>.broadcast();
+  Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
 
   PsiServiceImpl() {
     _ready = _initialize();
 
-    // BLE ホットリロード（DebugPage の更新はここには含めない）
+    // BLE鍵ホットリロード（DebugPage の DB 更新はここには含まれない）
     _kms.onKeyUpdated.listen((_) async {
       print('[SERVER] 🔔 BLE keys changed → reloading PSI keys...');
       await _reloadKeys();
@@ -43,7 +53,6 @@ class PsiServiceImpl extends PsiServiceBase {
     print('[SERVER] === Initializing PSI Server ===');
 
     _mySecret = _keyService.generateRandomSecret();
-
     await _reloadKeys();
 
     print('[SERVER] === PSI Server Ready ===');
@@ -51,10 +60,16 @@ class PsiServiceImpl extends PsiServiceBase {
 
   // --------------------------------------------------------------
   /// DB から鍵を読み込み aP を再計算
+  ///  - generated: 自分が生成した鍵
+  ///  - collected: 相手などから収集した鍵
   // --------------------------------------------------------------
   Future<void> _reloadKeys() async {
-    final generated = await _kms.getAllGeneratedPublicKeys();
-    final collected = await _kms.getAllCollectedPublicKeys();
+    final generated = await _kms.getAllGeneratedPublicKeys(); // 自分の鍵
+    final collected = await _kms.getAllCollectedPublicKeys(); // 他人の鍵
+
+    _myGeneratedKeysHex =
+        generated.map((e) => _hex(e)).toList(growable: false);
+
     _myKeys = [...generated, ...collected];
 
     print('[SERVER] Loaded ${_myKeys.length} BLE keys.');
@@ -65,8 +80,6 @@ class PsiServiceImpl extends PsiServiceBase {
 
   Future<void> _ensureReady() async => await _ready;
 
-  // --------------------------------------------------------------
-  /// Ping
   // --------------------------------------------------------------
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
@@ -84,7 +97,7 @@ class PsiServiceImpl extends PsiServiceBase {
 
     print('\n[SERVER] === exchangeKeys() called ===');
 
-    // ★ PSI実行前に DB から必ず最新鍵をロード（DebugPage の操作も反映される）
+    // PSI 開始前に、DebugPage などの DB 更新を反映
     await _reloadKeys();
 
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
@@ -95,7 +108,7 @@ class PsiServiceImpl extends PsiServiceBase {
     print('[SERVER] 🔒 Computed abQ keys.');
 
     final resp = KeyExchangeResp()
-      ..serverEncKeys.addAll(_myEncKeys)   // aP
+      ..serverEncKeys.addAll(_myEncKeys)    // aP
       ..clientReencKeys.addAll(_serverAbQ); // abQ
 
     print('[SERVER] 📤 Sent aP and abQ.');
@@ -103,8 +116,9 @@ class PsiServiceImpl extends PsiServiceBase {
   }
 
   // --------------------------------------------------------------
-  /// Phase 2: クライアント → abP を送信（サーバ側 PSI 完了）
-  ///         クライアントへ結果は送らず PsiDone を返す
+  /// Phase 2: abP を受け取り PSI を完了
+  ///         - gRPC の戻り値は PsiDone（軽量）
+  ///         - UI には Stream<PsiResult> で通知
   // --------------------------------------------------------------
   @override
   Future<PsiDone> finalizePsi(
@@ -118,6 +132,7 @@ class PsiServiceImpl extends PsiServiceBase {
 
     print('[SERVER] 📥 Received ${clientAbP.length} abP keys.');
 
+    // PSI 共通鍵（元の公開鍵 P のリスト）
     final intersected = _computeServerIntersection(
       serverAbQ: _serverAbQ,
       clientAbP: clientAbP,
@@ -125,25 +140,42 @@ class PsiServiceImpl extends PsiServiceBase {
     );
 
     print('[SERVER] 🎯 PSI intersection = ${intersected.length} items.');
-
     if (intersected.isNotEmpty) {
       print('[SERVER] 💍 [Intersection Results]');
       for (int i = 0; i < intersected.length; i++) {
-        print('[SERVER]   common key[$i]: ${_hex(intersected[i])}');
+        print('[SERVER]   common[$i]: ${_hex(intersected[i])}');
       }
     }
 
-    // クライアントへは結果を送信しない
+    // ----------------------------------------------------------
+    // 顔見知り判定:
+    //   - intersected に「自分が生成した鍵」の HEX が含まれているか
+    // ----------------------------------------------------------
+    final commonHex = intersected.map(_hex).toList(growable: false);
+    final myGenSet = _myGeneratedKeysHex.toSet();
+    final familiar =
+        commonHex.toSet().intersection(myGenSet).isNotEmpty;
+
+    print('[SERVER] 👤 Familiar? → $familiar');
+
+    // UI（ExchangePage）へイベント通知
+    final psiResult = PsiResult(
+      commonKeys: commonHex,
+      isFamiliar: familiar,
+    );
+    _psiEventController.add(psiResult);
+
+    // gRPC レスポンス自体は軽量な PsiDone のみ
     return PsiDone();
   }
 
   // --------------------------------------------------------------
-  /// abQ と abP の比較で共通鍵を抽出
+  /// abQ と abP を比較し、一致する P[i] を返す
   // --------------------------------------------------------------
   List<Uint8List> _computeServerIntersection({
-    required List<Uint8List> serverAbQ,
-    required List<Uint8List> clientAbP,
-    required List<Uint8List> originalKeys,
+    required List<Uint8List> serverAbQ,   // abQ
+    required List<Uint8List> clientAbP,   // abP
+    required List<Uint8List> originalKeys, // P
   }) {
     final abQSet = <String>{};
     for (final q in serverAbQ) {
@@ -165,9 +197,6 @@ class PsiServiceImpl extends PsiServiceBase {
     return result;
   }
 
-  // --------------------------------------------------------------
-  /// Hex util
-  // --------------------------------------------------------------
   String _hex(Uint8List b) =>
       b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 }
@@ -179,12 +208,15 @@ class PsiGrpcServer {
   Server? _server;
   int? _port;
 
+  // ★ PsiServiceImpl を直接参照できるようにしておく
+  late PsiServiceImpl service;
+
   bool get isRunning => _server != null;
 
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
-    final service = PsiServiceImpl();
+    service = PsiServiceImpl();
     await service._ready;
 
     final server = Server.create(
