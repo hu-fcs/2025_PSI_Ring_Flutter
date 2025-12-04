@@ -1,7 +1,9 @@
 syntax = "proto3";
 package psi;
 
-// 疎通確認用
+// ------------------------------------------------------------
+// Ping（疎通確認）
+// ------------------------------------------------------------
 message PingReq {
   string msg = 1;
 }
@@ -10,23 +12,45 @@ message PingResp {
   string msg = 1;
 }
 
-// ECC-PSI 用の鍵交換メッセージ
+// ------------------------------------------------------------
+// ECC-PSI: Phase 1 (鍵交換)
+// ------------------------------------------------------------
 message KeyExchangeReq {
-  // Clientが暗号化した鍵セット (b * Q)
+  // Client → Server : 暗号化鍵セット (b * Q)
   repeated bytes enc_keys = 1;
 }
 
 message KeyExchangeResp {
-  // Serverが暗号化した鍵セット (a * P)
+  // Server → Client : サーバ側暗号化鍵 (a * P)
   repeated bytes server_enc_keys = 1;
 
-  // Serverが再暗号化したClient鍵セット (a * b * Q)
+  // Server → Client : サーバが再暗号化した client 鍵 (a * b * Q)
   repeated bytes client_reenc_keys = 2;
 }
 
+// ------------------------------------------------------------
+// ECC-PSI: Phase 2 (サーバ側も共通集合を復元するためのデータ送信)
+// ------------------------------------------------------------
+message ClientFinalReq {
+  // Client → Server : クライアントが再暗号化したサーバ鍵 (a * b * P)
+  repeated bytes client_reenc_server_keys = 1;
+}
+
+message ServerPsiResult {
+  // Server が計算した共通集合（サーバ視点）
+  repeated bytes common_keys = 1;
+}
+
+// ------------------------------------------------------------
+// PSI Service
+// ------------------------------------------------------------
 service PsiService {
+  // 疎通確認
   rpc Ping (PingReq) returns (PingResp);
 
-  // 1回のRPCで相互の暗号化鍵を交換する
+  // Phase 1: 鍵交換（暗号化セット交換）
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
+
+  // Phase 2: クライアントがサーバにも abP を送る（双方向 PSI 完成）
+  rpc FinalizePsi (ClientFinalReq) returns (ServerPsiResult);
 }

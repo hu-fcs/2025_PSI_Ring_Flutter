@@ -70,3 +70,34 @@ const KeyExchangeResp$json = {
 final $typed_data.Uint8List keyExchangeRespDescriptor = $convert.base64Decode(
     'Cg9LZXlFeGNoYW5nZVJlc3ASJgoPc2VydmVyX2VuY19rZXlzGAEgAygMUg1zZXJ2ZXJFbmNLZX'
     'lzEioKEWNsaWVudF9yZWVuY19rZXlzGAIgAygMUg9jbGllbnRSZWVuY0tleXM=');
+
+@$core.Deprecated('Use clientFinalReqDescriptor instead')
+const ClientFinalReq$json = {
+  '1': 'ClientFinalReq',
+  '2': [
+    {
+      '1': 'client_reenc_server_keys',
+      '3': 1,
+      '4': 3,
+      '5': 12,
+      '10': 'clientReencServerKeys'
+    },
+  ],
+};
+
+/// Descriptor for `ClientFinalReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List clientFinalReqDescriptor = $convert.base64Decode(
+    'Cg5DbGllbnRGaW5hbFJlcRI3ChhjbGllbnRfcmVlbmNfc2VydmVyX2tleXMYASADKAxSFWNsaW'
+    'VudFJlZW5jU2VydmVyS2V5cw==');
+
+@$core.Deprecated('Use serverPsiResultDescriptor instead')
+const ServerPsiResult$json = {
+  '1': 'ServerPsiResult',
+  '2': [
+    {'1': 'common_keys', '3': 1, '4': 3, '5': 12, '10': 'commonKeys'},
+  ],
+};
+
+/// Descriptor for `ServerPsiResult`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List serverPsiResultDescriptor = $convert.base64Decode(
+    'Cg9TZXJ2ZXJQc2lSZXN1bHQSHwoLY29tbW9uX2tleXMYASADKAxSCmNvbW1vbktleXM=');

@@ -20,6 +20,9 @@ import 'psi.pb.dart' as $0;
 
 export 'psi.pb.dart';
 
+/// ------------------------------------------------------------
+/// PSI Service
+/// ------------------------------------------------------------
 @$pb.GrpcServiceName('psi.PsiService')
 class PsiServiceClient extends $grpc.Client {
   /// The hostname for this service.
@@ -32,6 +35,7 @@ class PsiServiceClient extends $grpc.Client {
 
   PsiServiceClient(super.channel, {super.options, super.interceptors});
 
+  /// 疎通確認
   $grpc.ResponseFuture<$0.PingResp> ping(
     $0.PingReq request, {
     $grpc.CallOptions? options,
@@ -39,12 +43,20 @@ class PsiServiceClient extends $grpc.Client {
     return $createUnaryCall(_$ping, request, options: options);
   }
 
-  /// 1回のRPCで相互の暗号化鍵を交換する
+  /// Phase 1: 鍵交換（暗号化セット交換）
   $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
     $0.KeyExchangeReq request, {
     $grpc.CallOptions? options,
   }) {
     return $createUnaryCall(_$exchangeKeys, request, options: options);
+  }
+
+  /// Phase 2: クライアントがサーバにも abP を送る（双方向 PSI 完成）
+  $grpc.ResponseFuture<$0.ServerPsiResult> finalizePsi(
+    $0.ClientFinalReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$finalizePsi, request, options: options);
   }
 
   // method descriptors
@@ -58,6 +70,11 @@ class PsiServiceClient extends $grpc.Client {
           '/psi.PsiService/ExchangeKeys',
           ($0.KeyExchangeReq value) => value.writeToBuffer(),
           $0.KeyExchangeResp.fromBuffer);
+  static final _$finalizePsi =
+      $grpc.ClientMethod<$0.ClientFinalReq, $0.ServerPsiResult>(
+          '/psi.PsiService/FinalizePsi',
+          ($0.ClientFinalReq value) => value.writeToBuffer(),
+          $0.ServerPsiResult.fromBuffer);
 }
 
 @$pb.GrpcServiceName('psi.PsiService')
@@ -79,6 +96,13 @@ abstract class PsiServiceBase extends $grpc.Service {
         false,
         ($core.List<$core.int> value) => $0.KeyExchangeReq.fromBuffer(value),
         ($0.KeyExchangeResp value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.ClientFinalReq, $0.ServerPsiResult>(
+        'FinalizePsi',
+        finalizePsi_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) => $0.ClientFinalReq.fromBuffer(value),
+        ($0.ServerPsiResult value) => value.writeToBuffer()));
   }
 
   $async.Future<$0.PingResp> ping_Pre(
@@ -95,4 +119,12 @@ abstract class PsiServiceBase extends $grpc.Service {
 
   $async.Future<$0.KeyExchangeResp> exchangeKeys(
       $grpc.ServiceCall call, $0.KeyExchangeReq request);
+
+  $async.Future<$0.ServerPsiResult> finalizePsi_Pre($grpc.ServiceCall $call,
+      $async.Future<$0.ClientFinalReq> $request) async {
+    return finalizePsi($call, await $request);
+  }
+
+  $async.Future<$0.ServerPsiResult> finalizePsi(
+      $grpc.ServiceCall call, $0.ClientFinalReq request);
 }

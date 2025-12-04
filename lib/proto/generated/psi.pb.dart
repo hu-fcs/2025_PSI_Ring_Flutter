@@ -16,7 +16,9 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
-/// 疎通確認用
+/// ------------------------------------------------------------
+/// Ping（疎通確認）
+/// ------------------------------------------------------------
 class PingReq extends $pb.GeneratedMessage {
   factory PingReq({
     $core.String? msg,
@@ -123,7 +125,9 @@ class PingResp extends $pb.GeneratedMessage {
   void clearMsg() => $_clearField(1);
 }
 
-/// ECC-PSI 用の鍵交換メッセージ
+/// ------------------------------------------------------------
+/// ECC-PSI: Phase 1 (鍵交換)
+/// ------------------------------------------------------------
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
     $core.Iterable<$core.List<$core.int>>? encKeys,
@@ -169,7 +173,7 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeReq>(create);
   static KeyExchangeReq? _defaultInstance;
 
-  /// Clientが暗号化した鍵セット (b * Q)
+  /// Client → Server : 暗号化鍵セット (b * Q)
   @$pb.TagNumber(1)
   $pb.PbList<$core.List<$core.int>> get encKeys => $_getList(0);
 }
@@ -223,13 +227,117 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<KeyExchangeResp>(create);
   static KeyExchangeResp? _defaultInstance;
 
-  /// Serverが暗号化した鍵セット (a * P)
+  /// Server → Client : サーバ側暗号化鍵 (a * P)
   @$pb.TagNumber(1)
   $pb.PbList<$core.List<$core.int>> get serverEncKeys => $_getList(0);
 
-  /// Serverが再暗号化したClient鍵セット (a * b * Q)
+  /// Server → Client : サーバが再暗号化した client 鍵 (a * b * Q)
   @$pb.TagNumber(2)
   $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
+}
+
+/// ------------------------------------------------------------
+/// ECC-PSI: Phase 2 (サーバ側も共通集合を復元するためのデータ送信)
+/// ------------------------------------------------------------
+class ClientFinalReq extends $pb.GeneratedMessage {
+  factory ClientFinalReq({
+    $core.Iterable<$core.List<$core.int>>? clientReencServerKeys,
+  }) {
+    final result = create();
+    if (clientReencServerKeys != null)
+      result.clientReencServerKeys.addAll(clientReencServerKeys);
+    return result;
+  }
+
+  ClientFinalReq._();
+
+  factory ClientFinalReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory ClientFinalReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ClientFinalReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..p<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'clientReencServerKeys', $pb.PbFieldType.PY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientFinalReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientFinalReq copyWith(void Function(ClientFinalReq) updates) =>
+      super.copyWith((message) => updates(message as ClientFinalReq))
+          as ClientFinalReq;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static ClientFinalReq create() => ClientFinalReq._();
+  @$core.override
+  ClientFinalReq createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static ClientFinalReq getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ClientFinalReq>(create);
+  static ClientFinalReq? _defaultInstance;
+
+  /// Client → Server : クライアントが再暗号化したサーバ鍵 (a * b * P)
+  @$pb.TagNumber(1)
+  $pb.PbList<$core.List<$core.int>> get clientReencServerKeys => $_getList(0);
+}
+
+class ServerPsiResult extends $pb.GeneratedMessage {
+  factory ServerPsiResult({
+    $core.Iterable<$core.List<$core.int>>? commonKeys,
+  }) {
+    final result = create();
+    if (commonKeys != null) result.commonKeys.addAll(commonKeys);
+    return result;
+  }
+
+  ServerPsiResult._();
+
+  factory ServerPsiResult.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory ServerPsiResult.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ServerPsiResult',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..p<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'commonKeys', $pb.PbFieldType.PY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ServerPsiResult clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ServerPsiResult copyWith(void Function(ServerPsiResult) updates) =>
+      super.copyWith((message) => updates(message as ServerPsiResult))
+          as ServerPsiResult;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static ServerPsiResult create() => ServerPsiResult._();
+  @$core.override
+  ServerPsiResult createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static ServerPsiResult getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ServerPsiResult>(create);
+  static ServerPsiResult? _defaultInstance;
+
+  /// Server が計算した共通集合（サーバ視点）
+  @$pb.TagNumber(1)
+  $pb.PbList<$core.List<$core.int>> get commonKeys => $_getList(0);
 }
 
 const $core.bool _omitFieldNames =
