@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../ble/ble_scanner.dart';
 import '../boringssl_service.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
@@ -148,6 +149,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   Future<void> _deleteAllKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
     await db.delete(tableName);
+
+    // 🔥 収集した鍵を全削除したら BLE キャッシュをリセットする
+    if (tableName == 'ecd_keys') {
+      BleScanner.clearCollectedCache();
+      if (kDebugMode) print('DebugPage: 🧹 cache cleared due to ecd_keys deletion');
+    }
+
     setState(() {});
   }
 

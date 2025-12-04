@@ -26,6 +26,22 @@ class BleScanner {
   final Map<String, _HalfState> _halves = {};
   final Queue<_QueueEntry> _queue = Queue<_QueueEntry>();
 
+  // 🔥 グローバルキャッシュ（static に変更）
+  static final Set<String> _globalCacheKeys = {};
+
+  // 🔥 現在のスロット
+  static int _currentSlot = -1;
+
+  // 外部（DebugPage 等）からキャッシュクリア
+  static void clearCollectedCache() {
+    _globalCacheKeys.clear();
+    if (kDebugMode) print("BLE_SCAN: 🧹 collected key cache cleared (manual)");
+  }
+
+  int _calcSlot(int timestampMs, int slotMillis) {
+    return timestampMs ~/ slotMillis;
+  }
+
   Uint8List _getKeyHashId(Uint8List key33) {
     final digest = pc.SHA256Digest();
     final hash = digest.process(key33);
@@ -46,6 +62,11 @@ class BleScanner {
     await FlutterBluePlus.startScan(
       androidScanMode: AndroidScanMode.lowLatency,
     );
+
+    // 🔥 スキャン開始時、現在スロットを初期化しておく
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final slotMillis = 10 * 60 * 1000;
+    _currentSlot = _calcSlot(now, slotMillis);
 
     _sub = FlutterBluePlus.scanResults.listen(
           (results) {
@@ -76,6 +97,7 @@ class BleScanner {
 
     _halves.clear();
     _queue.clear();
+    _globalCacheKeys.clear(); // 🔥 キャッシュもリセット
 
     _isScanning = false;
 
@@ -87,12 +109,9 @@ class BleScanner {
   // --------------------------------------------------------
   void _onDiscover(ScanResult r) async {
     final adv = r.advertisementData;
-
     if (!adv.manufacturerData.containsKey(_companyId)) return;
 
-    final data = adv.manufacturerData[_companyId]!;
-    final payload = Uint8List.fromList(data);
-
+    final payload = Uint8List.fromList(adv.manufacturerData[_companyId]!);
     if (payload.length < 31) return;
 
     final header = payload[0];
@@ -100,13 +119,24 @@ class BleScanner {
     final seq2 = BleHdr.parseSeq2(header);
     final part = BleHdr.parsePart(header);
     final yParity = BleHdr.parseYParity(header);
-
     final body16 = Uint8List.fromList(payload.sublist(5, 21));
 
     final now = DateTime.now().millisecondsSinceEpoch;
+    final slotMillis = 10 * 60 * 1000;
+    final slot = _calcSlot(now, slotMillis);
+
+    // 🔥 スロット変化 → キャッシュクリア
+    if (slot != _currentSlot) {
+      _globalCacheKeys.clear();
+      _currentSlot = slot;
+      if (kDebugMode) print("BLE_SCAN: 🔄 time slot changed → cache reset");
+    }
+
     final cacheKey = '$seq2|${keyIdBytes.join()}';
 
-    // キーの状態管理
+    // ------------------------------
+    // 片割れ管理
+    // ------------------------------
     var st = _halves[cacheKey];
     if (st == null) {
       st = _HalfState(
@@ -122,7 +152,9 @@ class BleScanner {
     if (part == 0) st.front16 = body16;
     if (part == 1) st.back16 = body16;
 
+    // ------------------------------
     // 両パーツ揃った
+    // ------------------------------
     if (st.front16 != null && st.back16 != null) {
       final merged = Uint8List.fromList([
         0x02 | (st.yParity & 0x01),
@@ -132,41 +164,45 @@ class BleScanner {
 
       final calculatedHash = _getKeyHashId(merged);
       if (listEquals(st.keyId, calculatedHash)) {
-        // ------------------------------
-        // 🔍 DBに存在確認
-        // ------------------------------
+        final hex = merged.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+        // 1️⃣ キャッシュチェック
+        if (_globalCacheKeys.contains(hex)) {
+          _halves.remove(cacheKey);
+          return;
+        }
+
+        // 2️⃣ DB チェック
         final exists = await DatabaseHelper.existsCollectedKey(merged);
+        if (exists) {
+          _globalCacheKeys.add(hex);
+          _halves.remove(cacheKey);
+          return;
+        }
 
-        if (!exists) {
-          // GPS取得（オプション）
-          int latE6 = 0;
-          int lonE6 = 0;
-          try {
-            final pos = await Geolocator.getCurrentPosition(
-              desiredAccuracy: LocationAccuracy.high,
-            );
-            latE6 = (pos.latitude * 1e6).round();
-            lonE6 = (pos.longitude * 1e6).round();
-          } catch (_) {}
-
-          // ------------------------------
-          // INSERT（存在しない場合のみ）
-          // ------------------------------
-          final inserted = await DatabaseHelper.insertCollectedKeyIfAbsent(
-            pubkey33: merged,
-            tms: now,
-            latE6: latE6,
-            lonE6: lonE6,
+        // 3️⃣ 新規 → GPS取得
+        int latE6 = 0;
+        int lonE6 = 0;
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
           );
+          latE6 = (pos.latitude * 1e6).round();
+          lonE6 = (pos.longitude * 1e6).round();
+        } catch (_) {}
 
-          if (inserted) {
-            if (kDebugMode) print("BLE_SCAN: 🔑 新規鍵をDBに追加しました");
+        // 4️⃣ DB Insert
+        final inserted = await DatabaseHelper.insertCollectedKeyIfAbsent(
+          pubkey33: merged,
+          tms: now,
+          latE6: latE6,
+          lonE6: lonE6,
+        );
 
-            // PSI サーバや DebugPage に通知
-            KeyManagementService().notifyKeyUpdated();
-          }
-        } else {
-          if (kDebugMode) print("BLE_SCAN: 既存鍵のためスキップ");
+        if (inserted) {
+          if (kDebugMode) print("BLE_SCAN: 🔑 新規鍵をDBに追加しました");
+          _globalCacheKeys.add(hex);
+          KeyManagementService().notifyKeyUpdated();
         }
       }
 
