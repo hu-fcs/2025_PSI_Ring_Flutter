@@ -8,7 +8,9 @@ import '../native_key_service.dart';
 import '../key_management_service.dart';
 
 /// ===============================================================
-///      ECC-PSI サーバ（FinalizePsi は結果送信しない最終版）
+///  ECC-PSI サーバ（FinalizePsi は結果送信しない軽量仕様）
+///  - BLE 更新時のみホットリロード
+///  - PSI 実行直前にも DB から最新鍵をロードする安全仕様
 /// ===============================================================
 class PsiServiceImpl extends PsiServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
@@ -16,17 +18,17 @@ class PsiServiceImpl extends PsiServiceBase {
 
   late final Future<void> _ready;
 
-  late Uint8List _mySecret;           // 秘密スカラー a
-  List<Uint8List> _myKeys = [];       // サーバ側公開鍵 P
-  List<Uint8List> _myEncKeys = [];    // aP
+  late Uint8List _mySecret;       // 秘密スカラー a
+  List<Uint8List> _myKeys = [];   // サーバの公開鍵 P
+  List<Uint8List> _myEncKeys = []; // aP
 
-  // クライアント側集合 Q → abQ
+  // クライアント集合 Q に対応する abQ を保持
   List<Uint8List> _serverAbQ = [];
 
   PsiServiceImpl() {
     _ready = _initialize();
 
-    // BLE ホットリロード
+    // BLE ホットリロード（DebugPage の更新はここには含めない）
     _kms.onKeyUpdated.listen((_) async {
       print('[SERVER] 🔔 BLE keys changed → reloading PSI keys...');
       await _reloadKeys();
@@ -35,19 +37,20 @@ class PsiServiceImpl extends PsiServiceBase {
   }
 
   // --------------------------------------------------------------
-  // 初期化
+  /// 初期化
   // --------------------------------------------------------------
   Future<void> _initialize() async {
     print('[SERVER] === Initializing PSI Server ===');
 
     _mySecret = _keyService.generateRandomSecret();
+
     await _reloadKeys();
 
     print('[SERVER] === PSI Server Ready ===');
   }
 
   // --------------------------------------------------------------
-  // BLE鍵を再読み込みして aP を再計算
+  /// DB から鍵を読み込み aP を再計算
   // --------------------------------------------------------------
   Future<void> _reloadKeys() async {
     final generated = await _kms.getAllGeneratedPublicKeys();
@@ -63,7 +66,7 @@ class PsiServiceImpl extends PsiServiceBase {
   Future<void> _ensureReady() async => await _ready;
 
   // --------------------------------------------------------------
-  // Ping
+  /// Ping
   // --------------------------------------------------------------
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
@@ -72,7 +75,7 @@ class PsiServiceImpl extends PsiServiceBase {
   }
 
   // --------------------------------------------------------------
-  // Phase 1: bQ を受け取り abQ と aP を返す
+  /// Phase 1: bQ を受け取り abQ と aP を返す
   // --------------------------------------------------------------
   @override
   Future<KeyExchangeResp> exchangeKeys(
@@ -80,6 +83,9 @@ class PsiServiceImpl extends PsiServiceBase {
     await _ensureReady();
 
     print('\n[SERVER] === exchangeKeys() called ===');
+
+    // ★ PSI実行前に DB から必ず最新鍵をロード（DebugPage の操作も反映される）
+    await _reloadKeys();
 
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
     print('[SERVER] 📥 Received ${bQ.length} bQ keys.');
@@ -89,18 +95,16 @@ class PsiServiceImpl extends PsiServiceBase {
     print('[SERVER] 🔒 Computed abQ keys.');
 
     final resp = KeyExchangeResp()
-      ..serverEncKeys.addAll(_myEncKeys)     // aP
-      ..clientReencKeys.addAll(_serverAbQ);  // abQ
+      ..serverEncKeys.addAll(_myEncKeys)   // aP
+      ..clientReencKeys.addAll(_serverAbQ); // abQ
 
     print('[SERVER] 📤 Sent aP and abQ.');
     return resp;
   }
 
   // --------------------------------------------------------------
-  // Phase 2: クライアント → サーバ へ abP を送信
-  //
-  // ここでサーバも PSI を完了させる。
-  // クライアントには結果を送らない（PsiDone を返す）
+  /// Phase 2: クライアント → abP を送信（サーバ側 PSI 完了）
+  ///         クライアントへ結果は送らず PsiDone を返す
   // --------------------------------------------------------------
   @override
   Future<PsiDone> finalizePsi(
@@ -120,7 +124,6 @@ class PsiServiceImpl extends PsiServiceBase {
       originalKeys: _myKeys,
     );
 
-    // ---- ログ出力（結果はクライアントに送らない）----
     print('[SERVER] 🎯 PSI intersection = ${intersected.length} items.');
 
     if (intersected.isNotEmpty) {
@@ -130,17 +133,17 @@ class PsiServiceImpl extends PsiServiceBase {
       }
     }
 
-    // クライアントには結果を送らない
+    // クライアントへは結果を送信しない
     return PsiDone();
   }
 
   // --------------------------------------------------------------
-  // abQ と abP を比較し一致した P[i] を返す
+  /// abQ と abP の比較で共通鍵を抽出
   // --------------------------------------------------------------
   List<Uint8List> _computeServerIntersection({
-    required List<Uint8List> serverAbQ,   // abQ
-    required List<Uint8List> clientAbP,   // abP
-    required List<Uint8List> originalKeys, // P
+    required List<Uint8List> serverAbQ,
+    required List<Uint8List> clientAbP,
+    required List<Uint8List> originalKeys,
   }) {
     final abQSet = <String>{};
     for (final q in serverAbQ) {
@@ -154,8 +157,7 @@ class PsiServiceImpl extends PsiServiceBase {
         : originalKeys.length;
 
     for (int i = 0; i < len; i++) {
-      final h = _hex(clientAbP[i]);
-      if (abQSet.contains(h)) {
+      if (abQSet.contains(_hex(clientAbP[i]))) {
         result.add(originalKeys[i]);
       }
     }
@@ -163,7 +165,9 @@ class PsiServiceImpl extends PsiServiceBase {
     return result;
   }
 
-  // Hex 表記
+  // --------------------------------------------------------------
+  /// Hex util
+  // --------------------------------------------------------------
   String _hex(Uint8List b) =>
       b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 }
