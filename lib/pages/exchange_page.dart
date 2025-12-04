@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io'; // ★ NetworkInterface を使うために必要
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../ble/ble_exchange_controller.dart';
 import '../grpc/psi_server.dart';
+import '../grpc/psi_client.dart';          // ★ PsiResult 取得のため追加
 import '../key_management_service.dart';
 import '../db/database_helper.dart';
 import 'debug_page.dart';
@@ -34,7 +35,7 @@ class _ExchangePageState extends State<ExchangePage> {
   final _db = DatabaseHelper();
 
   // ==========================================================
-  // ★ 常に DB から最新の鍵数を取得する
+  // ★ DB に鍵があるか確認
   // ==========================================================
   Future<bool> _hasAnyKey() async {
     final count = await _db.getTotalKeyCount();
@@ -42,7 +43,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  // ★ 鍵なし警告ダイアログ
+  // ★ 鍵なし警告
   // ==========================================================
   Future<bool> _requireKeyWarning() async {
     final hasKey = await _hasAnyKey();
@@ -69,7 +70,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  // ★ BLE 権限チェック
+  // ★ BLE 権限
   // ==========================================================
   Future<bool> _ensureBlePermissions() async {
     final perms = <Permission>[
@@ -85,20 +86,13 @@ class _ExchangePageState extends State<ExchangePage> {
     return true;
   }
 
-  // ==========================================================
-  // ★ BLE の ON/OFF を切り替え
-  // ==========================================================
   Future<bool> _ensureLocationPermissions() async {
-    // 許可を求める（拒否されても OK）
     await Permission.location.request();
-
-    // 許可されていれば true、拒否なら false
     return await Permission.location.isGranted;
   }
 
   Future<void> _toggleBleExchange() async {
     if (!_bleRunning) {
-      // BLE の権限チェック（これは必須）
       final bleOk = await _ensureBlePermissions();
       if (!bleOk) {
         if (mounted) {
@@ -108,8 +102,6 @@ class _ExchangePageState extends State<ExchangePage> {
         }
         return;
       }
-
-      // ★ 位置情報権限は optional のため、拒否されても BLE を開始する
       await _ensureLocationPermissions();
     }
 
@@ -117,19 +109,17 @@ class _ExchangePageState extends State<ExchangePage> {
     if (mounted) setState(() {});
   }
 
-
   // ==========================================================
-  // ★ 正しい Wi-Fi IPv4 を取得（wlan0 のみ使用）
+  // ★ Wi-Fi IP の取得
   // ==========================================================
   Future<String?> _getLocalWifiIp() async {
     try {
       final interfaces = await NetworkInterface.list();
-
       for (var interface in interfaces) {
         if (interface.name == 'wlan0') {
           for (var addr in interface.addresses) {
             if (addr.type == InternetAddressType.IPv4) {
-              return addr.address; // ★ 正しい IPv4 を返す
+              return addr.address;
             }
           }
         }
@@ -143,15 +133,12 @@ class _ExchangePageState extends State<ExchangePage> {
   // ==========================================================
   Future<void> _startGrpcServer() async {
     if (!await _requireKeyWarning()) return;
-
     if (_grpcRunning) return;
 
     final ip = await _getLocalWifiIp();
     if (ip == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ローカル IP が取得できません（同じ Wi-Fi に接続してください）'),
-        ),
+        const SnackBar(content: Text('ローカル IP が取得できません（Wi-Fi を確認）')),
       );
       return;
     }
@@ -165,7 +152,7 @@ class _ExchangePageState extends State<ExchangePage> {
       _serverPort = port;
     });
 
-    print('✅ gRPC Server started on $_serverIp:$_serverPort');
+    print('✅ gRPC Server started on $ip:$port');
   }
 
   Future<void> _stopGrpcServer() async {
@@ -176,11 +163,48 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  // ★ ScannerPage 起動前にも鍵チェック
+  // ★ ScannerPage → PsiResult を受け取る
   // ==========================================================
-  void _openScannerPage() async {
+  Future<void> _openScannerPage() async {
     if (!await _requireKeyWarning()) return;
-    Navigator.pushNamed(context, '/scanner');
+
+    final result = await Navigator.pushNamed(context, '/scanner');
+
+    if (result is PsiResult) {
+      _showPsiResultDialog(result);
+    }
+  }
+
+  // ==========================================================
+  // ★ 顔見知り判定ダイアログ
+  // ==========================================================
+  Future<void> _showPsiResultDialog(PsiResult psi) async {
+    final isFamiliar = psi.isFamiliar;
+    final commonCount = psi.commonKeys.length;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text(
+          isFamiliar ? '顔見知りです' : '見知らぬ人です',
+          style: TextStyle(
+            color: isFamiliar ? Colors.green : Colors.red,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          '共通鍵数: $commonCount\n'
+              '自身の生成鍵が一致: ${isFamiliar ? "あり" : "なし"}',
+        ),
+        actions: [
+          FilledButton(
+            child: const Text('OK'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
   }
 
   String get _qrPayload => jsonEncode({
@@ -198,36 +222,28 @@ class _ExchangePageState extends State<ExchangePage> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'PSI Ring Match',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            Text('PSI Ring Match', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             Text('通信設定', style: TextStyle(fontSize: 14)),
           ],
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.bug_report),
-            tooltip: 'デバッグページ',
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DebugPage()),
-              );
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const DebugPage()));
             },
-          ),
+          )
         ],
       ),
-
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ------------------------------------------------------
-          // BLE セクション
-          // ------------------------------------------------------
+          // -----------------------------
+          // BLE section
+          // -----------------------------
           Card(
-            elevation: 0,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -245,14 +261,10 @@ class _ExchangePageState extends State<ExchangePage> {
                       const SizedBox(width: 12),
                       Text(
                         _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
-                        style: TextStyle(
-                          color: _bleRunning ? Colors.green : Colors.grey,
-                        ),
+                        style: TextStyle(color: _bleRunning ? Colors.green : Colors.grey),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text('近くの端末と鍵を交換します。'),
                 ],
               ),
             ),
@@ -260,12 +272,12 @@ class _ExchangePageState extends State<ExchangePage> {
 
           const SizedBox(height: 16),
 
-          // ------------------------------------------------------
-          // gRPC セクション
-          // ------------------------------------------------------
+          // -----------------------------
+          // gRPC section
+          // -----------------------------
           Card(
-            elevation: 0,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -273,7 +285,6 @@ class _ExchangePageState extends State<ExchangePage> {
                 children: [
                   Text('gRPC 接続', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
-
                   Row(
                     children: [
                       Switch(
@@ -289,8 +300,8 @@ class _ExchangePageState extends State<ExchangePage> {
                       Text(_grpcRunning ? '稼働中' : '停止中'),
                       const Spacer(),
                       IconButton(
-                        tooltip: 'QR をスキャン（接続）',
                         icon: const Icon(Icons.qr_code_scanner),
+                        tooltip: 'QR をスキャン（接続）',
                         onPressed: _openScannerPage,
                       ),
                     ],
@@ -303,15 +314,14 @@ class _ExchangePageState extends State<ExchangePage> {
                     Center(
                       child: QrImageView(
                         data: _qrPayload,
-                        version: QrVersions.auto,
                         size: 200,
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Text('もう一方の端末で QR をスキャンして接続してください。'),
-                  ] else ...[
-                    const SizedBox(height: 8),
-                    const Text('ON にすると接続用の QR が表示されます。'),
+                    const Text(
+                      '相手端末で QR をスキャンしてください。',
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ],
               ),

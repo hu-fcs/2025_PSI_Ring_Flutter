@@ -6,6 +6,25 @@ import '../proto/generated/psi.pbgrpc.dart';
 import '../native_key_service.dart';
 import '../key_management_service.dart';
 
+/// ===============================================================
+/// PSI の結果（共通集合 + 顔見知り判定）
+/// ===============================================================
+class PsiResult {
+  /// 共通集合（HEX 表記）
+  final List<String> commonKeys;
+
+  /// 共通集合の中に「自分が生成した鍵」が含まれているか
+  final bool isFamiliar;
+
+  PsiResult({
+    required this.commonKeys,
+    required this.isFamiliar,
+  });
+}
+
+/// ===============================================================
+///                     ECC-PSI クライアント
+/// ===============================================================
 class PsiGrpcClient {
   ClientChannel? _channel;
   PsiServiceClient? _stub;
@@ -67,16 +86,16 @@ class PsiGrpcClient {
   // ================================================================
   //                     ECC-PSI（双方向対応）
   // ================================================================
-  Future<List<String>> executePsi() async {
+  Future<PsiResult> executePsi() async {
     await _ensureReady();
     final stub = _stub;
     if (stub == null) throw StateError('[CLIENT] Not connected.');
 
     print('\n[CLIENT] === PSI Flow Start ===');
 
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     // 1. BLE DB から鍵集合を取得
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     final generated = await _kms.getAllGeneratedPublicKeys();
     final collected = await _kms.getAllCollectedPublicKeys();
 
@@ -85,21 +104,20 @@ class PsiGrpcClient {
 
     if (myKeys.isEmpty) {
       print('[CLIENT] ⚠ No BLE keys found — PSI aborted.');
-      return [];
+      return PsiResult(commonKeys: [], isFamiliar: false);
     }
 
-    // -------------------------------------------------------------------
-    // 2. クライアント秘密 b 生成 → bQ
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
+    // 2. 秘密スカラー b → bQ
+    // ------------------------------------------------------------
     print('[CLIENT] 🔒 Generating client secret "b"...');
     final mySecret = _keyService.generateRandomSecret();
     final myEncKeys = _keyService.encryptSet(myKeys, mySecret);
-
     print('[CLIENT] 🔑 Created encrypted keys bQ (${myEncKeys.length}).');
 
-    // -------------------------------------------------------------------
-    // 3. bQ → Server
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
+    // 3. bQ → server へ送信
+    // ------------------------------------------------------------
     print('[CLIENT] 📤 Sending bQ to server...');
     final req = KeyExchangeReq()..encKeys.addAll(myEncKeys);
 
@@ -116,51 +134,55 @@ class PsiGrpcClient {
 
     print('[CLIENT] 📥 Received aP=${serverEncKeys.length}, abQ=${abQ.length}.');
 
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     // 4. aP → abP
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     print('[CLIENT] 🔒 Computing abP = b(aP)...');
     final abP = _keyService.encryptSet(serverEncKeys, mySecret);
-
     print('[CLIENT] 🔄 Converted aP → abP.');
 
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     // 5. Client 側 PSI（共通集合）
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
     print('[CLIENT] 🎯 Extracting PSI intersection (client-side)...');
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
 
-    print('[CLIENT] 🎯 PSI intersection (client) = ${clientCommon.length} items.');
-
-    if (clientCommon.isNotEmpty) {
-      print('[CLIENT] 💍 [Intersection Results]');
-      for (int i = 0; i < clientCommon.length; i++) {
-        print('[CLIENT]   common key[$i]: ${_bytesToHex(clientCommon[i])}');
-      }
+    print('[CLIENT] 🎯 PSI intersection = ${clientCommon.length} items.');
+    for (int i = 0; i < clientCommon.length; i++) {
+      print('[CLIENT]   common[$i]: ${_bytesToHex(clientCommon[i])}');
     }
 
-    // -------------------------------------------------------------------
-    // 6. abP をサーバに送る（結果は返ってこない）
-    // -------------------------------------------------------------------
+    // ------------------------------------------------------------
+    // 6. abP をサーバへ送信（結果は返ってこない）
+    // ------------------------------------------------------------
     print('[CLIENT] 📤 Sending abP to server (FinalizePsi)...');
-
     final finalReq = ClientFinalReq()
       ..clientReencServerKeys.addAll(abP);
 
-    // 戻り値は PsiDone（中身なし）
     await stub.finalizePsi(
       finalReq,
       options: CallOptions(compression: const GzipCodec()),
     );
 
     print('[CLIENT] 🔚 finalizePsi completed.');
-
     print('[CLIENT] === PSI Flow Complete ===\n');
 
-    // クライアントの PSI 結果のみ返す
-    return clientCommon.map(_bytesToHex).toList();
+    // ------------------------------------------------------------
+    // 7. 顔見知り判定（自分が生成した鍵を持っているか）
+    // ------------------------------------------------------------
+    final commonHex = clientCommon.map(_bytesToHex).toList();
+
+    final myGeneratedHex = generated.map(_bytesToHex).toSet();
+    final familiar =
+        commonHex.toSet().intersection(myGeneratedHex).isNotEmpty;
+
+    return PsiResult(
+      commonKeys: commonHex,
+      isFamiliar: familiar,
+    );
   }
 
+  // HEX 変換
   String _bytesToHex(List<int> bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }

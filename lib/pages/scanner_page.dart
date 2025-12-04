@@ -1,3 +1,4 @@
+// lib/pages/scanner_page.dart
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -29,7 +30,8 @@ class _ScannerPageState extends State<ScannerPage> {
   String? ipToConnect;
   int? portToConnect;
 
-  final MobileScannerController _scannerController = MobileScannerController();
+  final MobileScannerController _scannerController =
+  MobileScannerController();
 
   /// ======== カメラ排他ロック ========
   bool _cameraLock = false;
@@ -63,9 +65,9 @@ class _ScannerPageState extends State<ScannerPage> {
   String _bytesToHex(Uint8List bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
-  /// ===================================================================
-  /// 接続確認 → gRPC接続 → PSI実行
-  /// ===================================================================
+  // ===================================================================
+  //   接続確認 → gRPC → PSI 実行 → PsiResult を ExchangePage へ返す
+  // ===================================================================
   Future<void> _confirmAndConnect(String ip, int port) async {
     await safeStopCamera();
 
@@ -89,13 +91,14 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
     );
 
+    // キャンセルされたらカメラ再開
     if (ok != true) {
       _isProcessingScan = false;
       await safeStartCamera();
       return;
     }
 
-    // ローディング
+    // ローディング表示
     if (!mounted) return;
     showDialog(
       context: context,
@@ -112,29 +115,27 @@ class _ScannerPageState extends State<ScannerPage> {
       print('[CLIENT] connect() success');
 
       print('[Scanner] 🔍 Starting PSI...');
-      final commonKeys = await _client.executePsi();
+
+      /// ★ PsiResult を返す
+      final psiResult = await _client.executePsi();
 
       print('\n[Scanner] ✅ PSI Complete!');
-      print('Found ${commonKeys.length} common keys.');
+      print('👉 common=${psiResult.commonKeys.length}, '
+          'familiar=${psiResult.isFamiliar}');
 
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
+        Navigator.of(context, rootNavigator: true).pop(); // loading close
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('PSI完了: 共通鍵 ${commonKeys.length} 件を発見しました'),
-            backgroundColor:
-            commonKeys.isNotEmpty ? Colors.green : Colors.black,
-          ),
-        );
-
-        Navigator.pop(context, 'PSI完了: ${commonKeys.length}件一致');
+        /// ★ ScannerPage を閉じて結果を返す（SnackBar は出さない）
+        Navigator.pop(context, psiResult);
       }
     } catch (e) {
       print('[CLIENT] PSI/Exchange ERROR: $e');
 
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
+        Navigator.of(context, rootNavigator: true).pop(); // loading close
+
+        /// ★ 失敗時だけ SnackBar 表示
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('接続またはPSI実行に失敗しました: $e'),
@@ -203,9 +204,9 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  /// ===================================================================
-  /// UI
-  /// ===================================================================
+  // ===================================================================
+  // UI
+  // ===================================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -223,9 +224,8 @@ class _ScannerPageState extends State<ScannerPage> {
                 await safeStartCamera();
               }
             },
-            icon: Icon(
-              isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard,
-            ),
+            icon:
+            Icon(isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard),
           ),
         ],
       ),
