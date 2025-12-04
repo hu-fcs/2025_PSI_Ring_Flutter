@@ -20,8 +20,7 @@ void main() async {
     databaseFactory = databaseFactoryFfi;
   }
 
-  // データベースとテーブルを初期化（存在しない場合のみ作成）
-  await DatabaseHelper.initDatabase();
+  await DatabaseHelper.getDatabase(); // 初回生成される
 
   // KeyManagementServiceを初期化して鍵生成を開始
   final keyService = KeyManagementService();

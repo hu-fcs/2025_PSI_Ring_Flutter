@@ -1,3 +1,4 @@
+// lib/pages/scanner_page.dart
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -32,6 +33,27 @@ class _ScannerPageState extends State<ScannerPage> {
   final MobileScannerController _scannerController =
   MobileScannerController();
 
+  /// ======== カメラ排他ロック ========
+  bool _cameraLock = false;
+
+  Future<void> safeStopCamera() async {
+    if (_cameraLock) return;
+    _cameraLock = true;
+    try {
+      await _scannerController.stop();
+    } catch (_) {}
+    _cameraLock = false;
+  }
+
+  Future<void> safeStartCamera() async {
+    if (_cameraLock) return;
+    _cameraLock = true;
+    try {
+      await _scannerController.start();
+    } catch (_) {}
+    _cameraLock = false;
+  }
+
   @override
   void dispose() {
     ipController.dispose();
@@ -40,18 +62,16 @@ class _ScannerPageState extends State<ScannerPage> {
     super.dispose();
   }
 
-  /// バイト列を16進文字列へ
   String _bytesToHex(Uint8List bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
-  /// ----------------------------------------------------------------------
-  ///  接続確認 → gRPC 接続 の本体
-  /// ----------------------------------------------------------------------
+  // ===================================================================
+  //   接続確認 → gRPC → PSI 実行 → PsiResult を ExchangePage へ返す
+  // ===================================================================
   Future<void> _confirmAndConnect(String ip, int port) async {
-    // ★ まずカメラ停止（この時点で背景は静止）
-    await _scannerController.stop();
+    await safeStopCamera();
 
-    // ---- 接続確認ダイアログ ----
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -71,18 +91,19 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
     );
 
-    // キャンセルされたら再開して終了
+    // キャンセルされたらカメラ再開
     if (ok != true) {
       _isProcessingScan = false;
-      _scannerController.start();
+      await safeStartCamera();
       return;
     }
 
-    // ---- ローディング表示（確認ダイアログが完全に閉じてから表示）----
+    // ローディング表示
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withOpacity(0.1), // 暗くなりすぎない
+      barrierColor: Colors.black.withOpacity(0.1),
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
@@ -93,51 +114,44 @@ class _ScannerPageState extends State<ScannerPage> {
       await _client.connect(ip, port);
       print('[CLIENT] connect() success');
 
-      final generated = await _keyService.getAllGeneratedPublicKeys();
-      final collected = await _keyService.getAllCollectedPublicKeys();
-      final all = [...generated, ...collected];
-      final myKeysHex = all.map(_bytesToHex).toList();
+      print('[Scanner] 🔍 Starting PSI...');
 
-      print('🔑 [Client] sending ${myKeysHex.length} keys to $ip:$port');
-      for (var i = 0; i < myKeysHex.length; i++) {
-        print('🔑 [Client]   my key[$i]: ${myKeysHex[i]}');
-      }
+      /// ★ PsiResult を返す
+      final psiResult = await _client.executePsi();
 
-      final remoteKeys = await _client.exchangeKeys(myKeysHex);
-
-      print('📥 [Client] received ${remoteKeys.length} keys from server');
+      print('\n[Scanner] ✅ PSI Complete!');
+      print('👉 common=${psiResult.commonKeys.length}, '
+          'familiar=${psiResult.isFamiliar}');
 
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+        Navigator.of(context, rootNavigator: true).pop(); // loading close
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '鍵交換成功: 送信 ${myKeysHex.length} 件 / 受信 ${remoteKeys.length} 件',
-            ),
-          ),
-        );
-
-        Navigator.pop(context, '鍵交換成功');
+        /// ★ ScannerPage を閉じて結果を返す（SnackBar は出さない）
+        Navigator.pop(context, psiResult);
       }
     } catch (e) {
-      print('[CLIENT] exchangeKeys ERROR: $e');
+      print('[CLIENT] PSI/Exchange ERROR: $e');
 
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // ローディング閉じる
+        Navigator.of(context, rootNavigator: true).pop(); // loading close
+
+        /// ★ 失敗時だけ SnackBar 表示
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('接続または鍵交換に失敗: $e')),
+          SnackBar(
+            content: Text('接続またはPSI実行に失敗しました: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
 
       _isProcessingScan = false;
-      _scannerController.start();
+      await safeStartCamera();
     } finally {
       if (mounted) setState(() => isConnecting = false);
     }
   }
 
-  /// 手入力で接続
+  /// 手入力接続
   Future<void> _connectManual() async {
     final ip = ipController.text.trim();
     final port = int.tryParse(portController.text) ?? 50051;
@@ -150,7 +164,7 @@ class _ScannerPageState extends State<ScannerPage> {
     }
 
     _isProcessingScan = true;
-    await _scannerController.stop();
+    await safeStopCamera();
     await _confirmAndConnect(ip, port);
   }
 
@@ -158,16 +172,14 @@ class _ScannerPageState extends State<ScannerPage> {
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (isConnecting || _isProcessingScan) return;
 
-    final barcodes = capture.barcodes;
-
-    for (final barcode in barcodes) {
+    for (final barcode in capture.barcodes) {
       final raw = barcode.rawValue;
       if (raw == null) continue;
 
       _isProcessingScan = true;
 
       try {
-        await _scannerController.stop();
+        await safeStopCamera();
 
         final map = jsonDecode(raw) as Map<String, dynamic>;
         final ip = map['ip'];
@@ -179,21 +191,22 @@ class _ScannerPageState extends State<ScannerPage> {
         await _confirmAndConnect(ip, port);
       } catch (e) {
         print('QR decode error: $e');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('QRコードの形式が不正です')),
-        );
-
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('QRコードの形式が不正です')),
+          );
+        }
         _isProcessingScan = false;
-        _scannerController.start();
+        await safeStartCamera();
       }
 
       break;
     }
   }
 
-  /// ----------------------------------------------------------------------
-  /// UI
-  /// ----------------------------------------------------------------------
+  // ===================================================================
+  // UI
+  // ===================================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,27 +215,24 @@ class _ScannerPageState extends State<ScannerPage> {
         actions: [
           IconButton(
             tooltip: isManualInputMode ? 'カメラで読み取る' : '手入力する',
-            onPressed: () {
+            onPressed: () async {
               setState(() => isManualInputMode = !isManualInputMode);
               if (isManualInputMode) {
-                _scannerController.stop();
+                await safeStopCamera();
               } else {
                 _isProcessingScan = false;
-                _scannerController.start();
+                await safeStartCamera();
               }
             },
-            icon: Icon(
-              isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard,
-            ),
+            icon:
+            Icon(isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard),
           ),
         ],
       ),
-
       body: isManualInputMode ? _buildManual() : _buildScanner(),
     );
   }
 
-  /// 手入力UI
   Widget _buildManual() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -255,7 +265,6 @@ class _ScannerPageState extends State<ScannerPage> {
     );
   }
 
-  /// カメラスキャナUI
   Widget _buildScanner() {
     return Stack(
       children: [
@@ -263,16 +272,15 @@ class _ScannerPageState extends State<ScannerPage> {
           controller: _scannerController,
           onDetect: _onDetect,
         ),
-
         Positioned(
           left: 16,
           right: 16,
           bottom: 16,
           child: Card(
-            elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -282,7 +290,7 @@ class _ScannerPageState extends State<ScannerPage> {
                   if (ipToConnect != null && portToConnect != null) ...[
                     const SizedBox(height: 8),
                     Text('検出: $ipToConnect:$portToConnect'),
-                  ],
+                  ]
                 ],
               ),
             ),

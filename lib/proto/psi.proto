@@ -1,23 +1,30 @@
 syntax = "proto3";
 package psi;
 
-message PingReq {
-  string msg = 1;
-}
+// 疎通確認
+message PingReq { string msg = 1; }
+message PingResp { string msg = 1; }
 
-message PingResp {
-  string msg = 1;
-}
-
+// Phase 1
 message KeyExchangeReq {
-  repeated bytes keys = 1;
+  repeated bytes enc_keys = 1;
 }
 
 message KeyExchangeResp {
-  repeated bytes keys = 1;
+  repeated bytes server_enc_keys = 1;
+  repeated bytes client_reenc_keys = 2;
 }
+
+// Phase 2
+message ClientFinalReq {
+  repeated bytes client_reenc_server_keys = 1;
+}
+
+// サーバが返すものは何も不要
+message PsiDone {}
 
 service PsiService {
   rpc Ping (PingReq) returns (PingResp);
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
+  rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
 }

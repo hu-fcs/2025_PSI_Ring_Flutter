@@ -43,22 +43,58 @@ final $typed_data.Uint8List pingRespDescriptor =
 const KeyExchangeReq$json = {
   '1': 'KeyExchangeReq',
   '2': [
-    {'1': 'keys', '3': 1, '4': 3, '5': 12, '10': 'keys'},
+    {'1': 'enc_keys', '3': 1, '4': 3, '5': 12, '10': 'encKeys'},
   ],
 };
 
 /// Descriptor for `KeyExchangeReq`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List keyExchangeReqDescriptor =
-    $convert.base64Decode('Cg5LZXlFeGNoYW5nZVJlcRISCgRrZXlzGAEgAygMUgRrZXlz');
+final $typed_data.Uint8List keyExchangeReqDescriptor = $convert.base64Decode(
+    'Cg5LZXlFeGNoYW5nZVJlcRIZCghlbmNfa2V5cxgBIAMoDFIHZW5jS2V5cw==');
 
 @$core.Deprecated('Use keyExchangeRespDescriptor instead')
 const KeyExchangeResp$json = {
   '1': 'KeyExchangeResp',
   '2': [
-    {'1': 'keys', '3': 1, '4': 3, '5': 12, '10': 'keys'},
+    {'1': 'server_enc_keys', '3': 1, '4': 3, '5': 12, '10': 'serverEncKeys'},
+    {
+      '1': 'client_reenc_keys',
+      '3': 2,
+      '4': 3,
+      '5': 12,
+      '10': 'clientReencKeys'
+    },
   ],
 };
 
 /// Descriptor for `KeyExchangeResp`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List keyExchangeRespDescriptor = $convert
-    .base64Decode('Cg9LZXlFeGNoYW5nZVJlc3ASEgoEa2V5cxgBIAMoDFIEa2V5cw==');
+final $typed_data.Uint8List keyExchangeRespDescriptor = $convert.base64Decode(
+    'Cg9LZXlFeGNoYW5nZVJlc3ASJgoPc2VydmVyX2VuY19rZXlzGAEgAygMUg1zZXJ2ZXJFbmNLZX'
+    'lzEioKEWNsaWVudF9yZWVuY19rZXlzGAIgAygMUg9jbGllbnRSZWVuY0tleXM=');
+
+@$core.Deprecated('Use clientFinalReqDescriptor instead')
+const ClientFinalReq$json = {
+  '1': 'ClientFinalReq',
+  '2': [
+    {
+      '1': 'client_reenc_server_keys',
+      '3': 1,
+      '4': 3,
+      '5': 12,
+      '10': 'clientReencServerKeys'
+    },
+  ],
+};
+
+/// Descriptor for `ClientFinalReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List clientFinalReqDescriptor = $convert.base64Decode(
+    'Cg5DbGllbnRGaW5hbFJlcRI3ChhjbGllbnRfcmVlbmNfc2VydmVyX2tleXMYASADKAxSFWNsaW'
+    'VudFJlZW5jU2VydmVyS2V5cw==');
+
+@$core.Deprecated('Use psiDoneDescriptor instead')
+const PsiDone$json = {
+  '1': 'PsiDone',
+};
+
+/// Descriptor for `PsiDone`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List psiDoneDescriptor =
+    $convert.base64Decode('CgdQc2lEb25l');

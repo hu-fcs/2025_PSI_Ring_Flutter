@@ -16,6 +16,7 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
+/// 疎通確認
 class PingReq extends $pb.GeneratedMessage {
   factory PingReq({
     $core.String? msg,
@@ -122,12 +123,15 @@ class PingResp extends $pb.GeneratedMessage {
   void clearMsg() => $_clearField(1);
 }
 
+/// ------------------------------------------------------------
+/// ECC-PSI Phase 1
+/// ------------------------------------------------------------
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
-    $core.Iterable<$core.List<$core.int>>? keys,
+    $core.Iterable<$core.List<$core.int>>? encKeys,
   }) {
     final result = create();
-    if (keys != null) result.keys.addAll(keys);
+    if (encKeys != null) result.encKeys.addAll(encKeys);
     return result;
   }
 
@@ -145,7 +149,7 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
-        1, _omitFieldNames ? '' : 'keys', $pb.PbFieldType.PY)
+        1, _omitFieldNames ? '' : 'encKeys', $pb.PbFieldType.PY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -168,15 +172,17 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
   static KeyExchangeReq? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $pb.PbList<$core.List<$core.int>> get keys => $_getList(0);
+  $pb.PbList<$core.List<$core.int>> get encKeys => $_getList(0);
 }
 
 class KeyExchangeResp extends $pb.GeneratedMessage {
   factory KeyExchangeResp({
-    $core.Iterable<$core.List<$core.int>>? keys,
+    $core.Iterable<$core.List<$core.int>>? serverEncKeys,
+    $core.Iterable<$core.List<$core.int>>? clientReencKeys,
   }) {
     final result = create();
-    if (keys != null) result.keys.addAll(keys);
+    if (serverEncKeys != null) result.serverEncKeys.addAll(serverEncKeys);
+    if (clientReencKeys != null) result.clientReencKeys.addAll(clientReencKeys);
     return result;
   }
 
@@ -194,7 +200,9 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
-        1, _omitFieldNames ? '' : 'keys', $pb.PbFieldType.PY)
+        1, _omitFieldNames ? '' : 'serverEncKeys', $pb.PbFieldType.PY)
+    ..p<$core.List<$core.int>>(
+        2, _omitFieldNames ? '' : 'clientReencKeys', $pb.PbFieldType.PY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -217,7 +225,101 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
   static KeyExchangeResp? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $pb.PbList<$core.List<$core.int>> get keys => $_getList(0);
+  $pb.PbList<$core.List<$core.int>> get serverEncKeys => $_getList(0);
+
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
+}
+
+/// ------------------------------------------------------------
+/// ECC-PSI Phase 2
+/// ------------------------------------------------------------
+class ClientFinalReq extends $pb.GeneratedMessage {
+  factory ClientFinalReq({
+    $core.Iterable<$core.List<$core.int>>? clientReencServerKeys,
+  }) {
+    final result = create();
+    if (clientReencServerKeys != null)
+      result.clientReencServerKeys.addAll(clientReencServerKeys);
+    return result;
+  }
+
+  ClientFinalReq._();
+
+  factory ClientFinalReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory ClientFinalReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ClientFinalReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..p<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'clientReencServerKeys', $pb.PbFieldType.PY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientFinalReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientFinalReq copyWith(void Function(ClientFinalReq) updates) =>
+      super.copyWith((message) => updates(message as ClientFinalReq))
+          as ClientFinalReq;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static ClientFinalReq create() => ClientFinalReq._();
+  @$core.override
+  ClientFinalReq createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static ClientFinalReq getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ClientFinalReq>(create);
+  static ClientFinalReq? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<$core.List<$core.int>> get clientReencServerKeys => $_getList(0);
+}
+
+/// ★ Empty と同じ意味の自作メッセージ
+class PsiDone extends $pb.GeneratedMessage {
+  factory PsiDone() => create();
+
+  PsiDone._();
+
+  factory PsiDone.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory PsiDone.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PsiDone',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      createEmptyInstance: create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PsiDone clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PsiDone copyWith(void Function(PsiDone) updates) =>
+      super.copyWith((message) => updates(message as PsiDone)) as PsiDone;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static PsiDone create() => PsiDone._();
+  @$core.override
+  PsiDone createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static PsiDone getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PsiDone>(create);
+  static PsiDone? _defaultInstance;
 }
 
 const $core.bool _omitFieldNames =

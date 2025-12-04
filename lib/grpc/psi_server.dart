@@ -1,84 +1,228 @@
-// psi_server.dart
+// lib/grpc/psi_server.dart
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
+import '../native_key_service.dart';
 import '../key_management_service.dart';
+import 'psi_client.dart'; // ★ PsiResult を使う
 
+/// ===============================================================
+///  ECC-PSI サーバ
+///  - FinalizePsi は結果を gRPC では返さない（PsiDone）
+///  - 代わりに Stream<PsiResult> で UI にイベント通知
+/// ===============================================================
 class PsiServiceImpl extends PsiServiceBase {
-  final KeyManagementService _keyService = KeyManagementService();
+  final NativeKeyService _keyService = NativeKeyService();
+  final KeyManagementService _kms = KeyManagementService();
 
-  // デバッグログ用: バイト列をHex文字列に変換
-  String _bytesToHex(List<int> bytes) =>
-      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  late final Future<void> _ready;
 
+  late Uint8List _mySecret;          // 秘密スカラー a
+  List<Uint8List> _myKeys = [];      // P（generated + collected）
+  List<Uint8List> _myEncKeys = [];   // aP
+
+  // ★ 自分が「生成した」鍵のみ HEX で保持（顔見知り判定用）
+  List<String> _myGeneratedKeysHex = [];
+
+  // クライアント集合 Q に対する abQ
+  List<Uint8List> _serverAbQ = [];
+
+  // ★ PSI完了イベント（共通集合 + 顔見知り判定をまとめて通知）
+  final StreamController<PsiResult> _psiEventController =
+  StreamController<PsiResult>.broadcast();
+  Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
+
+  PsiServiceImpl() {
+    _ready = _initialize();
+
+    // BLE鍵ホットリロード（DebugPage の DB 更新はここには含まれない）
+    _kms.onKeyUpdated.listen((_) async {
+      print('[SERVER] 🔔 BLE keys changed → reloading PSI keys...');
+      await _reloadKeys();
+      print('[SERVER] 🔄 PSI keyset updated.');
+    });
+  }
+
+  // --------------------------------------------------------------
+  /// 初期化
+  // --------------------------------------------------------------
+  Future<void> _initialize() async {
+    print('[SERVER] === Initializing PSI Server ===');
+
+    _mySecret = _keyService.generateRandomSecret();
+    await _reloadKeys();
+
+    print('[SERVER] === PSI Server Ready ===');
+  }
+
+  // --------------------------------------------------------------
+  /// DB から鍵を読み込み aP を再計算
+  ///  - generated: 自分が生成した鍵
+  ///  - collected: 相手などから収集した鍵
+  // --------------------------------------------------------------
+  Future<void> _reloadKeys() async {
+    final generated = await _kms.getAllGeneratedPublicKeys(); // 自分の鍵
+    final collected = await _kms.getAllCollectedPublicKeys(); // 他人の鍵
+
+    _myGeneratedKeysHex =
+        generated.map((e) => _hex(e)).toList(growable: false);
+
+    _myKeys = [...generated, ...collected];
+
+    print('[SERVER] Loaded ${_myKeys.length} BLE keys.');
+
+    _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
+    print('[SERVER] 🔒 Recomputed server aP keys.');
+  }
+
+  Future<void> _ensureReady() async => await _ready;
+
+  // --------------------------------------------------------------
   @override
   Future<PingResp> ping(ServiceCall call, PingReq request) async {
-    // Pingは純粋な疎通確認用に戻します
-    print('[SERVER] ping() called');
-    final msg = request.msg;
-    print('[gRPC Server] Ping received: $msg');
-
-    return PingResp()..msg = 'pong: $msg';
+    await _ensureReady();
+    return PingResp()..msg = 'pong: ${request.msg}';
   }
 
-  // ★ 新規追加: 鍵交換専用RPCの実装
+  // --------------------------------------------------------------
+  /// Phase 1: bQ を受け取り abQ と aP を返す
+  // --------------------------------------------------------------
   @override
-  Future<KeyExchangeResp> exchangeKeys(ServiceCall call, KeyExchangeReq request) async {
-    print('[SERVER] exchangeKeys() called');
+  Future<KeyExchangeResp> exchangeKeys(
+      ServiceCall call, KeyExchangeReq request) async {
+    await _ensureReady();
 
-    // 1. クライアントから受信した鍵リスト (List<List<int>>)
-    final clientKeys = request.keys;
-    print('[gRPC Server] 🔑 Received ${clientKeys.length} keys from client');
+    print('\n[SERVER] === exchangeKeys() called ===');
 
-    // ログ出力 (数が多い場合は最初の数件のみ表示するなど調整してください)
-    for (var i = 0; i < clientKeys.length; i++) {
-      // 全て出すと多い場合は if (i < 5) 等で制限
-      print('[gRPC Server]   client key[$i]: ${_bytesToHex(clientKeys[i])}');
-    }
+    // PSI 開始前に、DebugPage などの DB 更新を反映
+    await _reloadKeys();
 
-    // 2. サーバ側の鍵を取得
-    // KeyManagementServiceは Uint8List のリストを返すと想定
-    final generated = await _keyService.getAllGeneratedPublicKeys();
-    final collected = await _keyService.getAllCollectedPublicKeys();
+    final bQ = request.encKeys.map(Uint8List.fromList).toList();
+    print('[SERVER] 📥 Received ${bQ.length} bQ keys.');
 
-    // 3. リストを結合
-    // protobufの repeated bytes は Dartでは List<List<int>> にマッピングされます
-    // Uint8List は List<int> を実装しているため、そのまま格納可能です
-    final allServerKeys = <List<int>>[...generated, ...collected];
+    // abQ = a(bQ)
+    _serverAbQ = _keyService.encryptSet(bQ, _mySecret);
+    print('[SERVER] 🔒 Computed abQ keys.');
 
-    print('[gRPC Server] 🔑 Sending ${allServerKeys.length} keys back to client');
+    final resp = KeyExchangeResp()
+      ..serverEncKeys.addAll(_myEncKeys)    // aP
+      ..clientReencKeys.addAll(_serverAbQ); // abQ
 
-    // ログ出力
-    for (var i = 0; i < allServerKeys.length; i++) {
-      print('[gRPC Server]   server key[$i]: ${_bytesToHex(allServerKeys[i])}');
-    }
-
-    // 4. レスポンスを返却
-    return KeyExchangeResp()..keys.addAll(allServerKeys);
+    print('[SERVER] 📤 Sent aP and abQ.');
+    return resp;
   }
+
+  // --------------------------------------------------------------
+  /// Phase 2: abP を受け取り PSI を完了
+  ///         - gRPC の戻り値は PsiDone（軽量）
+  ///         - UI には Stream<PsiResult> で通知
+  // --------------------------------------------------------------
+  @override
+  Future<PsiDone> finalizePsi(
+      ServiceCall call, ClientFinalReq request) async {
+    await _ensureReady();
+
+    print('\n[SERVER] === finalizePsi() called ===');
+
+    final clientAbP =
+    request.clientReencServerKeys.map(Uint8List.fromList).toList();
+
+    print('[SERVER] 📥 Received ${clientAbP.length} abP keys.');
+
+    // PSI 共通鍵（元の公開鍵 P のリスト）
+    final intersected = _computeServerIntersection(
+      serverAbQ: _serverAbQ,
+      clientAbP: clientAbP,
+      originalKeys: _myKeys,
+    );
+
+    print('[SERVER] 🎯 PSI intersection = ${intersected.length} items.');
+    if (intersected.isNotEmpty) {
+      print('[SERVER] 💍 [Intersection Results]');
+      for (int i = 0; i < intersected.length; i++) {
+        print('[SERVER]   common[$i]: ${_hex(intersected[i])}');
+      }
+    }
+
+    // ----------------------------------------------------------
+    // 顔見知り判定:
+    //   - intersected に「自分が生成した鍵」の HEX が含まれているか
+    // ----------------------------------------------------------
+    final commonHex = intersected.map(_hex).toList(growable: false);
+    final myGenSet = _myGeneratedKeysHex.toSet();
+    final familiar =
+        commonHex.toSet().intersection(myGenSet).isNotEmpty;
+
+    print('[SERVER] 👤 Familiar? → $familiar');
+
+    // UI（ExchangePage）へイベント通知
+    final psiResult = PsiResult(
+      commonKeys: commonHex,
+      isFamiliar: familiar,
+    );
+    _psiEventController.add(psiResult);
+
+    // gRPC レスポンス自体は軽量な PsiDone のみ
+    return PsiDone();
+  }
+
+  // --------------------------------------------------------------
+  /// abQ と abP を比較し、一致する P[i] を返す
+  // --------------------------------------------------------------
+  List<Uint8List> _computeServerIntersection({
+    required List<Uint8List> serverAbQ,   // abQ
+    required List<Uint8List> clientAbP,   // abP
+    required List<Uint8List> originalKeys, // P
+  }) {
+    final abQSet = <String>{};
+    for (final q in serverAbQ) {
+      abQSet.add(_hex(q));
+    }
+
+    final result = <Uint8List>[];
+
+    final len = (clientAbP.length < originalKeys.length)
+        ? clientAbP.length
+        : originalKeys.length;
+
+    for (int i = 0; i < len; i++) {
+      if (abQSet.contains(_hex(clientAbP[i]))) {
+        result.add(originalKeys[i]);
+      }
+    }
+
+    return result;
+  }
+
+  String _hex(Uint8List b) =>
+      b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 }
 
+/// ===============================================================
+/// gRPC Server 管理
+/// ===============================================================
 class PsiGrpcServer {
   Server? _server;
   int? _port;
 
+  // ★ PsiServiceImpl を直接参照できるようにしておく
+  late PsiServiceImpl service;
+
   bool get isRunning => _server != null;
-  int? get port => _port;
 
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
+    service = PsiServiceImpl();
+    await service._ready;
+
     final server = Server.create(
-      services: [PsiServiceImpl()],
-      interceptors: const <Interceptor>[],
-      codecRegistry: CodecRegistry(
-        codecs: [
-          GzipCodec(),
-          IdentityCodec(),
-        ],
-      ),
+      services: [service],
+      interceptors: const [],
+      codecRegistry: CodecRegistry(codecs: [GzipCodec(), IdentityCodec()]),
     );
 
     await server.serve(
@@ -89,7 +233,7 @@ class PsiGrpcServer {
     _server = server;
     _port = server.port;
 
-    print('[gRPC Server] started on 0.0.0.0:${_port}');
+    print('[gRPC Server] Listening on 0.0.0.0:${_port}');
     return _port!;
   }
 
@@ -97,6 +241,7 @@ class PsiGrpcServer {
     final s = _server;
     _server = null;
     _port = null;
+
     if (s != null) {
       await s.shutdown();
       print('[gRPC Server] stopped');
