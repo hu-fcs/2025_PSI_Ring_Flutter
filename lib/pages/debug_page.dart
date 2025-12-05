@@ -16,7 +16,7 @@ import '../ble/ble_scanner.dart';
 import '../boringssl_service.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
-import '../native_key_service.dart';
+import '../ffi/native_key_service.dart';
 
 
 // ================================================================

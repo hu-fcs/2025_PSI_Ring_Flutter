@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:math';                 // ← Random.secure() のために追加
 import 'package:ffi/ffi.dart';
 
-import 'native_key_bindings.dart';
+import './native_key_bindings.dart';
 
 // 定数
 const int pubKeyCompressedLen = 33;

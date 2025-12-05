@@ -1,13 +1,13 @@
-// lib/grpc/psi_server.dart
+// lib/grpc/grpc_server.dart
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
-import '../native_key_service.dart';
+import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
-import 'psi_client.dart'; // ★ PsiResult を使う
+import 'grpc_client.dart'; // ★ PsiResult を使う
 
 /// ===============================================================
 ///  ECC-PSI サーバ

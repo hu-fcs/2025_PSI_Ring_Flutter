@@ -6,8 +6,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../ble/ble_exchange_controller.dart';
-import '../grpc/psi_server.dart';
-import '../grpc/psi_client.dart'; // PsiResult
+import '../grpc/grpc_server.dart';
+import '../grpc/grpc_client.dart'; // PsiResult
 import '../key_management_service.dart';
 import '../db/database_helper.dart';
 import 'debug_page.dart';

@@ -1,9 +1,9 @@
-// lib/grpc/psi_client.dart
+// lib/grpc/grpc_client.dart
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
-import '../native_key_service.dart';
+import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
 
 /// ===============================================================

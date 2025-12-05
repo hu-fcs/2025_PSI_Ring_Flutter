@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../grpc/psi_client.dart';
+import '../grpc/grpc_client.dart';
 import '../key_management_service.dart';
 
 class ScannerPage extends StatefulWidget {

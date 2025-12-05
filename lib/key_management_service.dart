@@ -7,7 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'db/database_helper.dart';
-import 'native_key_service.dart';
+import 'ffi/native_key_service.dart';
 
 class KeyManagementService {
   // ================================================================
