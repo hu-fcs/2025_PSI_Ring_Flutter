@@ -2,7 +2,7 @@
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
-import '../proto/generated/psi.pbgrpc.dart';
+import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
 
@@ -25,9 +25,9 @@ class PsiResult {
 /// ===============================================================
 ///                     ECC-PSI クライアント
 /// ===============================================================
-class PsiGrpcClient {
+class GrpcClient {
   ClientChannel? _channel;
-  PsiServiceClient? _stub;
+  GrpcServiceClient? _stub;
 
   final NativeKeyService _keyService = NativeKeyService();
   final KeyManagementService _kms = KeyManagementService();
@@ -35,7 +35,7 @@ class PsiGrpcClient {
   late final Future<void> _ready;
   bool get isConnected => _stub != null;
 
-  PsiGrpcClient() {
+  GrpcClient() {
     _ready = _initialize();
   }
 
@@ -66,7 +66,7 @@ class PsiGrpcClient {
           idleTimeout: Duration(seconds: 30),
         ),
       );
-      _stub = PsiServiceClient(_channel!);
+      _stub = GrpcServiceClient(_channel!);
 
       print('[CLIENT] ✅ Connected to server.');
     } catch (e) {

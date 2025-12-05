@@ -1,6 +1,6 @@
 // This is a generated file - do not edit.
 //
-// Generated from psi.proto.
+// Generated from grpc.proto.
 
 // @dart = 3.3
 
@@ -37,7 +37,7 @@ class PingReq extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PingReq',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..aOS(1, _omitFieldNames ? '' : 'msg')
     ..hasRequiredFields = false;
@@ -90,7 +90,7 @@ class PingResp extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PingResp',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..aOS(1, _omitFieldNames ? '' : 'msg')
     ..hasRequiredFields = false;
@@ -123,9 +123,7 @@ class PingResp extends $pb.GeneratedMessage {
   void clearMsg() => $_clearField(1);
 }
 
-/// ------------------------------------------------------------
-/// ECC-PSI Phase 1
-/// ------------------------------------------------------------
+/// Phase 1
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
     $core.Iterable<$core.List<$core.int>>? encKeys,
@@ -146,7 +144,7 @@ class KeyExchangeReq extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'KeyExchangeReq',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
         1, _omitFieldNames ? '' : 'encKeys', $pb.PbFieldType.PY)
@@ -197,7 +195,7 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'KeyExchangeResp',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
         1, _omitFieldNames ? '' : 'serverEncKeys', $pb.PbFieldType.PY)
@@ -231,9 +229,7 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
   $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
 }
 
-/// ------------------------------------------------------------
-/// ECC-PSI Phase 2
-/// ------------------------------------------------------------
+/// Phase 2
 class ClientFinalReq extends $pb.GeneratedMessage {
   factory ClientFinalReq({
     $core.Iterable<$core.List<$core.int>>? clientReencServerKeys,
@@ -255,7 +251,7 @@ class ClientFinalReq extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'ClientFinalReq',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..p<$core.List<$core.int>>(
         1, _omitFieldNames ? '' : 'clientReencServerKeys', $pb.PbFieldType.PY)
@@ -284,7 +280,7 @@ class ClientFinalReq extends $pb.GeneratedMessage {
   $pb.PbList<$core.List<$core.int>> get clientReencServerKeys => $_getList(0);
 }
 
-/// ★ Empty と同じ意味の自作メッセージ
+/// サーバが返すものは何も不要
 class PsiDone extends $pb.GeneratedMessage {
   factory PsiDone() => create();
 
@@ -299,7 +295,7 @@ class PsiDone extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
       _omitMessageNames ? '' : 'PsiDone',
-      package: const $pb.PackageName(_omitMessageNames ? '' : 'psi'),
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
     ..hasRequiredFields = false;
 

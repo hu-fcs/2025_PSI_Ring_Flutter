@@ -1,5 +1,5 @@
 syntax = "proto3";
-package psi;
+package grpc;
 
 // 疎通確認
 message PingReq { string msg = 1; }
@@ -23,7 +23,7 @@ message ClientFinalReq {
 // サーバが返すものは何も不要
 message PsiDone {}
 
-service PsiService {
+service GrpcService {
   rpc Ping (PingReq) returns (PingResp);
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
   rpc FinalizePsi (ClientFinalReq) returns (PsiDone);

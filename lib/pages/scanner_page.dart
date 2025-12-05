@@ -16,7 +16,7 @@ class ScannerPage extends StatefulWidget {
 }
 
 class _ScannerPageState extends State<ScannerPage> {
-  final _client = PsiGrpcClient();
+  final _client = GrpcClient();
   final _keyService = KeyManagementService();
 
   bool isConnecting = false;

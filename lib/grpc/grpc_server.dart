@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
-import '../proto/generated/psi.pbgrpc.dart';
+import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
 import 'grpc_client.dart'; // ★ PsiResult を使う
@@ -14,7 +14,7 @@ import 'grpc_client.dart'; // ★ PsiResult を使う
 ///  - FinalizePsi は結果を gRPC では返さない（PsiDone）
 ///  - 代わりに Stream<PsiResult> で UI にイベント通知
 /// ===============================================================
-class PsiServiceImpl extends PsiServiceBase {
+class GrpcServiceImpl extends GrpcServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
   final KeyManagementService _kms = KeyManagementService();
 
@@ -35,7 +35,7 @@ class PsiServiceImpl extends PsiServiceBase {
   StreamController<PsiResult>.broadcast();
   Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
 
-  PsiServiceImpl() {
+  GrpcServiceImpl() {
     _ready = _initialize();
 
     // BLE鍵ホットリロード（DebugPage の DB 更新はここには含まれない）
@@ -209,14 +209,14 @@ class PsiGrpcServer {
   int? _port;
 
   // ★ PsiServiceImpl を直接参照できるようにしておく
-  late PsiServiceImpl service;
+  late GrpcServiceImpl service;
 
   bool get isRunning => _server != null;
 
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
-    service = PsiServiceImpl();
+    service = GrpcServiceImpl();
     await service._ready;
 
     final server = Server.create(

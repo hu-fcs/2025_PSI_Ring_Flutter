@@ -1,9 +1,12 @@
+// lib/pages/exchange_page.dart
+
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../ble/ble_exchange_controller.dart';
 import '../grpc/grpc_server.dart';
@@ -80,8 +83,34 @@ class _ExchangePageState extends State<ExchangePage> {
     return await Permission.location.isGranted;
   }
 
+  /// Bluetooth アダプタを ON にする。
+  /// Android で「〜がBluetoothをONにしようとしています」のダイアログを
+  /// 一度だけ出し、ON になるまで待つ。
+  Future<bool> _ensureBluetoothEnabled() async {
+    try {
+      // 現在の状態を確認
+      final current = await FlutterBluePlus.adapterState.first;
+      if (current == BluetoothAdapterState.on) {
+        return true;
+      }
+
+      // OFF なら、OS 標準ダイアログを 1 回だけ表示
+      await FlutterBluePlus.turnOn();
+
+      // ON になるまで最大30秒待機（ユーザがキャンセルした場合などは timeout）
+      final state = await FlutterBluePlus.adapterState
+          .firstWhere((s) => s == BluetoothAdapterState.on)
+          .timeout(const Duration(seconds: 30));
+
+      return state == BluetoothAdapterState.on;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _toggleBleExchange() async {
     if (!_bleRunning) {
+      // 起動時のみ権限 & Bluetooth ON をチェック
       if (!await _ensureBlePermissions()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -90,7 +119,18 @@ class _ExchangePageState extends State<ExchangePage> {
         }
         return;
       }
+
       await _ensureLocationPermissions();
+
+      final enabled = await _ensureBluetoothEnabled();
+      if (!enabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Bluetooth を ON にできませんでした')),
+          );
+        }
+        return;
+      }
     }
 
     await _ble.toggleExchange();
@@ -169,7 +209,10 @@ class _ExchangePageState extends State<ExchangePage> {
   // ==========================================================
   /// ★ クライアント／サーバ共通のポップアップ
   // ==========================================================
-  Future<void> _showUnifiedPsiDialog(PsiResult psi, {required bool isServerSide}) async {
+  Future<void> _showUnifiedPsiDialog(
+      PsiResult psi, {
+        required bool isServerSide,
+      }) async {
     final familiar = psi.isFamiliar;
     final commonCount = psi.commonKeys.length;
 
@@ -213,8 +256,10 @@ class _ExchangePageState extends State<ExchangePage> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('PSI Ring Match',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              'PSI Ring Match',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             Text('通信設定', style: TextStyle(fontSize: 14)),
           ],
         ),
@@ -237,28 +282,35 @@ class _ExchangePageState extends State<ExchangePage> {
           // BLE
           // ------------------------------------------------------
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('BLE 近接交換',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'BLE 近接交換',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       FilledButton.icon(
                         onPressed: _toggleBleExchange,
-                        icon: Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
+                        icon: Icon(
+                          _bleRunning ? Icons.stop : Icons.play_arrow,
+                        ),
                         label: Text(_bleRunning ? '停止' : '開始'),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
-                        style:
-                        TextStyle(color: _bleRunning ? Colors.green : Colors.grey),
+                        style: TextStyle(
+                          color:
+                          _bleRunning ? Colors.green : Colors.grey,
+                        ),
                       ),
                     ],
                   ),
@@ -273,15 +325,18 @@ class _ExchangePageState extends State<ExchangePage> {
           // gRPC
           // ------------------------------------------------------
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('gRPC 接続',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'gRPC 接続',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [

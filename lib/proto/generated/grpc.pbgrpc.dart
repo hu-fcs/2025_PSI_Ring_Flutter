@@ -1,6 +1,6 @@
 // This is a generated file - do not edit.
 //
-// Generated from psi.proto.
+// Generated from grpc.proto.
 
 // @dart = 3.3
 
@@ -16,12 +16,12 @@ import 'dart:core' as $core;
 import 'package:grpc/service_api.dart' as $grpc;
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'psi.pb.dart' as $0;
+import 'grpc.pb.dart' as $0;
 
-export 'psi.pb.dart';
+export 'grpc.pb.dart';
 
-@$pb.GrpcServiceName('psi.PsiService')
-class PsiServiceClient extends $grpc.Client {
+@$pb.GrpcServiceName('grpc.GrpcService')
+class GrpcServiceClient extends $grpc.Client {
   /// The hostname for this service.
   static const $core.String defaultHost = '';
 
@@ -30,7 +30,7 @@ class PsiServiceClient extends $grpc.Client {
     '',
   ];
 
-  PsiServiceClient(super.channel, {super.options, super.interceptors});
+  GrpcServiceClient(super.channel, {super.options, super.interceptors});
 
   $grpc.ResponseFuture<$0.PingResp> ping(
     $0.PingReq request, {
@@ -56,26 +56,26 @@ class PsiServiceClient extends $grpc.Client {
   // method descriptors
 
   static final _$ping = $grpc.ClientMethod<$0.PingReq, $0.PingResp>(
-      '/psi.PsiService/Ping',
+      '/grpc.GrpcService/Ping',
       ($0.PingReq value) => value.writeToBuffer(),
       $0.PingResp.fromBuffer);
   static final _$exchangeKeys =
       $grpc.ClientMethod<$0.KeyExchangeReq, $0.KeyExchangeResp>(
-          '/psi.PsiService/ExchangeKeys',
+          '/grpc.GrpcService/ExchangeKeys',
           ($0.KeyExchangeReq value) => value.writeToBuffer(),
           $0.KeyExchangeResp.fromBuffer);
   static final _$finalizePsi =
       $grpc.ClientMethod<$0.ClientFinalReq, $0.PsiDone>(
-          '/psi.PsiService/FinalizePsi',
+          '/grpc.GrpcService/FinalizePsi',
           ($0.ClientFinalReq value) => value.writeToBuffer(),
           $0.PsiDone.fromBuffer);
 }
 
-@$pb.GrpcServiceName('psi.PsiService')
-abstract class PsiServiceBase extends $grpc.Service {
-  $core.String get $name => 'psi.PsiService';
+@$pb.GrpcServiceName('grpc.GrpcService')
+abstract class GrpcServiceBase extends $grpc.Service {
+  $core.String get $name => 'grpc.GrpcService';
 
-  PsiServiceBase() {
+  GrpcServiceBase() {
     $addMethod($grpc.ServiceMethod<$0.PingReq, $0.PingResp>(
         'Ping',
         ping_Pre,
