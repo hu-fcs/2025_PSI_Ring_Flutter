@@ -32,13 +32,6 @@ class GrpcServiceClient extends $grpc.Client {
 
   GrpcServiceClient(super.channel, {super.options, super.interceptors});
 
-  $grpc.ResponseFuture<$0.PingResp> ping(
-    $0.PingReq request, {
-    $grpc.CallOptions? options,
-  }) {
-    return $createUnaryCall(_$ping, request, options: options);
-  }
-
   $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
     $0.KeyExchangeReq request, {
     $grpc.CallOptions? options,
@@ -55,10 +48,6 @@ class GrpcServiceClient extends $grpc.Client {
 
   // method descriptors
 
-  static final _$ping = $grpc.ClientMethod<$0.PingReq, $0.PingResp>(
-      '/grpc.GrpcService/Ping',
-      ($0.PingReq value) => value.writeToBuffer(),
-      $0.PingResp.fromBuffer);
   static final _$exchangeKeys =
       $grpc.ClientMethod<$0.KeyExchangeReq, $0.KeyExchangeResp>(
           '/grpc.GrpcService/ExchangeKeys',
@@ -76,13 +65,6 @@ abstract class GrpcServiceBase extends $grpc.Service {
   $core.String get $name => 'grpc.GrpcService';
 
   GrpcServiceBase() {
-    $addMethod($grpc.ServiceMethod<$0.PingReq, $0.PingResp>(
-        'Ping',
-        ping_Pre,
-        false,
-        false,
-        ($core.List<$core.int> value) => $0.PingReq.fromBuffer(value),
-        ($0.PingResp value) => value.writeToBuffer()));
     $addMethod($grpc.ServiceMethod<$0.KeyExchangeReq, $0.KeyExchangeResp>(
         'ExchangeKeys',
         exchangeKeys_Pre,
@@ -98,13 +80,6 @@ abstract class GrpcServiceBase extends $grpc.Service {
         ($core.List<$core.int> value) => $0.ClientFinalReq.fromBuffer(value),
         ($0.PsiDone value) => value.writeToBuffer()));
   }
-
-  $async.Future<$0.PingResp> ping_Pre(
-      $grpc.ServiceCall $call, $async.Future<$0.PingReq> $request) async {
-    return ping($call, await $request);
-  }
-
-  $async.Future<$0.PingResp> ping($grpc.ServiceCall call, $0.PingReq request);
 
   $async.Future<$0.KeyExchangeResp> exchangeKeys_Pre($grpc.ServiceCall $call,
       $async.Future<$0.KeyExchangeReq> $request) async {

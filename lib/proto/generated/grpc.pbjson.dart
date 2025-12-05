@@ -15,30 +15,6 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
-@$core.Deprecated('Use pingReqDescriptor instead')
-const PingReq$json = {
-  '1': 'PingReq',
-  '2': [
-    {'1': 'msg', '3': 1, '4': 1, '5': 9, '10': 'msg'},
-  ],
-};
-
-/// Descriptor for `PingReq`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List pingReqDescriptor =
-    $convert.base64Decode('CgdQaW5nUmVxEhAKA21zZxgBIAEoCVIDbXNn');
-
-@$core.Deprecated('Use pingRespDescriptor instead')
-const PingResp$json = {
-  '1': 'PingResp',
-  '2': [
-    {'1': 'msg', '3': 1, '4': 1, '5': 9, '10': 'msg'},
-  ],
-};
-
-/// Descriptor for `PingResp`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List pingRespDescriptor =
-    $convert.base64Decode('CghQaW5nUmVzcBIQCgNtc2cYASABKAlSA21zZw==');
-
 @$core.Deprecated('Use keyExchangeReqDescriptor instead')
 const KeyExchangeReq$json = {
   '1': 'KeyExchangeReq',

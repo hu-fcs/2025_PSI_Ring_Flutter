@@ -81,13 +81,6 @@ class GrpcServiceImpl extends GrpcServiceBase {
   Future<void> _ensureReady() async => await _ready;
 
   // --------------------------------------------------------------
-  @override
-  Future<PingResp> ping(ServiceCall call, PingReq request) async {
-    await _ensureReady();
-    return PingResp()..msg = 'pong: ${request.msg}';
-  }
-
-  // --------------------------------------------------------------
   /// Phase 1: bQ を受け取り abQ と aP を返す
   // --------------------------------------------------------------
   @override
