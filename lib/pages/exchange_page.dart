@@ -52,8 +52,7 @@ class _ExchangePageState extends State<ExchangePage> {
       builder: (_) => AlertDialog(
         title: const Text('鍵がありません'),
         content: const Text(
-          '顔見知り確認のための鍵がありません。\n'
-              'まずは BLE 近接交換を行ってください。',
+          '顔見知り確認のための鍵がありません。\nまずは BLE 近接交換を行ってください。',
         ),
         actions: [
           TextButton(
@@ -144,7 +143,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// gRPC サーバ起動 + イベント購読
+  /// gRPC サーバ起動 + イベント購読（方法A）
   // ==========================================================
   Future<void> _startGrpcServer() async {
     if (!await _requireKeyWarning()) return;
@@ -161,12 +160,14 @@ class _ExchangePageState extends State<ExchangePage> {
     final server = PsiGrpcServer();
     final port = await server.start(port: _serverPort);
 
-    // 🚫 今後これは使わない：PSI フェーズだけの判定は UI に出さない
-    // server.service.onPsiFinished.listen((psi) {
-    //   _showUnifiedPsiDialog(psi, isServerSide: true);
-    // });
+    // ● PSI完了通知（共通集合なしのとき UI 表示）
+    server.service.onPsiFinished.listen((PsiResult psi) {
+      if (!psi.isFamiliar) {
+        _showUnifiedPsiDialog(psi, isServerSide: true);
+      }
+    });
 
-    // 🟦 方法A：リング署名認証成功のみ UI に表示する
+    // ● リング署名成功（共通集合あり & 相互証明完了）
     server.service.onRingAuthenticated.listen((PsiResult psi) {
       _showUnifiedPsiDialog(psi, isServerSide: true);
     });
@@ -188,7 +189,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// クライアント側（ScannerPage）から返された結果を処理
+  /// ScannerPage → クライアント側結果を受け取る
   // ==========================================================
   Future<void> _openScannerPage() async {
     if (!await _requireKeyWarning()) return;
@@ -201,7 +202,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// クライアント／サーバ共通のポップアップ
+  /// PSI / リング署名結果ポップアップ
   // ==========================================================
   Future<void> _showUnifiedPsiDialog(
       PsiResult psi, {
@@ -250,10 +251,8 @@ class _ExchangePageState extends State<ExchangePage> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'PSI Ring Match',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            Text('PSI Ring Match',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             Text('通信設定', style: TextStyle(fontSize: 14)),
           ],
         ),
@@ -276,8 +275,8 @@ class _ExchangePageState extends State<ExchangePage> {
           // BLE 設定
           // --------------------------
           Card(
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -291,14 +290,16 @@ class _ExchangePageState extends State<ExchangePage> {
                     children: [
                       FilledButton.icon(
                         onPressed: _toggleBleExchange,
-                        icon: Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
+                        icon:
+                        Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
                         label: Text(_bleRunning ? '停止' : '開始'),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
                         style: TextStyle(
-                          color: _bleRunning ? Colors.green : Colors.grey,
+                          color:
+                          _bleRunning ? Colors.green : Colors.grey,
                         ),
                       ),
                     ],
@@ -314,8 +315,8 @@ class _ExchangePageState extends State<ExchangePage> {
           // gRPC 設定
           // --------------------------
           Card(
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
