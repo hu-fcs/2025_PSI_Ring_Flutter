@@ -24,8 +24,8 @@ class EcdKeysDao {
     await db.insert(
       'collected_keys',
       {
-        'key_ecd': pubkey33,
-        'ts': tms ~/ 1000,
+        'pubkey_ecd': pubkey33,
+        'receive_time': tms ~/ 1000,
         'lat': latE6,
         'lon': lonE6,
       },

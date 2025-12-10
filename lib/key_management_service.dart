@@ -141,8 +141,8 @@ class KeyManagementService {
 
   Future<List<Uint8List>> getAllCollectedPublicKeys() async {
     final db = await DatabaseHelper.getDatabase();
-    final rows = await db.query('collected_keys', columns: ['key_ecd']);
-    return rows.map((row) => row['key_ecd'] as Uint8List).toList();
+    final rows = await db.query('collected_keys', columns: ['pubkey_ecd']);
+    return rows.map((row) => row['pubkey_ecd'] as Uint8List).toList();
   }
 
   // ================================================================

@@ -136,7 +136,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   // ================================================================
   Future<List<Map<String, dynamic>>> _fetchLimitedKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    final order = tableName == 'generated_keys' ? 'id' : 'ts';
+    final order = tableName == 'generated_keys' ? 'id' : 'receive_time';
     return db.query(tableName, orderBy: '$order DESC', limit: 100);
   }
 
@@ -170,10 +170,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     final random = Random();
     final db = await DatabaseHelper.getDatabase();
     await db.insert('collected_keys', {
-      'key_ecd': keyPair.publicKey,
+      'pubkey_ecd': keyPair.publicKey,
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'receive_time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
@@ -780,7 +780,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           _showFullKeyDialog(
                             context,
                             '収集した鍵',
-                            row['key_ecd'] as List<int>?,
+                            row['pubkey_ecd'] as List<int>?,
                           );
                         }
                       },
@@ -805,7 +805,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Center(
-                              child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
+                              child: Text('Key: ${_shortHex(row['pubkey_ecd'] as List<int>?, length: 20)}',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
                             ),
                             const SizedBox(height: 8),
@@ -820,7 +820,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                               ])),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_formatTime(row['ts'], isSecond: true)),
+                                Text(_formatTime(row['receive_time'], isSecond: true)),
                               ])),
                             ]),
                           ],
