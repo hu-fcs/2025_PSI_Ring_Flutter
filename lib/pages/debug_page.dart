@@ -151,9 +151,9 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     await db.delete(tableName);
 
     // 🔥 収集した鍵を全削除したら BLE キャッシュをリセットする
-    if (tableName == 'ecd_keys') {
+    if (tableName == 'collected_keys') {
       BleScanner.clearCollectedCache();
-      if (kDebugMode) print('DebugPage: 🧹 cache cleared due to ecd_keys deletion');
+      if (kDebugMode) print('DebugPage: 🧹 cache cleared due to collected_keys deletion');
     }
 
     setState(() {});
@@ -169,7 +169,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     if (keyPair == null) return;
     final random = Random();
     final db = await DatabaseHelper.getDatabase();
-    await db.insert('ecd_keys', {
+    await db.insert('collected_keys', {
       'key_ecd': keyPair.publicKey,
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
@@ -732,7 +732,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                   ElevatedButton(onPressed: _insertDummyCollectedKey, child: const Text('ダミー追加')),
                   ElevatedButton(onPressed: _showAddMultipleDummiesDialog, child: const Text('複数追加')),
                   ElevatedButton(
-                    onPressed: () => _deleteAllKeys('ecd_keys'),
+                    onPressed: () => _deleteAllKeys('collected_keys'),
                     child: const Text('全削除'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
                   ),
@@ -855,7 +855,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildKeyListTab('ecd_keys', false),
+                _buildKeyListTab('collected_keys', false),
                 _buildKeyListTab('generated_keys', true),
                 _buildVerificationTab(),
               ],

@@ -44,7 +44,7 @@ class DatabaseHelper {
 
     // 収集鍵（UNIQUE）
     await db.execute('''
-      CREATE TABLE ecd_keys (
+      CREATE TABLE collected_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key_ecd BLOB NOT NULL UNIQUE,
         lat INTEGER NOT NULL,
@@ -60,7 +60,7 @@ class DatabaseHelper {
   static Future<bool> existsCollectedKey(Uint8List key33) async {
     final db = await getDatabase();
     final count = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      "SELECT COUNT(*) FROM collected_keys WHERE key_ecd = ?",
       [key33],
     ));
     return (count ?? 0) > 0;
@@ -78,14 +78,14 @@ class DatabaseHelper {
     final db = await getDatabase();
 
     final exists = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      "SELECT COUNT(*) FROM collected_keys WHERE key_ecd = ?",
       [pubkey33],
     ));
 
     if ((exists ?? 0) > 0) return false;
 
     await db.insert(
-      'ecd_keys',
+      'collected_keys',
       {
         'key_ecd': pubkey33,
         'ts': tms ~/ 1000,
@@ -109,7 +109,7 @@ class DatabaseHelper {
     )) ?? 0;
 
     final collected = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM ecd_keys',
+      'SELECT COUNT(*) FROM collected_keys',
     )) ?? 0;
 
     return generated + collected;
