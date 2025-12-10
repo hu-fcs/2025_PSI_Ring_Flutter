@@ -1,7 +1,10 @@
 syntax = "proto3";
 package grpc;
 
-// Phase 1
+// ================================================================
+// Phase 1 : PSI Key Exchange
+// ================================================================
+
 message KeyExchangeReq {
   repeated bytes enc_keys = 1;
 }
@@ -11,15 +14,62 @@ message KeyExchangeResp {
   repeated bytes client_reenc_keys = 2;
 }
 
-// Phase 2
+
+// ================================================================
+// Phase 2 : PSI Finalization
+// ================================================================
+
 message ClientFinalReq {
   repeated bytes client_reenc_server_keys = 1;
 }
 
-// サーバが返すものは何も不要
 message PsiDone {}
 
+
+// ================================================================
+// Phase 3A : Challenge Exchange (Optimized)
+// ================================================================
+
+// クライアント → サーバ
+message ClientChallenge {
+  bytes challenge_c = 1;       // クライアント生成 32B
+}
+
+// サーバ → クライアント
+message ServerChallenge {
+  bytes challenge_s = 1;       // サーバ生成 32B
+}
+
+
+// ================================================================
+// Phase 3B : Ring Signature Exchange
+// ================================================================
+
+// クライアント → サーバ
+message RingSignatureReq {
+  bytes signature_for_server = 1;   // クライアント署名（challenge_S 用）
+}
+
+// サーバ → クライアント
+message RingSignatureResp {
+  bytes signature_for_client = 1;   // サーバ署名（challenge_C 用）
+}
+
+
+// ================================================================
+// gRPC Service
+// ================================================================
+
 service GrpcService {
+  // Phase 1
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
+
+  // Phase 2
   rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
+
+  // Phase 3A : チャレンジ交換
+  rpc ExchangeChallenges(ClientChallenge) returns (ServerChallenge);
+
+  // Phase 3B : リング署名交換
+  rpc ExchangeRingSignatures(RingSignatureReq) returns (RingSignatureResp);
 }

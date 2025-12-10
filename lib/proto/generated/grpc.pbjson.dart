@@ -74,3 +74,65 @@ const PsiDone$json = {
 /// Descriptor for `PsiDone`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List psiDoneDescriptor =
     $convert.base64Decode('CgdQc2lEb25l');
+
+@$core.Deprecated('Use clientChallengeDescriptor instead')
+const ClientChallenge$json = {
+  '1': 'ClientChallenge',
+  '2': [
+    {'1': 'challenge_c', '3': 1, '4': 1, '5': 12, '10': 'challengeC'},
+  ],
+};
+
+/// Descriptor for `ClientChallenge`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List clientChallengeDescriptor = $convert.base64Decode(
+    'Cg9DbGllbnRDaGFsbGVuZ2USHwoLY2hhbGxlbmdlX2MYASABKAxSCmNoYWxsZW5nZUM=');
+
+@$core.Deprecated('Use serverChallengeDescriptor instead')
+const ServerChallenge$json = {
+  '1': 'ServerChallenge',
+  '2': [
+    {'1': 'challenge_s', '3': 1, '4': 1, '5': 12, '10': 'challengeS'},
+  ],
+};
+
+/// Descriptor for `ServerChallenge`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List serverChallengeDescriptor = $convert.base64Decode(
+    'Cg9TZXJ2ZXJDaGFsbGVuZ2USHwoLY2hhbGxlbmdlX3MYASABKAxSCmNoYWxsZW5nZVM=');
+
+@$core.Deprecated('Use ringSignatureReqDescriptor instead')
+const RingSignatureReq$json = {
+  '1': 'RingSignatureReq',
+  '2': [
+    {
+      '1': 'signature_for_server',
+      '3': 1,
+      '4': 1,
+      '5': 12,
+      '10': 'signatureForServer'
+    },
+  ],
+};
+
+/// Descriptor for `RingSignatureReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List ringSignatureReqDescriptor = $convert.base64Decode(
+    'ChBSaW5nU2lnbmF0dXJlUmVxEjAKFHNpZ25hdHVyZV9mb3Jfc2VydmVyGAEgASgMUhJzaWduYX'
+    'R1cmVGb3JTZXJ2ZXI=');
+
+@$core.Deprecated('Use ringSignatureRespDescriptor instead')
+const RingSignatureResp$json = {
+  '1': 'RingSignatureResp',
+  '2': [
+    {
+      '1': 'signature_for_client',
+      '3': 1,
+      '4': 1,
+      '5': 12,
+      '10': 'signatureForClient'
+    },
+  ],
+};
+
+/// Descriptor for `RingSignatureResp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List ringSignatureRespDescriptor = $convert.base64Decode(
+    'ChFSaW5nU2lnbmF0dXJlUmVzcBIwChRzaWduYXR1cmVfZm9yX2NsaWVudBgBIAEoDFISc2lnbm'
+    'F0dXJlRm9yQ2xpZW50');

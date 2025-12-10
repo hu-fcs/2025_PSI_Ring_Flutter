@@ -32,6 +32,7 @@ class GrpcServiceClient extends $grpc.Client {
 
   GrpcServiceClient(super.channel, {super.options, super.interceptors});
 
+  /// Phase 1
   $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
     $0.KeyExchangeReq request, {
     $grpc.CallOptions? options,
@@ -39,11 +40,29 @@ class GrpcServiceClient extends $grpc.Client {
     return $createUnaryCall(_$exchangeKeys, request, options: options);
   }
 
+  /// Phase 2
   $grpc.ResponseFuture<$0.PsiDone> finalizePsi(
     $0.ClientFinalReq request, {
     $grpc.CallOptions? options,
   }) {
     return $createUnaryCall(_$finalizePsi, request, options: options);
+  }
+
+  /// Phase 3A : チャレンジ交換
+  $grpc.ResponseFuture<$0.ServerChallenge> exchangeChallenges(
+    $0.ClientChallenge request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$exchangeChallenges, request, options: options);
+  }
+
+  /// Phase 3B : リング署名交換
+  $grpc.ResponseFuture<$0.RingSignatureResp> exchangeRingSignatures(
+    $0.RingSignatureReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$exchangeRingSignatures, request,
+        options: options);
   }
 
   // method descriptors
@@ -58,6 +77,16 @@ class GrpcServiceClient extends $grpc.Client {
           '/grpc.GrpcService/FinalizePsi',
           ($0.ClientFinalReq value) => value.writeToBuffer(),
           $0.PsiDone.fromBuffer);
+  static final _$exchangeChallenges =
+      $grpc.ClientMethod<$0.ClientChallenge, $0.ServerChallenge>(
+          '/grpc.GrpcService/ExchangeChallenges',
+          ($0.ClientChallenge value) => value.writeToBuffer(),
+          $0.ServerChallenge.fromBuffer);
+  static final _$exchangeRingSignatures =
+      $grpc.ClientMethod<$0.RingSignatureReq, $0.RingSignatureResp>(
+          '/grpc.GrpcService/ExchangeRingSignatures',
+          ($0.RingSignatureReq value) => value.writeToBuffer(),
+          $0.RingSignatureResp.fromBuffer);
 }
 
 @$pb.GrpcServiceName('grpc.GrpcService')
@@ -79,6 +108,20 @@ abstract class GrpcServiceBase extends $grpc.Service {
         false,
         ($core.List<$core.int> value) => $0.ClientFinalReq.fromBuffer(value),
         ($0.PsiDone value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.ClientChallenge, $0.ServerChallenge>(
+        'ExchangeChallenges',
+        exchangeChallenges_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) => $0.ClientChallenge.fromBuffer(value),
+        ($0.ServerChallenge value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.RingSignatureReq, $0.RingSignatureResp>(
+        'ExchangeRingSignatures',
+        exchangeRingSignatures_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) => $0.RingSignatureReq.fromBuffer(value),
+        ($0.RingSignatureResp value) => value.writeToBuffer()));
   }
 
   $async.Future<$0.KeyExchangeResp> exchangeKeys_Pre($grpc.ServiceCall $call,
@@ -96,4 +139,22 @@ abstract class GrpcServiceBase extends $grpc.Service {
 
   $async.Future<$0.PsiDone> finalizePsi(
       $grpc.ServiceCall call, $0.ClientFinalReq request);
+
+  $async.Future<$0.ServerChallenge> exchangeChallenges_Pre(
+      $grpc.ServiceCall $call,
+      $async.Future<$0.ClientChallenge> $request) async {
+    return exchangeChallenges($call, await $request);
+  }
+
+  $async.Future<$0.ServerChallenge> exchangeChallenges(
+      $grpc.ServiceCall call, $0.ClientChallenge request);
+
+  $async.Future<$0.RingSignatureResp> exchangeRingSignatures_Pre(
+      $grpc.ServiceCall $call,
+      $async.Future<$0.RingSignatureReq> $request) async {
+    return exchangeRingSignatures($call, await $request);
+  }
+
+  $async.Future<$0.RingSignatureResp> exchangeRingSignatures(
+      $grpc.ServiceCall call, $0.RingSignatureReq request);
 }

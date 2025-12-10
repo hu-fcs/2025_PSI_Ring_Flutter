@@ -16,7 +16,6 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
-/// Phase 1
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
     $core.Iterable<$core.List<$core.int>>? encKeys,
@@ -122,7 +121,6 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
   $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
 }
 
-/// Phase 2
 class ClientFinalReq extends $pb.GeneratedMessage {
   factory ClientFinalReq({
     $core.Iterable<$core.List<$core.int>>? clientReencServerKeys,
@@ -173,7 +171,6 @@ class ClientFinalReq extends $pb.GeneratedMessage {
   $pb.PbList<$core.List<$core.int>> get clientReencServerKeys => $_getList(0);
 }
 
-/// サーバが返すものは何も不要
 class PsiDone extends $pb.GeneratedMessage {
   factory PsiDone() => create();
 
@@ -209,6 +206,232 @@ class PsiDone extends $pb.GeneratedMessage {
   static PsiDone getDefault() =>
       _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PsiDone>(create);
   static PsiDone? _defaultInstance;
+}
+
+/// クライアント → サーバ
+class ClientChallenge extends $pb.GeneratedMessage {
+  factory ClientChallenge({
+    $core.List<$core.int>? challengeC,
+  }) {
+    final result = create();
+    if (challengeC != null) result.challengeC = challengeC;
+    return result;
+  }
+
+  ClientChallenge._();
+
+  factory ClientChallenge.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory ClientChallenge.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ClientChallenge',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..a<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'challengeC', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientChallenge clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ClientChallenge copyWith(void Function(ClientChallenge) updates) =>
+      super.copyWith((message) => updates(message as ClientChallenge))
+          as ClientChallenge;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static ClientChallenge create() => ClientChallenge._();
+  @$core.override
+  ClientChallenge createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static ClientChallenge getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ClientChallenge>(create);
+  static ClientChallenge? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.List<$core.int> get challengeC => $_getN(0);
+  @$pb.TagNumber(1)
+  set challengeC($core.List<$core.int> value) => $_setBytes(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasChallengeC() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearChallengeC() => $_clearField(1);
+}
+
+/// サーバ → クライアント
+class ServerChallenge extends $pb.GeneratedMessage {
+  factory ServerChallenge({
+    $core.List<$core.int>? challengeS,
+  }) {
+    final result = create();
+    if (challengeS != null) result.challengeS = challengeS;
+    return result;
+  }
+
+  ServerChallenge._();
+
+  factory ServerChallenge.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory ServerChallenge.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ServerChallenge',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..a<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'challengeS', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ServerChallenge clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ServerChallenge copyWith(void Function(ServerChallenge) updates) =>
+      super.copyWith((message) => updates(message as ServerChallenge))
+          as ServerChallenge;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static ServerChallenge create() => ServerChallenge._();
+  @$core.override
+  ServerChallenge createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static ServerChallenge getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ServerChallenge>(create);
+  static ServerChallenge? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.List<$core.int> get challengeS => $_getN(0);
+  @$pb.TagNumber(1)
+  set challengeS($core.List<$core.int> value) => $_setBytes(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasChallengeS() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearChallengeS() => $_clearField(1);
+}
+
+/// クライアント → サーバ
+class RingSignatureReq extends $pb.GeneratedMessage {
+  factory RingSignatureReq({
+    $core.List<$core.int>? signatureForServer,
+  }) {
+    final result = create();
+    if (signatureForServer != null)
+      result.signatureForServer = signatureForServer;
+    return result;
+  }
+
+  RingSignatureReq._();
+
+  factory RingSignatureReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory RingSignatureReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RingSignatureReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..a<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'signatureForServer', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RingSignatureReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RingSignatureReq copyWith(void Function(RingSignatureReq) updates) =>
+      super.copyWith((message) => updates(message as RingSignatureReq))
+          as RingSignatureReq;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static RingSignatureReq create() => RingSignatureReq._();
+  @$core.override
+  RingSignatureReq createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static RingSignatureReq getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RingSignatureReq>(create);
+  static RingSignatureReq? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.List<$core.int> get signatureForServer => $_getN(0);
+  @$pb.TagNumber(1)
+  set signatureForServer($core.List<$core.int> value) => $_setBytes(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSignatureForServer() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSignatureForServer() => $_clearField(1);
+}
+
+/// サーバ → クライアント
+class RingSignatureResp extends $pb.GeneratedMessage {
+  factory RingSignatureResp({
+    $core.List<$core.int>? signatureForClient,
+  }) {
+    final result = create();
+    if (signatureForClient != null)
+      result.signatureForClient = signatureForClient;
+    return result;
+  }
+
+  RingSignatureResp._();
+
+  factory RingSignatureResp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory RingSignatureResp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RingSignatureResp',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..a<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'signatureForClient', $pb.PbFieldType.OY)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RingSignatureResp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RingSignatureResp copyWith(void Function(RingSignatureResp) updates) =>
+      super.copyWith((message) => updates(message as RingSignatureResp))
+          as RingSignatureResp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static RingSignatureResp create() => RingSignatureResp._();
+  @$core.override
+  RingSignatureResp createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static RingSignatureResp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RingSignatureResp>(create);
+  static RingSignatureResp? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.List<$core.int> get signatureForClient => $_getN(0);
+  @$pb.TagNumber(1)
+  set signatureForClient($core.List<$core.int> value) => $_setBytes(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSignatureForClient() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSignatureForClient() => $_clearField(1);
 }
 
 const $core.bool _omitFieldNames =
