@@ -1,5 +1,8 @@
 // lib/grpc/grpc_client.dart
+import 'dart:ffi';
 import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/grpc.pbgrpc.dart';
@@ -10,10 +13,7 @@ import '../key_management_service.dart';
 /// PSI の結果（共通集合 + 顔見知り判定）
 /// ===============================================================
 class PsiResult {
-  /// 共通集合（HEX 表記）
   final List<String> commonKeys;
-
-  /// 共通集合の中に「自分が生成した鍵」が含まれているか
   final bool isFamiliar;
 
   PsiResult({
@@ -61,7 +61,7 @@ class GrpcClient {
       _channel = ClientChannel(
         host,
         port: port,
-        options: const ChannelOptions(
+        options: ChannelOptions(
           credentials: ChannelCredentials.insecure(),
           idleTimeout: Duration(seconds: 30),
         ),
@@ -84,7 +84,7 @@ class GrpcClient {
   }
 
   // ================================================================
-  //                     ECC-PSI（双方向対応）
+  //                     ECC-PSI（双方向）
   // ================================================================
   Future<PsiResult> executePsi() async {
     await _ensureReady();
@@ -123,7 +123,7 @@ class GrpcClient {
 
     final resp = await stub.exchangeKeys(
       req,
-      options: CallOptions(compression: const GzipCodec()),
+      options: CallOptions(compression: GzipCodec()),
     );
 
     final serverEncKeys =
@@ -153,36 +153,207 @@ class GrpcClient {
     }
 
     // ------------------------------------------------------------
-    // 6. abP をサーバへ送信（結果は返ってこない）
+    // 6. abP をサーバへ送信（結果なし）
     // ------------------------------------------------------------
     print('[CLIENT] 📤 Sending abP to server (FinalizePsi)...');
-    final finalReq = ClientFinalReq()
-      ..clientReencServerKeys.addAll(abP);
-
     await stub.finalizePsi(
-      finalReq,
-      options: CallOptions(compression: const GzipCodec()),
+      ClientFinalReq()..clientReencServerKeys.addAll(abP),
+      options: CallOptions(compression: GzipCodec()),
     );
 
     print('[CLIENT] 🔚 finalizePsi completed.');
-    print('[CLIENT] === PSI Flow Complete ===\n');
 
     // ------------------------------------------------------------
-    // 7. 顔見知り判定（自分が生成した鍵を持っているか）
+    // 7. 顔見知り判定（PSI）
     // ------------------------------------------------------------
     final commonHex = clientCommon.map(_bytesToHex).toList();
 
     final myGeneratedHex = generated.map(_bytesToHex).toSet();
-    final familiar =
+    final familiarByPsi =
         commonHex.toSet().intersection(myGeneratedHex).isNotEmpty;
+
+    print('[CLIENT] 👤 Familiar by PSI? → $familiarByPsi');
+
+    // ------------------------------------------------------------
+    // 8. リング署名フェーズ
+    // ------------------------------------------------------------
+    bool ringOk = false;
+    if (familiarByPsi && clientCommon.length >= 2) {
+      try {
+        ringOk = await _runRingSignaturePhase(
+          stub: stub,
+          intersection: clientCommon,
+        );
+      } catch (e, st) {
+        print('[CLIENT] ❌ Ring signature phase ERROR: $e');
+        print(st);
+      }
+    }
+
+    print('[CLIENT] 🔚 Ring signature result = $ringOk');
 
     return PsiResult(
       commonKeys: commonHex,
-      isFamiliar: familiar,
+      isFamiliar: familiarByPsi && ringOk,
     );
   }
 
-  // HEX 変換
+  // ===============================================================
+  // Phase 3: Challenge 交換 + リング署名処理（修正版）
+  // ===============================================================
+  Future<bool> _runRingSignaturePhase({
+    required GrpcServiceClient stub,
+    required List<Uint8List> intersection,
+  }) async {
+    print('\n[CLIENT] === Ring Signature Phase Start ===');
+
+    // ------------------------------------------------------------
+    // 1. リング順序（PSI 共通集合をソート）
+    // ------------------------------------------------------------
+    final ringPubKeys = [...intersection]..sort(_compareUint8List);
+
+    final ringSize = ringPubKeys.length;
+    if (ringSize < 2) {
+      print('[CLIENT] ⚠ Ring size < 2 → skip.');
+      return false;
+    }
+
+    // ------------------------------------------------------------
+    // 2. 自分の秘密鍵（署名者）を取得
+    // ------------------------------------------------------------
+    final latestKeyPair = await _kms.getLatestKeyPair();
+    if (latestKeyPair == null) {
+      print('[CLIENT] ❌ No latest key pair.');
+      return false;
+    }
+
+    // ------------------------------------------------------------
+    // 3. Challenge 交換（クライアント → サーバ）
+    // ------------------------------------------------------------
+    final challengeC = _keyService.generateRandomSecret();
+    final chResp = await stub.exchangeChallenges(
+      ClientChallenge()..challengeC = challengeC,
+    );
+
+    final challengeS = Uint8List.fromList(chResp.challengeS);
+
+    print('[CLIENT] challenge_C = ${_bytesToHex(challengeC)}');
+    print('[CLIENT] challenge_S = ${_bytesToHex(challengeS)}');
+
+    final msgForServer = _bytesToHex(challengeS);
+    final msgForClient = _bytesToHex(challengeC);
+
+    // ------------------------------------------------------------
+    // 4. 自分 → サーバ のリング署名生成
+    // ------------------------------------------------------------
+    print('[CLIENT] ✍️ Creating ring signature for server...');
+
+    final msgPtr = msgForServer.toNativeUtf8().cast<Char>();
+
+    final privPtr = calloc<Uint8>(latestKeyPair.privateKey.length)
+      ..asTypedList(latestKeyPair.privateKey.length)
+          .setAll(0, latestKeyPair.privateKey);
+
+    const pubLen = 33;
+    final ringKeysPtr = calloc<Uint8>(pubLen * ringSize);
+    final ringView = ringKeysPtr.asTypedList(pubLen * ringSize);
+
+    int offset = 0;
+    for (final key in ringPubKeys) {
+      ringView.setAll(offset, key);
+      offset += key.length;
+    }
+
+    final sigOutPtr = calloc<Uint8>((1 + ringSize) * 32);
+
+    Uint8List signatureForServer;
+    try {
+      final rc = _keyService.createRingSignature(
+        msgPtr,
+        msgForServer.length,
+        privPtr,
+        ringKeysPtr,
+        ringSize,
+        sigOutPtr,
+      );
+
+      if (rc != 1) {
+        print('[CLIENT] ❌ createRingSignature failed');
+        return false;
+      }
+
+      signatureForServer =
+          Uint8List.fromList(sigOutPtr.asTypedList((1 + ringSize) * 32));
+
+      print('[CLIENT] SignatureForServer OK. len=${signatureForServer.length}');
+    } finally {
+      calloc.free(msgPtr);
+      calloc.free(privPtr);
+      calloc.free(ringKeysPtr);
+      calloc.free(sigOutPtr);
+    }
+
+    // ------------------------------------------------------------
+    // 5. 署名送信 → サーバ署名取得
+    // ------------------------------------------------------------
+    final sigResp = await stub.exchangeRingSignatures(
+      RingSignatureReq()..signatureForServer = signatureForServer,
+    );
+
+    final sigFromServer = Uint8List.fromList(sigResp.signatureForClient);
+
+    print('[CLIENT] 📥 Received server signature len=${sigFromServer.length}');
+
+    // ------------------------------------------------------------
+    // 6. サーバ署名の検証
+    // ------------------------------------------------------------
+    print('[CLIENT] 🔍 Verifying server signature...');
+
+    final msgVerifyPtr = msgForClient.toNativeUtf8().cast<Char>();
+
+    final ringKeysPtr2 = calloc<Uint8>(pubLen * ringSize);
+    final ringView2 = ringKeysPtr2.asTypedList(pubLen * ringSize);
+
+    offset = 0;
+    for (final key in ringPubKeys) {
+      ringView2.setAll(offset, key);
+      offset += key.length;
+    }
+
+    final sigPtr = calloc<Uint8>(sigFromServer.length)
+      ..asTypedList(sigFromServer.length).setAll(0, sigFromServer);
+
+    try {
+      final verifyRc = _keyService.verifyRingSignature(
+        msgVerifyPtr,
+        msgForClient.length,
+        sigPtr,
+        ringKeysPtr2,
+        ringSize,
+      );
+
+      final ok = verifyRc == 1;
+      print('[CLIENT] Signature verify → $ok');
+      return ok;
+    } finally {
+      calloc.free(msgVerifyPtr);
+      calloc.free(sigPtr);
+      calloc.free(ringKeysPtr2);
+      print('[CLIENT] === Ring Signature Phase End ===');
+    }
+  }
+
+  // ===============================================================
+
   String _bytesToHex(List<int> bytes) =>
       bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+  int _compareUint8List(Uint8List a, Uint8List b) {
+    final m = a.length < b.length ? a.length : b.length;
+    for (int i = 0; i < m; i++) {
+      final d = a[i] - b[i];
+      if (d != 0) return d;
+    }
+    return a.length - b.length;
+  }
 }

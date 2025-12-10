@@ -83,21 +83,13 @@ class _ExchangePageState extends State<ExchangePage> {
     return await Permission.location.isGranted;
   }
 
-  /// Bluetooth アダプタを ON にする。
-  /// Android で「〜がBluetoothをONにしようとしています」のダイアログを
-  /// 一度だけ出し、ON になるまで待つ。
   Future<bool> _ensureBluetoothEnabled() async {
     try {
-      // 現在の状態を確認
       final current = await FlutterBluePlus.adapterState.first;
-      if (current == BluetoothAdapterState.on) {
-        return true;
-      }
+      if (current == BluetoothAdapterState.on) return true;
 
-      // OFF なら、OS 標準ダイアログを 1 回だけ表示
       await FlutterBluePlus.turnOn();
 
-      // ON になるまで最大30秒待機（ユーザがキャンセルした場合などは timeout）
       final state = await FlutterBluePlus.adapterState
           .firstWhere((s) => s == BluetoothAdapterState.on)
           .timeout(const Duration(seconds: 30));
@@ -110,12 +102,10 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Future<void> _toggleBleExchange() async {
     if (!_bleRunning) {
-      // 起動時のみ権限 & Bluetooth ON をチェック
       if (!await _ensureBlePermissions()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bluetooth の権限が必要です')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Bluetooth の権限が必要です')));
         }
         return;
       }
@@ -125,9 +115,8 @@ class _ExchangePageState extends State<ExchangePage> {
       final enabled = await _ensureBluetoothEnabled();
       if (!enabled) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bluetooth を ON にできませんでした')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Bluetooth を ON にできませんでした')));
         }
         return;
       }
@@ -155,7 +144,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  // ★ サーバ起動 & PSI完了通知購読
+  /// gRPC サーバ起動 + イベント購読
   // ==========================================================
   Future<void> _startGrpcServer() async {
     if (!await _requireKeyWarning()) return;
@@ -172,8 +161,13 @@ class _ExchangePageState extends State<ExchangePage> {
     final server = PsiGrpcServer();
     final port = await server.start(port: _serverPort);
 
-    // ★ サーバ側 PSI 完了イベントを購読
-    server.service.onPsiFinished.listen((PsiResult psi) {
+    // 🚫 今後これは使わない：PSI フェーズだけの判定は UI に出さない
+    // server.service.onPsiFinished.listen((psi) {
+    //   _showUnifiedPsiDialog(psi, isServerSide: true);
+    // });
+
+    // 🟦 方法A：リング署名認証成功のみ UI に表示する
+    server.service.onRingAuthenticated.listen((PsiResult psi) {
       _showUnifiedPsiDialog(psi, isServerSide: true);
     });
 
@@ -194,7 +188,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  // ★ ScannerPage の PSI結果（クライアント側）を受け取る
+  /// クライアント側（ScannerPage）から返された結果を処理
   // ==========================================================
   Future<void> _openScannerPage() async {
     if (!await _requireKeyWarning()) return;
@@ -207,7 +201,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// ★ クライアント／サーバ共通のポップアップ
+  /// クライアント／サーバ共通のポップアップ
   // ==========================================================
   Future<void> _showUnifiedPsiDialog(
       PsiResult psi, {
@@ -278,9 +272,9 @@ class _ExchangePageState extends State<ExchangePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ------------------------------------------------------
-          // BLE
-          // ------------------------------------------------------
+          // --------------------------
+          // BLE 設定
+          // --------------------------
           Card(
             shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -290,26 +284,21 @@ class _ExchangePageState extends State<ExchangePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'BLE 近接交換',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                  Text('BLE 近接交換',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       FilledButton.icon(
                         onPressed: _toggleBleExchange,
-                        icon: Icon(
-                          _bleRunning ? Icons.stop : Icons.play_arrow,
-                        ),
+                        icon: Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
                         label: Text(_bleRunning ? '停止' : '開始'),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
                         style: TextStyle(
-                          color:
-                          _bleRunning ? Colors.green : Colors.grey,
+                          color: _bleRunning ? Colors.green : Colors.grey,
                         ),
                       ),
                     ],
@@ -321,9 +310,9 @@ class _ExchangePageState extends State<ExchangePage> {
 
           const SizedBox(height: 16),
 
-          // ------------------------------------------------------
-          // gRPC
-          // ------------------------------------------------------
+          // --------------------------
+          // gRPC 設定
+          // --------------------------
           Card(
             shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -333,10 +322,8 @@ class _ExchangePageState extends State<ExchangePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'gRPC 接続',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                  Text('gRPC 接続',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   Row(
                     children: [
