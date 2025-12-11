@@ -8,6 +8,7 @@ import 'package:grpc/grpc.dart';
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
+import '../db/database_helper.dart';
 
 /// ===============================================================
 /// PSI の結果（共通集合 + 顔見知り判定）
@@ -111,7 +112,6 @@ class GrpcClient {
 
     print('[CLIENT] === Phase1: 鍵読み込み 終了 ===');
 
-
     // ------------------------------------------------------------
     // Phase2: bQ 計算
     // ------------------------------------------------------------
@@ -126,7 +126,6 @@ class GrpcClient {
     print('[CLIENT] 🔒 bQ 計算完了 (${myEncKeys.length} 件)');
 
     print('[CLIENT] === Phase2: bQ 計算 終了 ===');
-
 
     // ------------------------------------------------------------
     // Phase3: ExchangeKeys
@@ -147,7 +146,6 @@ class GrpcClient {
     print('[CLIENT] 📥 受信: aP=${serverEncKeys.length}, abQ=${abQ.length}');
     print('[CLIENT] === Phase3: ExchangeKeys 終了 ===');
 
-
     // ------------------------------------------------------------
     // Phase4: abP 計算
     // ------------------------------------------------------------
@@ -158,7 +156,6 @@ class GrpcClient {
 
     print('[CLIENT] 🔒 abP 計算完了 (${abP.length} 件)');
     print('[CLIENT] === Phase4: abP 計算 終了 ===');
-
 
     // ------------------------------------------------------------
     // Phase5: PSI 共通集合
@@ -182,7 +179,6 @@ class GrpcClient {
     print('[CLIENT] 🔚 PSI(2段階) 完了');
     print('[CLIENT] === Phase5: PSI 共通集合抽出 終了 ===');
 
-
     // ------------------------------------------------------------
     // Phase6: PSI 顔見知り判定
     // ------------------------------------------------------------
@@ -197,7 +193,6 @@ class GrpcClient {
     print('[CLIENT] 👤 PSIベースの顔見知り判定 = $familiarByPsi');
 
     print('[CLIENT] === Phase6: 顔見知り判定 終了 ===');
-
 
     // ------------------------------------------------------------
     // Phase7: リング署名フェーズ
@@ -233,6 +228,60 @@ class GrpcClient {
   }
 
   // ===============================================================
+  // 共通集合から署名者となる自分の鍵を選択
+  //   - intersection に含まれる公開鍵のうち
+  //   - generated_keys テーブルに存在するものだけを候補とし
+  //   - expire_time が最大のものを 1 件選ぶ
+  // ===============================================================
+  Future<KeyPair?> _selectSignerKeyFromIntersection(
+      List<Uint8List> intersection) async {
+    if (intersection.isEmpty) {
+      print('[CLIENT] 🔑 共通集合が空のため署名者候補なし');
+      return null;
+    }
+
+    final db = await DatabaseHelper.getDatabase();
+
+    int? bestExpire;
+    Uint8List? bestSec;
+    Uint8List? bestPub;
+
+    for (final pub in intersection) {
+      // generated_keys に自分が生成した鍵があるか確認
+      final rows = await db.query(
+        'generated_keys',
+        columns: ['seckey_ecd', 'pubkey_ecd', 'expire_time'],
+        where: 'pubkey_ecd = ?',
+        whereArgs: [pub],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) continue;
+
+      final row = rows.first;
+      final sec = row['seckey_ecd'] as Uint8List?;
+      final pubKey = row['pubkey_ecd'] as Uint8List?;
+      final expire = row['expire_time'] as int? ?? 0;
+
+      if (sec == null || pubKey == null) continue;
+
+      if (bestExpire == null || expire > bestExpire) {
+        bestExpire = expire;
+        bestSec = sec;
+        bestPub = pubKey;
+      }
+    }
+
+    if (bestSec == null || bestPub == null) {
+      print('[CLIENT] 🔑 共通集合内に自分の generated_keys が見つかりませんでした');
+      return null;
+    }
+
+    print('[CLIENT] 🔑 共通集合から署名者鍵を選択 (expire_time=$bestExpire)');
+    return KeyPair(bestSec, bestPub);
+  }
+
+  // ===============================================================
   //               リング署名フェーズ（ログ統一版）
   // ===============================================================
   Future<bool> _runRingSignaturePhase({
@@ -249,7 +298,8 @@ class GrpcClient {
       return false;
     }
 
-    final keyPair = await _kms.getLatestKeyPair();
+    // 共通集合に含まれる自分の鍵の中から「最も新しいもの」を署名者として選ぶ
+    final keyPair = await _selectSignerKeyFromIntersection(intersection);
     if (keyPair == null) {
       print('[CLIENT] ❌ 自身の秘密鍵が見つかりません');
       return false;
