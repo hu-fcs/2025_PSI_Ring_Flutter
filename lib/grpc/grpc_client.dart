@@ -285,10 +285,7 @@ class GrpcClient {
     print('[CLIENT] 🔑 署名者 generate_time = $generateTimeMs');
 
     // ★★★ 共通集合 → 同日部分集合にフィルタ
-    final filteredRing = await _kms.filterKeysBySameDay(
-      intersection,
-      generateTimeMs,
-    );
+    final filteredRing = await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
 
     print('[CLIENT] 🔍 同日フィルタ後のリングサイズ = ${filteredRing.length}');
 

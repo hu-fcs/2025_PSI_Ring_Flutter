@@ -180,27 +180,26 @@ class KeyManagementService {
 
   /// 共通集合 intersection のうち、
   /// signerKeyGenerateTimeMs と「同じ日」に属するものだけを返す。
-  Future<List<Uint8List>> filterKeysBySameDay(
+  Future<List<Uint8List>> filterKeysBySameSlot(
       List<Uint8List> intersection,
-      int signerKeyGenerateTimeMs,
+      int signerGenerateTimeMs,
+      {int slotMs = 10 * 60 * 1000}
       ) async {
-    const dayMs = 24 * 60 * 60 * 1000;
-
-    final targetDay = signerKeyGenerateTimeMs ~/ dayMs;
+    final targetSlot = signerGenerateTimeMs ~/ slotMs;
     final List<Uint8List> result = [];
 
     for (final pub in intersection) {
       final ts = await getTimestampForKey(pub);
       if (ts == null) continue;
 
-      final keyDay = ts ~/ dayMs;
-      if (keyDay == targetDay) {
+      final slot = ts ~/ slotMs;
+      if (slot == targetSlot) {
         result.add(pub);
       }
     }
-
     return result;
   }
+
 
   // ================================================================
   // DebugPage 用

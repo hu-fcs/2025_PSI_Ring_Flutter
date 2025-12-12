@@ -225,8 +225,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     print('[SERVER] 🔑 signer generate_time = $signerGenerateTimeMs');
 
-    // ★★★ 共通集合 → 同日だけにフィルタ
-    final filteredRing = await _kms.filterKeysBySameDay(
+    final filteredRing = await _kms.filterKeysBySameSlot(
       _lastIntersection,
       signerGenerateTimeMs,
     );
@@ -328,11 +327,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     final signerGenerateTimeMs = rows.first['generate_time'] as int;
 
-    // ★ 同日リングメンバにフィルタ
-    final filteredRing = await _kms.filterKeysBySameDay(
+    final filteredRing = await _kms.filterKeysBySameSlot(
       _lastIntersection,
       signerGenerateTimeMs,
     );
+
 
     if (filteredRing.length < 2) {
       print('[SERVER] ❌ Filtered ring too small');
