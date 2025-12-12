@@ -88,7 +88,7 @@ class DatabaseHelper {
       'collected_keys',
       {
         'pubkey_ecd': pubkey33,
-        'receive_time': tms ~/ 1000,
+        'receive_time': tms,
         'lat': latE6,
         'lon': lonE6,
       },

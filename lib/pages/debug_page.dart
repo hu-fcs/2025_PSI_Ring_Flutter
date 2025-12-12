@@ -173,7 +173,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       'pubkey_ecd': keyPair.publicKey,
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
-      'receive_time': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'receive_time': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
@@ -557,13 +557,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     return hex.length > length ? '${hex.substring(0, length)}...' : hex;
   }
 
-  String _formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
+  String _formatTime(dynamic unixTimeMs) {
     if (unixTimeMs == null) return "N/A";
-    final millis = isSecond ? unixTimeMs * 1000 : unixTimeMs;
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
+
 
   String _toDMS(double decimalDegree, {required bool isLatitude}) {
     final direction = isLatitude ? (decimalDegree >= 0 ? 'N' : 'S') : (decimalDegree >= 0 ? 'E' : 'W');
@@ -820,7 +820,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                               ])),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_formatTime(row['receive_time'], isSecond: true)),
+                                Text(_formatTime(row['receive_time'])),
                               ])),
                             ]),
                           ],
