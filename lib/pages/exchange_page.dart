@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -73,7 +74,6 @@ class _ExchangePageState extends State<ExchangePage> {
       Permission.bluetoothConnect,
     ];
     final statuses = await perms.request();
-
     return perms.every((p) => statuses[p]?.isGranted ?? false);
   }
 
@@ -143,7 +143,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// gRPC サーバ起動 + イベント購読（方法A）
+  /// gRPC サーバ起動
   // ==========================================================
   Future<void> _startGrpcServer() async {
     if (!await _requireKeyWarning()) return;
@@ -160,14 +160,12 @@ class _ExchangePageState extends State<ExchangePage> {
     final server = PsiGrpcServer();
     final port = await server.start(port: _serverPort);
 
-    // ● PSI完了通知（共通集合なしのとき UI 表示）
     server.service.onPsiFinished.listen((PsiResult psi) {
       if (!psi.isFamiliar) {
         _showUnifiedPsiDialog(psi, isServerSide: true);
       }
     });
 
-    // ● リング署名成功（共通集合あり & 相互証明完了）
     server.service.onRingAuthenticated.listen((PsiResult psi) {
       _showUnifiedPsiDialog(psi, isServerSide: true);
     });
@@ -177,8 +175,6 @@ class _ExchangePageState extends State<ExchangePage> {
       _serverIp = ip;
       _serverPort = port;
     });
-
-    print('✅ gRPC Server started on $ip:$port');
   }
 
   Future<void> _stopGrpcServer() async {
@@ -189,53 +185,261 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   // ==========================================================
-  /// ScannerPage → クライアント側結果を受け取る
+  /// Scanner → クライアント結果
   // ==========================================================
   Future<void> _openScannerPage() async {
     if (!await _requireKeyWarning()) return;
 
     final result = await Navigator.pushNamed(context, '/scanner');
-
     if (result is PsiResult) {
       _showUnifiedPsiDialog(result, isServerSide: false);
     }
   }
 
   // ==========================================================
-  /// PSI / リング署名結果ポップアップ
+  /// ---- ここから追加ロジック ----
+  // ==========================================================
+  String _bytesToHex(Uint8List b) =>
+      b.map((e) => e.toRadixString(16).padLeft(2, '0')).join();
+
+  String _fmtTime(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    String z(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}/${z(d.month)}/${z(d.day)} ${z(d.hour)}:${z(d.minute)}';
+  }
+
+  Future<({int count, int? first, int? last})> _calcMeetStats(
+      List<String> commonKeys) async {
+    if (commonKeys.isEmpty) return (count: 0, first: null, last: null);
+
+    final db = await DatabaseHelper.getDatabase();
+    final rows = await db.query(
+      'generated_keys',
+      columns: ['pubkey_ecd', 'generate_time'],
+    );
+
+    final map = <String, int>{
+      for (final r in rows)
+        _bytesToHex(r['pubkey_ecd'] as Uint8List):
+        r['generate_time'] as int
+    };
+
+    final times = <int>[];
+    for (final k in commonKeys) {
+      final t = map[k];
+      if (t != null) times.add(t);
+    }
+
+    if (times.isEmpty) return (count: 0, first: null, last: null);
+
+    times.sort();
+    final first = times.first;
+
+    final now = DateTime.now();
+    final today0 =
+        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+
+    final beforeToday = times.where((t) => t < today0).toList();
+    final last = beforeToday.isNotEmpty ? beforeToday.last : times.last;
+
+    return (count: times.length, first: first, last: last);
+  }
+
+  // ==========================================================
+  /// 結果ダイアログ
   // ==========================================================
   Future<void> _showUnifiedPsiDialog(
       PsiResult psi, {
         required bool isServerSide,
       }) async {
     final familiar = psi.isFamiliar;
-    final commonCount = psi.commonKeys.length;
+    final stats = await _calcMeetStats(psi.commonKeys);
+
+    final titleColor = familiar ? Colors.green : Colors.red;
 
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: Text(
-          familiar ? '顔見知りです' : '見知らぬ人です',
-          style: TextStyle(
-            color: familiar ? Colors.green : Colors.red,
-            fontWeight: FontWeight.bold,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ======================
+              // タイトル
+              // ======================
+              Row(
+                children: [
+                  Icon(
+                    familiar ? Icons.favorite : Icons.help_outline,
+                    color: titleColor,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    familiar ? '顔見知りです' : '見知らぬ人です',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: titleColor,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // 重要情報（上）
+              // ======================
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: familiar
+                      ? Colors.green.withOpacity(0.08)
+                      : Colors.grey.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 会った回数（強調）
+                    Text(
+                      '会った回数',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${stats.count} 回',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // 初めて
+                    Row(
+                      children: [
+                        const Icon(Icons.first_page, size: 18),
+                        const SizedBox(width: 6),
+                        const Text('初めて会った時間'),
+                        const Spacer(),
+                        Text(
+                          stats.first == null
+                              ? 'N/A'
+                              : _fmtTime(stats.first!),
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // 最後に
+                    Row(
+                      children: [
+                        const Icon(Icons.history, size: 18),
+                        const SizedBox(width: 6),
+                        const Text('最後に会った時間'),
+                        const Spacer(),
+                        Text(
+                          stats.last == null
+                              ? 'N/A'
+                              : _fmtTime(stats.last!),
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // デバッグ情報（下）
+              // ======================
+              Divider(color: Colors.grey.shade300),
+
+              const SizedBox(height: 8),
+
+              Text(
+                'デバッグ情報',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              _debugRow('共通鍵数', '${psi.commonKeys.length} 件'),
+              _debugRow(
+                '自身の生成鍵との一致',
+                familiar ? 'あり' : 'なし',
+              ),
+              _debugRow(
+                '判定側',
+                isServerSide ? 'サーバ側' : 'クライアント側',
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // OKボタン
+              // ======================
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ),
+            ],
           ),
         ),
-        content: Text(
-          '共通鍵数: $commonCount 件\n'
-              '自身の生成鍵との一致: ${familiar ? "あり" : "なし"}\n'
-              '${isServerSide ? "（サーバ側）" : "（クライアント側）"}',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          )
+      ),
+    );
+  }
+
+// ----------------------------
+// デバッグ用の1行UI
+// ----------------------------
+  Widget _debugRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(
+            '$label:',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+            ),
+          ),
         ],
       ),
     );
   }
+
 
   // ==========================================================
   String get _qrPayload => jsonEncode({
@@ -271,12 +475,10 @@ class _ExchangePageState extends State<ExchangePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // --------------------------
-          // BLE 設定
-          // --------------------------
+          // BLE
           Card(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -290,17 +492,16 @@ class _ExchangePageState extends State<ExchangePage> {
                     children: [
                       FilledButton.icon(
                         onPressed: _toggleBleExchange,
-                        icon:
-                        Icon(_bleRunning ? Icons.stop : Icons.play_arrow),
+                        icon: Icon(
+                            _bleRunning ? Icons.stop : Icons.play_arrow),
                         label: Text(_bleRunning ? '停止' : '開始'),
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        _bleRunning ? '実行中（広告＋スキャン）' : '停止中',
+                        _bleRunning ? '実行中' : '停止中',
                         style: TextStyle(
-                          color:
-                          _bleRunning ? Colors.green : Colors.grey,
-                        ),
+                            color:
+                            _bleRunning ? Colors.green : Colors.grey),
                       ),
                     ],
                   ),
@@ -308,15 +509,11 @@ class _ExchangePageState extends State<ExchangePage> {
               ),
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // --------------------------
-          // gRPC 設定
-          // --------------------------
+          // gRPC
           Card(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -330,19 +527,13 @@ class _ExchangePageState extends State<ExchangePage> {
                     children: [
                       Switch(
                         value: _grpcRunning,
-                        onChanged: (on) {
-                          if (on) {
-                            _startGrpcServer();
-                          } else {
-                            _stopGrpcServer();
-                          }
-                        },
+                        onChanged: (on) =>
+                        on ? _startGrpcServer() : _stopGrpcServer(),
                       ),
                       Text(_grpcRunning ? '稼働中' : '停止中'),
                       const Spacer(),
                       IconButton(
                         icon: const Icon(Icons.qr_code_scanner),
-                        tooltip: 'QR をスキャン（接続）',
                         onPressed: _openScannerPage,
                       ),
                     ],
@@ -352,15 +543,7 @@ class _ExchangePageState extends State<ExchangePage> {
                     Text('サーバ: ${_serverIp ?? "-"} : $_serverPort'),
                     const SizedBox(height: 8),
                     Center(
-                      child: QrImageView(
-                        data: _qrPayload,
-                        size: 200,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      '相手端末で QR をスキャンしてください。',
-                      textAlign: TextAlign.center,
+                      child: QrImageView(data: _qrPayload, size: 200),
                     ),
                   ],
                 ],
