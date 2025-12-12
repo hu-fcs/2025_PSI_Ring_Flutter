@@ -163,14 +163,329 @@ class _ExchangePageState extends State<ExchangePage> {
       _showUnifiedPsiDialog(result, isServerSide: false);
     }
   }
+  // ==========================================================
+  // 共通鍵 → 16進文字列
+  // ==========================================================
+  String _bytesToHex(Uint8List b) =>
+      b.map((e) => e.toRadixString(16).padLeft(2, '0')).join();
+
+  // ==========================================================
+  // 時刻フォーマット
+  // ==========================================================
+  String _fmtTime(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    String z(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}/${z(d.month)}/${z(d.day)} ${z(d.hour)}:${z(d.minute)}';
+  }
+
+  // ==========================================================
+  // 会った回数 / 初回 / 最終回 を計算
+  // ==========================================================
+  Future<({int count, int? first, int? last})> _calcMeetStats(
+      List<String> commonKeys) async {
+    if (commonKeys.isEmpty) {
+      return (count: 0, first: null, last: null);
+    }
+
+    final db = await DatabaseHelper.getDatabase();
+    final rows = await db.query(
+      'generated_keys',
+      columns: ['pubkey_ecd', 'generate_time'],
+    );
+
+    // pubkey(hex) -> generate_time
+    final Map<String, int> myKeyTimes = {
+      for (final r in rows)
+        _bytesToHex(r['pubkey_ecd'] as Uint8List):
+        r['generate_time'] as int
+    };
+
+    final List<int> times = [];
+    for (final k in commonKeys) {
+      final t = myKeyTimes[k];
+      if (t != null) times.add(t);
+    }
+
+    if (times.isEmpty) {
+      return (count: 0, first: null, last: null);
+    }
+
+    times.sort();
+
+    final first = times.first;
+
+    // 「最後」は前日以前を優先
+    final now = DateTime.now();
+    final today0 =
+        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+
+    final beforeToday = times.where((t) => t < today0).toList();
+    final last = beforeToday.isNotEmpty ? beforeToday.last : times.last;
+
+    return (
+    count: times.length,
+    first: first,
+    last: last,
+    );
+  }
 
   // ==========================================================
   Future<void> _showUnifiedPsiDialog(
       PsiResult psi, {
         required bool isServerSide,
       }) async {
-    // 既存のポップアップ実装をそのまま使用
+    final familiar = psi.isFamiliar;
+    final stats = await _calcMeetStats(psi.commonKeys);
+
+    final titleColor = familiar ? Colors.green : Colors.red;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ======================
+              // タイトル
+              // ======================
+              Row(
+                children: [
+                  Icon(
+                    familiar ? Icons.favorite : Icons.help_outline,
+                    color: titleColor,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    familiar ? '顔見知りです' : '見知らぬ人です',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: titleColor,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // 重要情報（上）
+              // ======================
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: familiar
+                      ? Colors.green.withOpacity(0.08)
+                      : Colors.grey.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 会った回数（強調）
+                    Text(
+                      '会った回数',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${stats.count} 回',
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // 初めて
+                    _timeRow(
+                      icon: Icons.first_page,
+                      label: '初めて会った時間',
+                      value: stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // 最後に
+                    _timeRow(
+                      icon: Icons.history,
+                      label: '最後に会った時間',
+                      value: stats.last == null ? 'N/A' : _fmtTime(stats.last!),
+                    ),
+
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // デバッグ情報（下）
+              // ======================
+              Divider(color: Colors.grey.shade300),
+
+              const SizedBox(height: 8),
+
+              Text(
+                'デバッグ情報',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              _debugRow('共通鍵数', '${psi.commonKeys.length} 件'),
+              _debugRow(
+                '自身の生成鍵との一致',
+                familiar ? 'あり' : 'なし',
+              ),
+              _debugRow(
+                '判定側',
+                isServerSide ? 'サーバ側' : 'クライアント側',
+              ),
+
+              const SizedBox(height: 20),
+
+              // ======================
+              // OKボタン
+              // ======================
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
+  Widget _timeRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final theme = Theme.of(context);
+
+        final labelStyle = theme.textTheme.bodyMedium!;
+        final valueStyle =
+        theme.textTheme.bodyMedium!.copyWith(fontWeight: FontWeight.w500);
+
+        // ---- value（日時）の横幅を計測 ----
+        final valuePainter = TextPainter(
+          text: TextSpan(text: value, style: valueStyle),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+
+        // アイコン＋余白の固定幅
+        const iconSize = 18.0;
+        const iconGap = 6.0;
+        const betweenGap = 8.0;
+
+        final fixedWidth =
+            iconSize + iconGap + betweenGap + valuePainter.width;
+
+        // ---- label が1行で収まるかを計測 ----
+        final labelPainter = TextPainter(
+          text: TextSpan(text: label, style: labelStyle),
+          maxLines: 1,
+          ellipsis: '…',
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(
+          maxWidth: (constraints.maxWidth - fixedWidth)
+              .clamp(0.0, constraints.maxWidth),
+        );
+
+        final fitsOneLine = !labelPainter.didExceedMaxLines;
+
+        if (fitsOneLine) {
+          // ===== 横並び（1行で収まる場合）=====
+          return Row(
+            children: [
+              Icon(icon, size: iconSize),
+              const SizedBox(width: iconGap),
+              Expanded(
+                child: Text(label, style: labelStyle),
+              ),
+              const SizedBox(width: betweenGap),
+              Text(value, style: valueStyle),
+            ],
+          );
+        }
+
+        // ===== 縦並び（ラベル → 次行右寄せで日時）=====
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: iconSize),
+                const SizedBox(width: iconGap),
+                Expanded(
+                  child: Text(label, style: labelStyle),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(value, style: valueStyle),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ----------------------------
+  // デバッグ用の1行UI
+  // ----------------------------
+  Widget _debugRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(
+            '$label:',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   // ==========================================================
   String get _qrPayload => jsonEncode({
@@ -297,8 +612,8 @@ class _ExchangePageState extends State<ExchangePage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '・一方の端末で「QRを表示する」をタップします\n'
-                '・もう一方の端末で「QRを読み取る」をタップします',
+            '・一方の端末で「QRを表示する」をタップ\n'
+            '・もう一方の端末で「QRを読み取る」をタップ',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
           ),
 
@@ -317,7 +632,7 @@ class _ExchangePageState extends State<ExchangePage> {
         Expanded(
           child: FilledButton.icon(
             icon: const Icon(Icons.qr_code),
-            label: const Text('QRを表示する'),
+            label: const Text('QRを表示'),
             onPressed: _showQr,
           ),
         ),
@@ -325,7 +640,7 @@ class _ExchangePageState extends State<ExchangePage> {
         Expanded(
           child: OutlinedButton.icon(
             icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('QRを読み取る'),
+            label: const Text('QRを読取'),
             onPressed: _scanQr,
           ),
         ),
@@ -349,7 +664,7 @@ class _ExchangePageState extends State<ExchangePage> {
         Center(
           child: QrImageView(
             data: _qrPayload,
-            size: 180,
+            size: 200,
           ),
         ),
         const SizedBox(height: 10),
