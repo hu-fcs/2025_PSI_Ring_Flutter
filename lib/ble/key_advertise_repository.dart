@@ -9,9 +9,7 @@ class KeyAdvertiseRepository {
 
   /// KMSが返す 33B 圧縮公開鍵をそのまま返す (★ 処理内容を変更)
   Future<Uint8List> getPublicKeyForAdvertise({Duration? validity}) async {
-    final Uint8List? pubKey33 = await _kms.getPublicKeyForAdvertise(
-      validity: validity ?? const Duration(minutes: 10),
-    );
+    final Uint8List? pubKey33 = await _kms.getPublicKeyForAdvertise();
     if (pubKey33 == null) {
       throw StateError('Failed to obtain public key from KeyManagementService.');
     }

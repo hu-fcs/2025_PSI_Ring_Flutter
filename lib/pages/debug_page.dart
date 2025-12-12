@@ -136,7 +136,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   // ================================================================
   Future<List<Map<String, dynamic>>> _fetchLimitedKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    final order = tableName == 'generated_keys' ? 'id' : 'ts';
+    final order = tableName == 'generated_keys' ? 'id' : 'receive_time';
     return db.query(tableName, orderBy: '$order DESC', limit: 100);
   }
 
@@ -151,9 +151,9 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     await db.delete(tableName);
 
     // 🔥 収集した鍵を全削除したら BLE キャッシュをリセットする
-    if (tableName == 'ecd_keys') {
+    if (tableName == 'collected_keys') {
       BleScanner.clearCollectedCache();
-      if (kDebugMode) print('DebugPage: 🧹 cache cleared due to ecd_keys deletion');
+      if (kDebugMode) print('DebugPage: 🧹 cache cleared due to collected_keys deletion');
     }
 
     setState(() {});
@@ -169,11 +169,11 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     if (keyPair == null) return;
     final random = Random();
     final db = await DatabaseHelper.getDatabase();
-    await db.insert('ecd_keys', {
-      'key_ecd': keyPair.publicKey,
+    await db.insert('collected_keys', {
+      'pubkey_ecd': keyPair.publicKey,
       'lat': 34000000 + random.nextInt(1000000),
       'lon': 135000000 + random.nextInt(1000000),
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'receive_time': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
@@ -557,13 +557,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     return hex.length > length ? '${hex.substring(0, length)}...' : hex;
   }
 
-  String _formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
+  String _formatTime(dynamic unixTimeMs) {
     if (unixTimeMs == null) return "N/A";
-    final millis = isSecond ? unixTimeMs * 1000 : unixTimeMs;
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
+
 
   String _toDMS(double decimalDegree, {required bool isLatitude}) {
     final direction = isLatitude ? (decimalDegree >= 0 ? 'N' : 'S') : (decimalDegree >= 0 ? 'E' : 'W');
@@ -650,46 +650,94 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-
   Widget _buildVerificationTab() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _testRandBytes,
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('BoringSSLのRAND_bytesをテスト'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
-              icon: _isVerifying
-                  ? Container(
-                width: 24,
-                height: 24,
-                padding: const EdgeInsets.all(2.0),
-                child: const CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
-                ),
-              )
-                  : const Icon(Icons.edit_document),
-              label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ★ 追加：スロット選択UI
+          _buildSlotSelector(),
+
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _testRandBytes,
+            icon: const Icon(Icons.science_outlined),
+            label: const Text('BoringSSLのRAND_bytesをテスト'),
+          ),
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
+            icon: _isVerifying
+                ? Container(
+              width: 24,
+              height: 24,
+              padding: const EdgeInsets.all(2),
+              child: const CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
               ),
+            )
+                : const Icon(Icons.edit_document),
+            label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  Widget _buildSlotSelector() {
+    int current = _keyManager.slotMs;
+
+    Widget buildSlotButton(String label, int value) {
+      final bool selected = (current == value);
+
+      return OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: selected ? Colors.blue : Colors.grey.shade200,
+          foregroundColor: selected ? Colors.white : Colors.black87,
+          side: BorderSide(
+            color: selected ? Colors.blue : Colors.grey,
+            width: selected ? 2 : 1,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        ),
+        onPressed: () {
+          setState(() {
+            _keyManager.slotMs = value;
+          });
+        },
+        child: Text(label, style: const TextStyle(fontSize: 14)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "現在のスロット時間: ${_keyManager.slotMs} ms",
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          children: [
+            buildSlotButton("10分", 10 * 60 * 1000),
+            buildSlotButton("1分", 1 * 60 * 1000),
+            buildSlotButton("1秒", 1000),
+          ],
+        ),
+      ],
+    );
+  }
+
+
 
   Widget _buildKeyListTab(String tableName, bool isGenerated) {
     final fetchData = Future.wait([
@@ -732,7 +780,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                   ElevatedButton(onPressed: _insertDummyCollectedKey, child: const Text('ダミー追加')),
                   ElevatedButton(onPressed: _showAddMultipleDummiesDialog, child: const Text('複数追加')),
                   ElevatedButton(
-                    onPressed: () => _deleteAllKeys('ecd_keys'),
+                    onPressed: () => _deleteAllKeys('collected_keys'),
                     child: const Text('全削除'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
                   ),
@@ -780,7 +828,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           _showFullKeyDialog(
                             context,
                             '収集した鍵',
-                            row['key_ecd'] as List<int>?,
+                            row['pubkey_ecd'] as List<int>?,
                           );
                         }
                       },
@@ -805,7 +853,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Center(
-                              child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
+                              child: Text('Key: ${_shortHex(row['pubkey_ecd'] as List<int>?, length: 20)}',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
                             ),
                             const SizedBox(height: 8),
@@ -820,7 +868,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                               ])),
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_formatTime(row['ts'], isSecond: true)),
+                                Text(_formatTime(row['receive_time'])),
                               ])),
                             ]),
                           ],
@@ -855,7 +903,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildKeyListTab('ecd_keys', false),
+                _buildKeyListTab('collected_keys', false),
                 _buildKeyListTab('generated_keys', true),
                 _buildVerificationTab(),
               ],

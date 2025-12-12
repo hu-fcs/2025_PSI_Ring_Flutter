@@ -35,21 +35,21 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE generated_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        seckey_ecd BLOB,
-        pubkey_ecd BLOB,
-        generate_time INTEGER,
-        expire_time INTEGER
+        seckey_ecd BLOB NOT NULL,
+        pubkey_ecd BLOB NOT NULL,
+        generate_time INTEGER NOT NULL,
+        expire_time INTEGER NOT NULL
       )
     ''');
 
     // 収集鍵（UNIQUE）
     await db.execute('''
-      CREATE TABLE ecd_keys (
+      CREATE TABLE collected_keys (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key_ecd BLOB NOT NULL UNIQUE,
+        pubkey_ecd BLOB NOT NULL UNIQUE,
         lat INTEGER NOT NULL,
         lon INTEGER NOT NULL,
-        ts INTEGER NOT NULL
+        receive_time INTEGER NOT NULL
       )
     ''');
   }
@@ -60,7 +60,7 @@ class DatabaseHelper {
   static Future<bool> existsCollectedKey(Uint8List key33) async {
     final db = await getDatabase();
     final count = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
       [key33],
     ));
     return (count ?? 0) > 0;
@@ -78,17 +78,17 @@ class DatabaseHelper {
     final db = await getDatabase();
 
     final exists = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM ecd_keys WHERE key_ecd = ?",
+      "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
       [pubkey33],
     ));
 
     if ((exists ?? 0) > 0) return false;
 
     await db.insert(
-      'ecd_keys',
+      'collected_keys',
       {
-        'key_ecd': pubkey33,
-        'ts': tms ~/ 1000,
+        'pubkey_ecd': pubkey33,
+        'receive_time': tms,
         'lat': latE6,
         'lon': lonE6,
       },
@@ -109,7 +109,7 @@ class DatabaseHelper {
     )) ?? 0;
 
     final collected = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM ecd_keys',
+      'SELECT COUNT(*) FROM collected_keys',
     )) ?? 0;
 
     return generated + collected;
