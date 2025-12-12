@@ -145,6 +145,63 @@ class KeyManagementService {
     return rows.map((row) => row['pubkey_ecd'] as Uint8List).toList();
   }
 
+  /// 公開鍵 pubkey_ecd（33 bytes）に対応する timestamp(ms) を返す。
+  /// generated_keys(generate_time) → 自分の鍵
+  /// collected_keys(receive_time) → 他者の鍵
+  Future<int?> getTimestampForKey(Uint8List pub) async {
+    final db = await DatabaseHelper.getDatabase();
+
+    // ① 自分が生成した鍵
+    final g = await db.query(
+      'generated_keys',
+      columns: ['generate_time'],
+      where: 'pubkey_ecd = ?',
+      whereArgs: [pub],
+      limit: 1,
+    );
+    if (g.isNotEmpty) {
+      return g.first['generate_time'] as int;
+    }
+
+    // ② 収集した鍵
+    final c = await db.query(
+      'collected_keys',
+      columns: ['receive_time'],
+      where: 'pubkey_ecd = ?',
+      whereArgs: [pub],
+      limit: 1,
+    );
+    if (c.isNotEmpty) {
+      return c.first['receive_time'] as int;
+    }
+
+    return null;
+  }
+
+  /// 共通集合 intersection のうち、
+  /// signerKeyGenerateTimeMs と「同じ日」に属するものだけを返す。
+  Future<List<Uint8List>> filterKeysBySameDay(
+      List<Uint8List> intersection,
+      int signerKeyGenerateTimeMs,
+      ) async {
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    final targetDay = signerKeyGenerateTimeMs ~/ dayMs;
+    final List<Uint8List> result = [];
+
+    for (final pub in intersection) {
+      final ts = await getTimestampForKey(pub);
+      if (ts == null) continue;
+
+      final keyDay = ts ~/ dayMs;
+      if (keyDay == targetDay) {
+        result.add(pub);
+      }
+    }
+
+    return result;
+  }
+
   // ================================================================
   // DebugPage 用
   // ================================================================
