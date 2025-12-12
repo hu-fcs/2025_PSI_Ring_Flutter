@@ -1,12 +1,12 @@
 // lib/pages/scanner_page.dart
+
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../grpc/grpc_client.dart';
-import '../key_management_service.dart';
 
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key});
@@ -17,24 +17,18 @@ class ScannerPage extends StatefulWidget {
 
 class _ScannerPageState extends State<ScannerPage> {
   final _client = GrpcClient();
-  final _keyService = KeyManagementService();
 
   bool isConnecting = false;
-  bool isManualInputMode = false;
   bool _isProcessingScan = false;
+  bool _isManualInputMode = false;
+
+  final MobileScannerController _scannerController = MobileScannerController();
+
+  bool _cameraLock = false;
 
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController =
   TextEditingController(text: '50051');
-
-  String? ipToConnect;
-  int? portToConnect;
-
-  final MobileScannerController _scannerController =
-  MobileScannerController();
-
-  /// ======== カメラ排他ロック ========
-  bool _cameraLock = false;
 
   Future<void> safeStopCamera() async {
     if (_cameraLock) return;
@@ -56,18 +50,13 @@ class _ScannerPageState extends State<ScannerPage> {
 
   @override
   void dispose() {
+    _scannerController.dispose();
     ipController.dispose();
     portController.dispose();
-    _scannerController.dispose();
     super.dispose();
   }
 
-  String _bytesToHex(Uint8List bytes) =>
-      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-
-  // ===================================================================
-  //   接続確認 → gRPC → PSI 実行 → PsiResult を ExchangePage へ返す
-  // ===================================================================
+  // ==========================================================
   Future<void> _confirmAndConnect(String ip, int port) async {
     await safeStopCamera();
 
@@ -77,7 +66,7 @@ class _ScannerPageState extends State<ScannerPage> {
       barrierDismissible: false,
       builder: (_) => AlertDialog(
         title: const Text('接続確認'),
-        content: Text('サーバ: $ip:$port に接続しますか？'),
+        content: Text('サーバ $ip:$port に接続しますか？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -91,84 +80,39 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
     );
 
-    // キャンセルされたらカメラ再開
     if (ok != true) {
       _isProcessingScan = false;
       await safeStartCamera();
       return;
     }
 
-    // ローディング表示
     if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withOpacity(0.1),
+      barrierColor: Colors.black.withOpacity(0.2),
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
-    setState(() => isConnecting = true);
-
     try {
-      print('[CLIENT] trying to connect to $ip:$port');
       await _client.connect(ip, port);
-      print('[CLIENT] connect() success');
-
-      print('[Scanner] 🔍 Starting PSI...');
-
-      /// ★ PsiResult を返す
       final psiResult = await _client.executePsi();
-
-      print('\n[Scanner] ✅ PSI Complete!');
-      print('👉 common=${psiResult.commonKeys.length}, '
-          'familiar=${psiResult.isFamiliar}');
-
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // loading close
-
-        /// ★ ScannerPage を閉じて結果を返す（SnackBar は出さない）
+        Navigator.of(context, rootNavigator: true).pop();
         Navigator.pop(context, psiResult);
       }
     } catch (e) {
-      print('[CLIENT] PSI/Exchange ERROR: $e');
-
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // loading close
-
-        /// ★ 失敗時だけ SnackBar 表示
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('接続またはPSI実行に失敗しました: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('接続に失敗しました: $e')),
         );
       }
-
       _isProcessingScan = false;
       await safeStartCamera();
-    } finally {
-      if (mounted) setState(() => isConnecting = false);
     }
   }
 
-  /// 手入力接続
-  Future<void> _connectManual() async {
-    final ip = ipController.text.trim();
-    final port = int.tryParse(portController.text) ?? 50051;
-
-    if (ip.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('IP を入力してください')),
-      );
-      return;
-    }
-
-    _isProcessingScan = true;
-    await safeStopCamera();
-    await _confirmAndConnect(ip, port);
-  }
-
-  /// QR検出
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (isConnecting || _isProcessingScan) return;
 
@@ -177,126 +121,251 @@ class _ScannerPageState extends State<ScannerPage> {
       if (raw == null) continue;
 
       _isProcessingScan = true;
-
       try {
         await safeStopCamera();
-
         final map = jsonDecode(raw) as Map<String, dynamic>;
-        final ip = map['ip'];
-        final port = map['port'];
-
-        ipToConnect = ip;
-        portToConnect = port;
-
-        await _confirmAndConnect(ip, port);
-      } catch (e) {
-        print('QR decode error: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('QRコードの形式が不正です')),
-          );
-        }
+        await _confirmAndConnect(map['ip'], map['port']);
+      } catch (_) {
         _isProcessingScan = false;
         await safeStartCamera();
       }
-
       break;
     }
   }
 
-  // ===================================================================
-  // UI
-  // ===================================================================
+  // ==========================================================
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('サーバをスキャン'),
-        actions: [
-          IconButton(
-            tooltip: isManualInputMode ? 'カメラで読み取る' : '手入力する',
-            onPressed: () async {
-              setState(() => isManualInputMode = !isManualInputMode);
-              if (isManualInputMode) {
-                await safeStopCamera();
-              } else {
-                _isProcessingScan = false;
-                await safeStartCamera();
-              }
-            },
-            icon:
-            Icon(isManualInputMode ? Icons.qr_code_scanner : Icons.keyboard),
-          ),
-        ],
-      ),
-      body: isManualInputMode ? _buildManual() : _buildScanner(),
-    );
-  }
+    final topInset = MediaQuery.of(context).padding.top;
+    final size = MediaQuery.of(context).size;
 
-  Widget _buildManual() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        TextField(
-          controller: ipController,
-          decoration: const InputDecoration(
-            labelText: 'IPアドレス',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: portController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'ポート番号',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: isConnecting ? null : _connectManual,
-          icon: const Icon(Icons.link),
-          label: const Text('接続'),
-        ),
-      ],
+    // ステータスバー文字を白に（背景は透明）
+    final overlay = const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light, // Android
+      statusBarBrightness: Brightness.dark, // iOS（dark=文字白）
     );
-  }
 
-  Widget _buildScanner() {
-    return Stack(
-      children: [
-        MobileScanner(
-          controller: _scannerController,
-          onDetect: _onDetect,
-        ),
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 16,
-          child: Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('カメラに QR をかざしてください'),
-                  if (ipToConnect != null && portToConnect != null) ...[
-                    const SizedBox(height: 8),
-                    Text('検出: $ipToConnect:$portToConnect'),
-                  ]
-                ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlay,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand, // ★ これで「左上に縮む」事故を防ぐ
+          children: [
+            // ===== カメラ（ステータスバー領域を避ける）=====
+            if (!_isManualInputMode)
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.only(top: topInset),
+                  child: MobileScanner(
+                    controller: _scannerController,
+                    onDetect: _onDetect,
+                    fit: BoxFit.cover, // ★ 画面に覆うように表示
+                  ),
+                ),
+              ),
+
+            // ===== 上部（PayPay風：グラデ＋タイトル＋×）=====
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: Container(
+                height: topInset + 96, // ステータスバー + ヘッダー
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black87, Colors.transparent],
+                  ),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.only(top: topInset),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      const Text(
+                        'スキャン',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Positioned(
+                        left: 6,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
+
+            // ===== QR枠（上寄り）=====
+            if (!_isManualInputMode)
+              Positioned(
+                top: size.height * 0.25,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Icon(
+                    Icons.qr_code_scanner,
+                    size: 200,
+                    color: Colors.white.withOpacity(0.25),
+                  ),
+                ),
+              ),
+
+
+            // ===== 下部ガイド（半透明黒は前のまま）=====
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'QRコードをカメラにかざしてください',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // ★ 押せると分かるボタンに
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              setState(() => _isManualInputMode = true);
+                              await safeStopCamera();
+                            },
+                            icon: const Icon(Icons.keyboard),
+                            label: const Text('手入力で接続'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(
+                                color: Colors.white.withOpacity(0.65),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 14,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ===== 手入力ボトムシート（見た目改善版）=====
+            if (_isManualInputMode) _manualBottomSheet(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==========================================================
+
+  Widget _manualBottomSheet() {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ===== タイトル行 + ✕ =====
+              Row(
+                children: [
+                  Text(
+                    '手入力で接続',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: '閉じる',
+                    icon: const Icon(Icons.close),
+                    onPressed: () async {
+                      setState(() => _isManualInputMode = false);
+                      _isProcessingScan = false;
+                      await safeStartCamera();
+                    },
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: ipController,
+                decoration: const InputDecoration(
+                  labelText: 'IPアドレス',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              TextField(
+                controller: portController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'ポート番号',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => _confirmAndConnect(
+                    ipController.text.trim(),
+                    int.tryParse(portController.text) ?? 50051,
+                  ),
+                  icon: const Icon(Icons.link),
+                  label: const Text('接続'),
+                ),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
