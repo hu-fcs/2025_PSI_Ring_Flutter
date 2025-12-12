@@ -650,46 +650,94 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-
   Widget _buildVerificationTab() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _testRandBytes,
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('BoringSSLのRAND_bytesをテスト'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
-              icon: _isVerifying
-                  ? Container(
-                width: 24,
-                height: 24,
-                padding: const EdgeInsets.all(2.0),
-                child: const CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
-                ),
-              )
-                  : const Icon(Icons.edit_document),
-              label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ★ 追加：スロット選択UI
+          _buildSlotSelector(),
+
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _testRandBytes,
+            icon: const Icon(Icons.science_outlined),
+            label: const Text('BoringSSLのRAND_bytesをテスト'),
+          ),
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
+            icon: _isVerifying
+                ? Container(
+              width: 24,
+              height: 24,
+              padding: const EdgeInsets.all(2),
+              child: const CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
               ),
+            )
+                : const Icon(Icons.edit_document),
+            label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  Widget _buildSlotSelector() {
+    int current = _keyManager.slotMs;
+
+    Widget buildSlotButton(String label, int value) {
+      final bool selected = (current == value);
+
+      return OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: selected ? Colors.blue : Colors.grey.shade200,
+          foregroundColor: selected ? Colors.white : Colors.black87,
+          side: BorderSide(
+            color: selected ? Colors.blue : Colors.grey,
+            width: selected ? 2 : 1,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        ),
+        onPressed: () {
+          setState(() {
+            _keyManager.slotMs = value;
+          });
+        },
+        child: Text(label, style: const TextStyle(fontSize: 14)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "現在のスロット時間: ${_keyManager.slotMs} ms",
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          children: [
+            buildSlotButton("10分", 10 * 60 * 1000),
+            buildSlotButton("1分", 1 * 60 * 1000),
+            buildSlotButton("1秒", 1000),
+          ],
+        ),
+      ],
+    );
+  }
+
+
 
   Widget _buildKeyListTab(String tableName, bool isGenerated) {
     final fetchData = Future.wait([
