@@ -685,7 +685,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
           children: [
             buildSlotButton("10分", 10 * 60 * 1000),
             buildSlotButton("1分", 1 * 60 * 1000),
-            buildSlotButton("1秒", 1000),
+            buildSlotButton("10秒", 10 * 1000),
           ],
         ),
       ],

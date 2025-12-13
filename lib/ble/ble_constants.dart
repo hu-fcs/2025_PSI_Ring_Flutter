@@ -1,5 +1,6 @@
 // lib/ble/ble_constants.dart
 import 'dart:typed_data';
+import '../key_management_service.dart';
 
 // ★ UUID関連のインポートと定義をすべて削除
 // import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
@@ -40,6 +41,5 @@ bool isValidCompressedPubkey(Uint8List key33) {
 
 /// 10分単位の下位2bit（0..3）
 int currentTenMinSeq2() {
-  final unixSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-  return (unixSec ~/ 600) & 0x03;
+  return (DateTime.now().millisecondsSinceEpoch ~/ KeyManagementService().slotMs) & 0x03;
 }
