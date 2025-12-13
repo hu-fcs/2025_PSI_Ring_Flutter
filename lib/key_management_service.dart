@@ -4,7 +4,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:geolocator/geolocator.dart';
 
 import 'db/database_helper.dart';
 import 'ffi/native_key_service.dart';
@@ -37,6 +40,87 @@ class KeyManagementService {
     print("🔔 KeyManagementService: notifyKeyUpdated()");
     _keyUpdatedController.add(null);
   }
+
+  // ================================================================
+  // 位置情報（非同期で後付け）
+  // ================================================================
+
+  void _attachLocationAsync({
+    required Uint8List pubkey33
+  }) {
+    // 非同期で実行（鍵生成・UIは一切ブロックしない）
+    () async {
+      try {
+        // ============================
+        // ① Location Service 確認
+        // ============================
+        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          if (kDebugMode) {
+            print('📍 Location service is disabled');
+          }
+          return;
+        }
+
+        // ============================
+        // ② Permission 確認・要求
+        // ============================
+        LocationPermission permission =
+            await Geolocator.checkPermission();
+
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+
+        if (permission == LocationPermission.denied ||
+            permission == LocationPermission.deniedForever) {
+          if (kDebugMode) {
+            print('📍 Location permission denied: $permission');
+          }
+          return;
+        }
+
+        // ============================
+        // ③ GPS を「必ず起動」して取得
+        // ============================
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 0,
+          ),
+        );
+
+        final latE6 = (pos.latitude * 1e6).round();
+        final lonE6 = (pos.longitude * 1e6).round();
+
+        // ============================
+        // ④ DB 更新
+        // ============================
+        final db = await DatabaseHelper.getDatabase();
+        await db.update(
+          'generated_keys',
+          {
+            'lat': latE6,
+            'lon': lonE6,
+          },
+          where: 'pubkey_ecd = ?',
+          whereArgs: [pubkey33],
+        );
+
+        if (kDebugMode) {
+          print('📍 generated_keys: location updated ($latE6, $lonE6)');
+        }
+
+        notifyKeyUpdated();
+      } catch (e, st) {
+        if (kDebugMode) {
+          print('📍 location attach failed: $e');
+          print(st);
+        }
+      }
+    }();
+  }
+
 
   // ================================================================
   // 初期化（マスターキー生成）
@@ -87,31 +171,47 @@ class KeyManagementService {
     final db = await DatabaseHelper.getDatabase();
 
     // ★ すでにそのスロットの鍵があるか？
+    // 位置情報も読み、未設定なら非同期で付与を試みる
     final existing = await db.query(
       'generated_keys',
+      columns: const ['pubkey_ecd', 'lat', 'lon'],
       where: 'generate_time = ? AND expire_time > ?',
       whereArgs: [slotStartTime, now],
       limit: 1,
     );
 
     if (existing.isNotEmpty) {
-      return existing.first['pubkey_ecd'] as Uint8List;
+      final pub = existing.first['pubkey_ecd'] as Uint8List;
+      final lat = existing.first['lat'] as int?;
+      final lon = existing.first['lon'] as int?;
+
+      // 未設定なら後付けを試みる（ブロックしない）
+      if (lat == null || lon == null) {
+        _attachLocationAsync(pubkey33: pub);
+      }
+
+      return pub;
     }
 
-    // ★ 新規鍵生成も slotMs を利用
-    final keyPair =
-    _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
+    // ★ 新規鍵生成も slotMs を利用（ここは瞬時）
+    final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
     if (keyPair == null) {
       print("🚨 生成失敗");
       return null;
     }
 
+    // 位置情報は “後付け” なので、まずは NULL でINSERTして即返す
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
+      'lat': null,
+      'lon': null,
       'generate_time': slotStartTime,
       'expire_time': expireTime,
     });
+
+    // 🔥 GPS取得→取得できたらUPDATE（ブロックしない）
+    _attachLocationAsync(pubkey33: keyPair.publicKey);
 
     return keyPair.publicKey;
   }
@@ -185,7 +285,6 @@ class KeyManagementService {
   // ================================================================
   Future<List<Uint8List>> filterKeysBySameSlot(
       List<Uint8List> intersection, int signerGenerateTimeMs) async {
-
     final targetSlot = signerGenerateTimeMs ~/ slotMs;
     final result = <Uint8List>[];
 

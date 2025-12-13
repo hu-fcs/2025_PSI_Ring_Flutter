@@ -3,12 +3,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
+import 'package:flutter/services.dart';
 import '../ble/ble_exchange_controller.dart';
 import '../grpc/grpc_server.dart';
 import '../grpc/grpc_client.dart'; // PsiResult
@@ -181,51 +180,83 @@ class _ExchangePageState extends State<ExchangePage> {
   // ==========================================================
   // 会った回数 / 初回 / 最終回 を計算
   // ==========================================================
-  Future<({int count, int? first, int? last})> _calcMeetStats(
-      List<String> commonKeys) async {
+  Future<({
+  int count,
+  int? first,
+  int? last,
+  int? firstLat,
+  int? firstLon,
+  int? lastLat,
+  int? lastLon,
+  })> _calcMeetStats(List<String> commonKeys) async {
     if (commonKeys.isEmpty) {
-      return (count: 0, first: null, last: null);
+      return (
+      count: 0,
+      first: null,
+      last: null,
+      firstLat: null,
+      firstLon: null,
+      lastLat: null,
+      lastLon: null,
+      );
     }
 
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
-      columns: ['pubkey_ecd', 'generate_time'],
+      columns: ['pubkey_ecd', 'generate_time', 'lat', 'lon'],
     );
 
-    // pubkey(hex) -> generate_time
-    final Map<String, int> myKeyTimes = {
+    // pubkey(hex) -> { time, lat, lon }
+    final Map<String, Map<String, int?>> myKeys = {
       for (final r in rows)
-        _bytesToHex(r['pubkey_ecd'] as Uint8List):
-        r['generate_time'] as int
+        _bytesToHex(r['pubkey_ecd'] as Uint8List): {
+          'time': r['generate_time'] as int,
+          'lat': r['lat'] as int?,
+          'lon': r['lon'] as int?,
+        }
     };
 
-    final List<int> times = [];
+    final List<Map<String, int?>> hits = [];
     for (final k in commonKeys) {
-      final t = myKeyTimes[k];
-      if (t != null) times.add(t);
+      final v = myKeys[k];
+      if (v != null) hits.add(v);
     }
 
-    if (times.isEmpty) {
-      return (count: 0, first: null, last: null);
+    if (hits.isEmpty) {
+      return (
+      count: 0,
+      first: null,
+      last: null,
+      firstLat: null,
+      firstLon: null,
+      lastLat: null,
+      lastLon: null,
+      );
     }
 
-    times.sort();
+    // time 昇順
+    hits.sort((a, b) => a['time']!.compareTo(b['time']!));
 
-    final first = times.first;
+    final first = hits.first;
 
-    // 「最後」は前日以前を優先
+    // 「最後」は前日以前を優先（なければ最新）
     final now = DateTime.now();
-    final today0 =
-        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final today0 = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
 
-    final beforeToday = times.where((t) => t < today0).toList();
-    final last = beforeToday.isNotEmpty ? beforeToday.last : times.last;
+    final last = hits.lastWhere(
+          (h) => h['time']! < today0,
+      orElse: () => hits.last,
+    );
 
     return (
-    count: times.length,
-    first: first,
-    last: last,
+    count: hits.length,
+    first: first['time'],
+    last: last['time'],
+    firstLat: first['lat'],
+    firstLon: first['lon'],
+    lastLat: last['lat'],
+    lastLon: last['lon'],
     );
   }
 
@@ -275,9 +306,6 @@ class _ExchangePageState extends State<ExchangePage> {
 
               const SizedBox(height: 20),
 
-              // ======================
-              // 重要情報（上）
-              // ======================
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -290,7 +318,9 @@ class _ExchangePageState extends State<ExchangePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 会った回数（強調）
+                    // ======================
+                    // 会った回数
+                    // ======================
                     Text(
                       '会った回数',
                       style: TextStyle(
@@ -307,29 +337,100 @@ class _ExchangePageState extends State<ExchangePage> {
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
 
-                    // 初めて
-                    _timeRow(
-                      icon: Icons.first_page,
-                      label: '初めて会った時間',
-                      value: stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                    // ======================
+                    // 初めて会った
+                    // ======================
+                    Row(
+                      children: [
+                        // 左：ラベル＋時刻
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '初めて会った',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 右：場所ボタン
+                        TextButton.icon(
+                          icon: const Icon(Icons.place, size: 18),
+                          label: const Text('場所'),
+                          onPressed: (stats.firstLat != null && stats.firstLon != null)
+                              ? () => _openExternalMap(
+                            stats.firstLat!,
+                            stats.firstLon!,
+                          )
+                              : null,
+                        ),
+                      ],
                     ),
 
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
 
-                    // 最後に
-                    _timeRow(
-                      icon: Icons.history,
-                      label: '最後に会った時間',
-                      value: stats.last == null ? 'N/A' : _fmtTime(stats.last!),
+                    // ======================
+                    // 最後に会った
+                    // ======================
+                    Row(
+                      children: [
+                        // 左：ラベル＋時刻
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '最後に会った',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                stats.last == null ? 'N/A' : _fmtTime(stats.last!),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 右：場所ボタン
+                        TextButton.icon(
+                          icon: const Icon(Icons.place, size: 18),
+                          label: const Text('場所'),
+                          onPressed: (stats.lastLat != null && stats.lastLon != null)
+                              ? () => _openExternalMap(
+                            stats.lastLat!,
+                            stats.lastLon!,
+                          )
+                              : null,
+                        ),
+                      ],
                     ),
-
                   ],
                 ),
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
               // ======================
               // デバッグ情報（下）
@@ -376,86 +477,24 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
     );
   }
-  Widget _timeRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final theme = Theme.of(context);
 
-        final labelStyle = theme.textTheme.bodyMedium!;
-        final valueStyle =
-        theme.textTheme.bodyMedium!.copyWith(fontWeight: FontWeight.w500);
+  static const MethodChannel _mapChannel = MethodChannel('app.maps');
 
-        // ---- value（日時）の横幅を計測 ----
-        final valuePainter = TextPainter(
-          text: TextSpan(text: value, style: valueStyle),
-          maxLines: 1,
-          textDirection: TextDirection.ltr,
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout();
+  Future<void> _openExternalMap(int latE6, int lonE6) async {
+    final lat = latE6 / 1e6;
+    final lon = lonE6 / 1e6;
 
-        // アイコン＋余白の固定幅
-        const iconSize = 18.0;
-        const iconGap = 6.0;
-        const betweenGap = 8.0;
-
-        final fixedWidth =
-            iconSize + iconGap + betweenGap + valuePainter.width;
-
-        // ---- label が1行で収まるかを計測 ----
-        final labelPainter = TextPainter(
-          text: TextSpan(text: label, style: labelStyle),
-          maxLines: 1,
-          ellipsis: '…',
-          textDirection: TextDirection.ltr,
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout(
-          maxWidth: (constraints.maxWidth - fixedWidth)
-              .clamp(0.0, constraints.maxWidth),
-        );
-
-        final fitsOneLine = !labelPainter.didExceedMaxLines;
-
-        if (fitsOneLine) {
-          // ===== 横並び（1行で収まる場合）=====
-          return Row(
-            children: [
-              Icon(icon, size: iconSize),
-              const SizedBox(width: iconGap),
-              Expanded(
-                child: Text(label, style: labelStyle),
-              ),
-              const SizedBox(width: betweenGap),
-              Text(value, style: valueStyle),
-            ],
-          );
-        }
-
-        // ===== 縦並び（ラベル → 次行右寄せで日時）=====
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: iconSize),
-                const SizedBox(width: iconGap),
-                Expanded(
-                  child: Text(label, style: labelStyle),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(value, style: valueStyle),
-            ),
-          ],
-        );
-      },
-    );
+    try {
+      await _mapChannel.invokeMethod('openMap', {
+        'lat': lat,
+        'lon': lon,
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('地図アプリを開けませんでした: $e')),
+      );
+    }
   }
 
   // ----------------------------
