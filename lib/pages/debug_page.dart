@@ -1,8 +1,6 @@
 // lib/pages/debug_page.dart
 
 import 'dart:ffi';
-import 'dart:isolate';
-import 'dart:math';
 import 'dart:typed_data';
 import 'dart:async'; // ★ StreamSubscription 用に必要
 import 'package:convert/convert.dart' as convert;
@@ -167,12 +165,9 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   Future<void> _generateAndInsertSingleDummyCollectedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
     if (keyPair == null) return;
-    final random = Random();
     final db = await DatabaseHelper.getDatabase();
     await db.insert('collected_keys', {
       'pubkey_ecd': keyPair.publicKey,
-      'lat': 34000000 + random.nextInt(1000000),
-      'lon': 135000000 + random.nextInt(1000000),
       'receive_time': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
@@ -202,6 +197,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
+      'lat': null,
+      'lon': null,
       'generate_time': DateTime.now().millisecondsSinceEpoch,
       'expire_time': DateTime.now().add(Duration(minutes: 10)).millisecondsSinceEpoch,
     });
@@ -560,7 +557,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   String _formatTime(dynamic unixTimeMs) {
     if (unixTimeMs == null) return "N/A";
     final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+    return '${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
@@ -646,48 +643,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildVerificationTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ★ 追加：スロット選択UI
-          _buildSlotSelector(),
-
-          const SizedBox(height: 24),
-
-          ElevatedButton.icon(
-            onPressed: _testRandBytes,
-            icon: const Icon(Icons.science_outlined),
-            label: const Text('BoringSSLのRAND_bytesをテスト'),
-          ),
-          const SizedBox(height: 24),
-
-          ElevatedButton.icon(
-            onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
-            icon: _isVerifying
-                ? Container(
-              width: 24,
-              height: 24,
-              padding: const EdgeInsets.all(2),
-              child: const CircularProgressIndicator(
-                strokeWidth: 3,
-                color: Colors.white,
-              ),
-            )
-                : const Icon(Icons.edit_document),
-            label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepPurple,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -847,30 +802,30 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                               Expanded(child: Text('生成: ${_formatTime(row['generate_time'])}')),
                               Expanded(child: Text('期限: ${_formatTime(row['expire_time'])}')),
                             ]),
+                            const SizedBox(height: 6),
+                            Text(
+                              (row['lat'] == null || row['lon'] == null)
+                                  ? '位置情報: 未取得'
+                                  : '位置情報: '
+                                  '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
+                                  '${_toDMS((row['lon'] as int) / 1e6, isLatitude: false)}',
+                              style: TextStyle(
+                                color: (row['lat'] == null || row['lon'] == null)
+                                    ? Colors.grey
+                                    : Colors.black87,
+                              ),
+                            ),
                           ],
                         )
                             : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Center(
-                              child: Text('Key: ${_shortHex(row['pubkey_ecd'] as List<int>?, length: 20)}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                            Row(
+                              children: [
+                                Expanded(child: Text('Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}')),
+                                Expanded(child:Text('取得: ${_formatTime(row['receive_time'])}')),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_toDMS((row['lat'] as int) / 1e6, isLatitude: true)),
-                              ])),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_toDMS((row['lon'] as int) / 1e6, isLatitude: false)),
-                              ])),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_formatTime(row['receive_time'])),
-                              ])),
-                            ]),
                           ],
                         ),
                       ),
@@ -907,6 +862,48 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                 _buildKeyListTab('generated_keys', true),
                 _buildVerificationTab(),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVerificationTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ★ 追加：スロット選択UI
+          _buildSlotSelector(),
+
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _testRandBytes,
+            icon: const Icon(Icons.science_outlined),
+            label: const Text('BoringSSLのRAND_bytesをテスト'),
+          ),
+          const SizedBox(height: 24),
+
+          ElevatedButton.icon(
+            onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
+            icon: _isVerifying
+                ? Container(
+              width: 24,
+              height: 24,
+              padding: const EdgeInsets.all(2),
+              child: const CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
+            )
+                : const Icon(Icons.edit_document),
+            label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
             ),
           ),
         ],

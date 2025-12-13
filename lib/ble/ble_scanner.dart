@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import '../db/database_helper.dart';
@@ -26,7 +25,7 @@ class BleScanner {
   final Map<String, _HalfState> _halves = {};
   final Queue<_QueueEntry> _queue = Queue<_QueueEntry>();
 
-  // 🔥 グローバルキャッシュ（static に変更）
+  // 🔥 グローバルキャッシュ
   static final Set<String> _globalCacheKeys = {};
 
   // 🔥 現在のスロット
@@ -35,7 +34,9 @@ class BleScanner {
   // 外部（DebugPage 等）からキャッシュクリア
   static void clearCollectedCache() {
     _globalCacheKeys.clear();
-    if (kDebugMode) print("BLE_SCAN: 🧹 collected key cache cleared (manual)");
+    if (kDebugMode) {
+      print("BLE_SCAN: 🧹 collected key cache cleared (manual)");
+    }
   }
 
   int _calcSlot(int timestampMs, int slotMillis) {
@@ -58,12 +59,10 @@ class BleScanner {
     if (kDebugMode) print('BLE_SCAN: 🚀 startScan() called.');
 
     await FlutterBluePlus.stopScan();
-
     await FlutterBluePlus.startScan(
       androidScanMode: AndroidScanMode.lowLatency,
     );
 
-    // 🔥 スキャン開始時、現在スロットを初期化しておく
     final now = DateTime.now().millisecondsSinceEpoch;
     final slotMillis = 10 * 60 * 1000;
     _currentSlot = _calcSlot(now, slotMillis);
@@ -79,7 +78,10 @@ class BleScanner {
       },
     );
 
-    _gcTimer = Timer.periodic(const Duration(minutes: 1), (_) => _gcSweep());
+    _gcTimer = Timer.periodic(
+      const Duration(minutes: 1),
+          (_) => _gcSweep(),
+    );
   }
 
   // --------------------------------------------------------
@@ -97,7 +99,7 @@ class BleScanner {
 
     _halves.clear();
     _queue.clear();
-    _globalCacheKeys.clear(); // 🔥 キャッシュもリセット
+    _globalCacheKeys.clear();
 
     _isScanning = false;
 
@@ -111,7 +113,9 @@ class BleScanner {
     final adv = r.advertisementData;
     if (!adv.manufacturerData.containsKey(_companyId)) return;
 
-    final payload = Uint8List.fromList(adv.manufacturerData[_companyId]!);
+    final payload = Uint8List.fromList(
+      adv.manufacturerData[_companyId]!,
+    );
     if (payload.length < 31) return;
 
     final header = payload[0];
@@ -129,7 +133,9 @@ class BleScanner {
     if (slot != _currentSlot) {
       _globalCacheKeys.clear();
       _currentSlot = slot;
-      if (kDebugMode) print("BLE_SCAN: 🔄 time slot changed → cache reset");
+      if (kDebugMode) {
+        print("BLE_SCAN: 🔄 time slot changed → cache reset");
+      }
     }
 
     final cacheKey = '$seq2|${keyIdBytes.join()}';
@@ -164,7 +170,9 @@ class BleScanner {
 
       final calculatedHash = _getKeyHashId(merged);
       if (listEquals(st.keyId, calculatedHash)) {
-        final hex = merged.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        final hex = merged
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join();
 
         // 1️⃣ キャッシュチェック
         if (_globalCacheKeys.contains(hex)) {
@@ -173,34 +181,25 @@ class BleScanner {
         }
 
         // 2️⃣ DB チェック
-        final exists = await DatabaseHelper.existsCollectedKey(merged);
+        final exists =
+        await DatabaseHelper.existsCollectedKey(merged);
         if (exists) {
           _globalCacheKeys.add(hex);
           _halves.remove(cacheKey);
           return;
         }
 
-        // 3️⃣ 新規 → GPS取得
-        int latE6 = 0;
-        int lonE6 = 0;
-        try {
-          final pos = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-          latE6 = (pos.latitude * 1e6).round();
-          lonE6 = (pos.longitude * 1e6).round();
-        } catch (_) {}
-
-        // 4️⃣ DB Insert
-        final inserted = await DatabaseHelper.insertCollectedKeyIfAbsent(
+        // 3️⃣ DB Insert（位置情報なし）
+        final inserted =
+        await DatabaseHelper.insertCollectedKeyIfAbsent(
           pubkey33: merged,
           tms: now,
-          latE6: latE6,
-          lonE6: lonE6,
         );
 
         if (inserted) {
-          if (kDebugMode) print("BLE_SCAN: 🔑 新規鍵をDBに追加しました");
+          if (kDebugMode) {
+            print("BLE_SCAN: 🔑 新規鍵をDBに追加しました");
+          }
           _globalCacheKeys.add(hex);
           KeyManagementService().notifyKeyUpdated();
         }

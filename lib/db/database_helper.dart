@@ -17,8 +17,7 @@ class DatabaseHelper {
     _db = await openDatabase(
       path,
       version: 1,
-
-      // ★ 初回作成時のみテーブル作成される
+      // ★ 初回作成時のみテーブル作成
       onCreate: (Database db, int version) async {
         await _createTables(db);
       },
@@ -33,54 +32,58 @@ class DatabaseHelper {
   static Future<void> _createTables(Database db) async {
     // 生成鍵
     await db.execute('''
-      CREATE TABLE generated_keys (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        seckey_ecd BLOB NOT NULL,
-        pubkey_ecd BLOB NOT NULL,
-        generate_time INTEGER NOT NULL,
-        expire_time INTEGER NOT NULL
-      )
-    ''');
+    CREATE TABLE generated_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      seckey_ecd BLOB NOT NULL,
+      pubkey_ecd BLOB NOT NULL,
+      lat INTEGER,
+      lon INTEGER,
+      generate_time INTEGER NOT NULL,
+      expire_time INTEGER NOT NULL
+    )
+  ''');
 
-    // 収集鍵（UNIQUE）
+    // 収集鍵
     await db.execute('''
-      CREATE TABLE collected_keys (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pubkey_ecd BLOB NOT NULL UNIQUE,
-        lat INTEGER NOT NULL,
-        lon INTEGER NOT NULL,
-        receive_time INTEGER NOT NULL
-      )
-    ''');
+    CREATE TABLE collected_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pubkey_ecd BLOB NOT NULL UNIQUE,
+      receive_time INTEGER NOT NULL
+    )
+  ''');
   }
+
 
   // ----------------------------
   // 収集鍵が存在するかチェック
   // ----------------------------
   static Future<bool> existsCollectedKey(Uint8List key33) async {
     final db = await getDatabase();
-    final count = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
-      [key33],
-    ));
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery(
+        "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
+        [key33],
+      ),
+    );
     return (count ?? 0) > 0;
   }
 
   // ----------------------------
   // 新規収集鍵 INSERT（存在しない場合のみ）
+  // ★ 位置情報は扱わない
   // ----------------------------
   static Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int tms,
-    required int latE6,
-    required int lonE6,
   }) async {
     final db = await getDatabase();
 
-    final exists = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
-      [pubkey33],
-    ));
+    final exists = Sqflite.firstIntValue(
+      await db.rawQuery(
+        "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
+        [pubkey33],
+      ),
+    );
 
     if ((exists ?? 0) > 0) return false;
 
@@ -89,8 +92,6 @@ class DatabaseHelper {
       {
         'pubkey_ecd': pubkey33,
         'receive_time': tms,
-        'lat': latE6,
-        'lon': lonE6,
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
@@ -98,19 +99,19 @@ class DatabaseHelper {
     return true;
   }
 
-
   // ----------------------------
   // キー合計数（任意）
   // ----------------------------
   Future<int> getTotalKeyCount() async {
     final db = await getDatabase();
-    final generated = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM generated_keys',
-    )) ?? 0;
 
-    final collected = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM collected_keys',
-    )) ?? 0;
+    final generated = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM generated_keys'),
+    ) ?? 0;
+
+    final collected = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM collected_keys'),
+    ) ?? 0;
 
     return generated + collected;
   }
