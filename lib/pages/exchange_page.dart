@@ -181,51 +181,83 @@ class _ExchangePageState extends State<ExchangePage> {
   // ==========================================================
   // 会った回数 / 初回 / 最終回 を計算
   // ==========================================================
-  Future<({int count, int? first, int? last})> _calcMeetStats(
-      List<String> commonKeys) async {
+  Future<({
+  int count,
+  int? first,
+  int? last,
+  int? firstLat,
+  int? firstLon,
+  int? lastLat,
+  int? lastLon,
+  })> _calcMeetStats(List<String> commonKeys) async {
     if (commonKeys.isEmpty) {
-      return (count: 0, first: null, last: null);
+      return (
+      count: 0,
+      first: null,
+      last: null,
+      firstLat: null,
+      firstLon: null,
+      lastLat: null,
+      lastLon: null,
+      );
     }
 
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
-      columns: ['pubkey_ecd', 'generate_time'],
+      columns: ['pubkey_ecd', 'generate_time', 'lat', 'lon'],
     );
 
-    // pubkey(hex) -> generate_time
-    final Map<String, int> myKeyTimes = {
+    // pubkey(hex) -> { time, lat, lon }
+    final Map<String, Map<String, int?>> myKeys = {
       for (final r in rows)
-        _bytesToHex(r['pubkey_ecd'] as Uint8List):
-        r['generate_time'] as int
+        _bytesToHex(r['pubkey_ecd'] as Uint8List): {
+          'time': r['generate_time'] as int,
+          'lat': r['lat'] as int?,
+          'lon': r['lon'] as int?,
+        }
     };
 
-    final List<int> times = [];
+    final List<Map<String, int?>> hits = [];
     for (final k in commonKeys) {
-      final t = myKeyTimes[k];
-      if (t != null) times.add(t);
+      final v = myKeys[k];
+      if (v != null) hits.add(v);
     }
 
-    if (times.isEmpty) {
-      return (count: 0, first: null, last: null);
+    if (hits.isEmpty) {
+      return (
+      count: 0,
+      first: null,
+      last: null,
+      firstLat: null,
+      firstLon: null,
+      lastLat: null,
+      lastLon: null,
+      );
     }
 
-    times.sort();
+    // time 昇順
+    hits.sort((a, b) => a['time']!.compareTo(b['time']!));
 
-    final first = times.first;
+    final first = hits.first;
 
-    // 「最後」は前日以前を優先
+    // 「最後」は前日以前を優先（なければ最新）
     final now = DateTime.now();
-    final today0 =
-        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final today0 = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
 
-    final beforeToday = times.where((t) => t < today0).toList();
-    final last = beforeToday.isNotEmpty ? beforeToday.last : times.last;
+    final last = hits.lastWhere(
+          (h) => h['time']! < today0,
+      orElse: () => hits.last,
+    );
 
     return (
-    count: times.length,
-    first: first,
-    last: last,
+    count: hits.length,
+    first: first['time'],
+    last: last['time'],
+    firstLat: first['lat'],
+    firstLon: first['lon'],
+    lastLat: last['lat'],
+    lastLon: last['lon'],
     );
   }
 
@@ -315,6 +347,14 @@ class _ExchangePageState extends State<ExchangePage> {
                       label: '初めて会った時間',
                       value: stats.first == null ? 'N/A' : _fmtTime(stats.first!),
                     ),
+                    _timeRow(
+                      icon: Icons.place,
+                      label: '初めて会った場所',
+                      value: (stats.firstLat == null || stats.firstLon == null)
+                          ? 'N/A'
+                          : '${stats.firstLat! / 1e6}, ${stats.firstLon! / 1e6}',
+                    ),
+
 
                     const SizedBox(height: 8),
 
@@ -324,7 +364,13 @@ class _ExchangePageState extends State<ExchangePage> {
                       label: '最後に会った時間',
                       value: stats.last == null ? 'N/A' : _fmtTime(stats.last!),
                     ),
-
+                    _timeRow(
+                      icon: Icons.place,
+                      label: '最後に会った場所',
+                      value: (stats.lastLat == null || stats.lastLon == null)
+                          ? 'N/A'
+                          : '${stats.lastLat! / 1e6}, ${stats.lastLon! / 1e6}',
+                    ),
                   ],
                 ),
               ),
