@@ -3,12 +3,11 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
+import 'package:flutter/services.dart';
 import '../ble/ble_exchange_controller.dart';
 import '../grpc/grpc_server.dart';
 import '../grpc/grpc_client.dart'; // PsiResult
@@ -307,9 +306,6 @@ class _ExchangePageState extends State<ExchangePage> {
 
               const SizedBox(height: 20),
 
-              // ======================
-              // 重要情報（上）
-              // ======================
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -322,7 +318,9 @@ class _ExchangePageState extends State<ExchangePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 会った回数（強調）
+                    // ======================
+                    // 会った回数
+                    // ======================
                     Text(
                       '会った回数',
                       style: TextStyle(
@@ -339,43 +337,100 @@ class _ExchangePageState extends State<ExchangePage> {
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 10),
 
-                    // 初めて
-                    _timeRow(
-                      icon: Icons.first_page,
-                      label: '初めて会った時間',
-                      value: stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                    // ======================
+                    // 初めて会った
+                    // ======================
+                    Row(
+                      children: [
+                        // 左：ラベル＋時刻
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '初めて会った',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 右：場所ボタン
+                        TextButton.icon(
+                          icon: const Icon(Icons.place, size: 18),
+                          label: const Text('場所'),
+                          onPressed: (stats.firstLat != null && stats.firstLon != null)
+                              ? () => _openExternalMap(
+                            stats.firstLat!,
+                            stats.firstLon!,
+                          )
+                              : null,
+                        ),
+                      ],
                     ),
-                    _timeRow(
-                      icon: Icons.place,
-                      label: '初めて会った場所',
-                      value: (stats.firstLat == null || stats.firstLon == null)
-                          ? 'N/A'
-                          : '${stats.firstLat! / 1e6}, ${stats.firstLon! / 1e6}',
-                    ),
 
+                    const SizedBox(height: 10),
 
-                    const SizedBox(height: 8),
+                    // ======================
+                    // 最後に会った
+                    // ======================
+                    Row(
+                      children: [
+                        // 左：ラベル＋時刻
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '最後に会った',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                stats.last == null ? 'N/A' : _fmtTime(stats.last!),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
-                    // 最後に
-                    _timeRow(
-                      icon: Icons.history,
-                      label: '最後に会った時間',
-                      value: stats.last == null ? 'N/A' : _fmtTime(stats.last!),
-                    ),
-                    _timeRow(
-                      icon: Icons.place,
-                      label: '最後に会った場所',
-                      value: (stats.lastLat == null || stats.lastLon == null)
-                          ? 'N/A'
-                          : '${stats.lastLat! / 1e6}, ${stats.lastLon! / 1e6}',
+                        // 右：場所ボタン
+                        TextButton.icon(
+                          icon: const Icon(Icons.place, size: 18),
+                          label: const Text('場所'),
+                          onPressed: (stats.lastLat != null && stats.lastLon != null)
+                              ? () => _openExternalMap(
+                            stats.lastLat!,
+                            stats.lastLon!,
+                          )
+                              : null,
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
               // ======================
               // デバッグ情報（下）
@@ -422,86 +477,24 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
     );
   }
-  Widget _timeRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final theme = Theme.of(context);
 
-        final labelStyle = theme.textTheme.bodyMedium!;
-        final valueStyle =
-        theme.textTheme.bodyMedium!.copyWith(fontWeight: FontWeight.w500);
+  static const MethodChannel _mapChannel = MethodChannel('app.maps');
 
-        // ---- value（日時）の横幅を計測 ----
-        final valuePainter = TextPainter(
-          text: TextSpan(text: value, style: valueStyle),
-          maxLines: 1,
-          textDirection: TextDirection.ltr,
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout();
+  Future<void> _openExternalMap(int latE6, int lonE6) async {
+    final lat = latE6 / 1e6;
+    final lon = lonE6 / 1e6;
 
-        // アイコン＋余白の固定幅
-        const iconSize = 18.0;
-        const iconGap = 6.0;
-        const betweenGap = 8.0;
-
-        final fixedWidth =
-            iconSize + iconGap + betweenGap + valuePainter.width;
-
-        // ---- label が1行で収まるかを計測 ----
-        final labelPainter = TextPainter(
-          text: TextSpan(text: label, style: labelStyle),
-          maxLines: 1,
-          ellipsis: '…',
-          textDirection: TextDirection.ltr,
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout(
-          maxWidth: (constraints.maxWidth - fixedWidth)
-              .clamp(0.0, constraints.maxWidth),
-        );
-
-        final fitsOneLine = !labelPainter.didExceedMaxLines;
-
-        if (fitsOneLine) {
-          // ===== 横並び（1行で収まる場合）=====
-          return Row(
-            children: [
-              Icon(icon, size: iconSize),
-              const SizedBox(width: iconGap),
-              Expanded(
-                child: Text(label, style: labelStyle),
-              ),
-              const SizedBox(width: betweenGap),
-              Text(value, style: valueStyle),
-            ],
-          );
-        }
-
-        // ===== 縦並び（ラベル → 次行右寄せで日時）=====
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: iconSize),
-                const SizedBox(width: iconGap),
-                Expanded(
-                  child: Text(label, style: labelStyle),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(value, style: valueStyle),
-            ),
-          ],
-        );
-      },
-    );
+    try {
+      await _mapChannel.invokeMethod('openMap', {
+        'lat': lat,
+        'lon': lon,
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('地図アプリを開けませんでした: $e')),
+      );
+    }
   }
 
   // ----------------------------
