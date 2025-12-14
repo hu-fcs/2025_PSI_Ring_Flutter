@@ -477,12 +477,16 @@ class _ExchangePageState extends State<ExchangePage> {
                     ),
                     if (!isServerSide) ...[
                       _debugRow(
-                        'PSI処理時間',
+                        'PSI時間',
                         '${psi.psiTimeMs} ms',
                       ),
                       _debugRow(
                         'リング署名・検証時間',
                         '${psi.ringSigTimeMs} ms',
+                      ),
+                      _debugRow(
+                        '全体処理時間',
+                        '${psi.totalTimeMs} ms',
                       ),
                     ],
                   ],

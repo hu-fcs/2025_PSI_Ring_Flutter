@@ -20,6 +20,7 @@ class PsiResult {
   final int ringSize;
   final int psiTimeMs;
   final int ringSigTimeMs;
+  final int totalTimeMs;
 
   PsiResult({
     required this.isFamiliar,
@@ -28,6 +29,7 @@ class PsiResult {
     required this.ringSize,
     required this.psiTimeMs,
     required this.ringSigTimeMs,
+    required this.totalTimeMs,
   });
 }
 
@@ -100,6 +102,9 @@ class GrpcClient {
     final stub = _stub;
     if (stub == null) throw StateError('[CLIENT] ❌ サーバ未接続');
 
+    // ★ 全体時間計測開始
+    final totalSw = Stopwatch()..start();
+
     print('\n[CLIENT] === PSI フロー開始 ===');
 
     // ------------------------------------------------------------
@@ -115,6 +120,7 @@ class GrpcClient {
 
     if (myKeys.isEmpty) {
       print('[CLIENT] ⚠ BLE鍵なし → PSI中止');
+      totalSw.stop();
       return PsiResult(
         isFamiliar: false,
         commonKeys: [],
@@ -122,6 +128,7 @@ class GrpcClient {
         ringSize: 0,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
+        totalTimeMs: totalSw.elapsedMilliseconds,
       );
     }
 
@@ -227,6 +234,10 @@ class GrpcClient {
       print('[CLIENT] ⚠ PSI条件不足のためリング署名フェーズは実施しません');
     }
 
+    // ★ 全体時間計測終了
+    totalSw.stop();
+    final totalTimeMs = totalSw.elapsedMilliseconds;
+
     // ------------------------------------------------------------
     // 最終結果
     // ------------------------------------------------------------
@@ -237,9 +248,11 @@ class GrpcClient {
       ringSize: ringSize,
       psiTimeMs: psiTimeMs,
       ringSigTimeMs: ringSigTimeMs,
+      totalTimeMs: totalTimeMs,
     );
 
     print('[CLIENT] ⭐ 最終判定 isFamiliar=${result.isFamiliar}');
+    print('[CLIENT] ⏱ 全体処理時間 = ${totalTimeMs} ms');
     print('-----------------------------------------------');
 
     return result;
