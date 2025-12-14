@@ -14,12 +14,20 @@ import '../db/database_helper.dart';
 /// PSI の結果（共通集合 + 顔見知り判定）
 /// ===============================================================
 class PsiResult {
-  final List<String> commonKeys;
   final bool isFamiliar;
+  final int psiKeyCount;
+  final List<String> commonKeys;
+  final int ringSize;
+  final int psiTimeMs;
+  final int ringSigTimeMs;
 
   PsiResult({
-    required this.commonKeys,
     required this.isFamiliar,
+    required this.psiKeyCount,
+    required this.commonKeys,
+    required this.ringSize,
+    required this.psiTimeMs,
+    required this.ringSigTimeMs,
   });
 }
 
@@ -107,20 +115,29 @@ class GrpcClient {
 
     if (myKeys.isEmpty) {
       print('[CLIENT] ⚠ BLE鍵なし → PSI中止');
-      return PsiResult(commonKeys: [], isFamiliar: false);
+      return PsiResult(
+        isFamiliar: false,
+        commonKeys: [],
+        psiKeyCount: 0,
+        ringSize: 0,
+        psiTimeMs: 0,
+        ringSigTimeMs: 0,
+      );
     }
 
     print('[CLIENT] === Phase1: 鍵読み込み 終了 ===');
+
+    // ============================================================
+    // PSI 時間計測 開始（Phase2〜5）
+    // ============================================================
+    final psiSw = Stopwatch()..start();
 
     // ------------------------------------------------------------
     // Phase2: bQ 計算
     // ------------------------------------------------------------
     print('\n[CLIENT] === Phase2: bQ 計算 開始 ===');
 
-    print('[CLIENT] 🔒 秘密値 b を生成します...');
     final mySecret = _keyService.generateRandomSecret();
-
-    print('[CLIENT] 🔒 bQ を計算中...');
     final myEncKeys = _keyService.encryptSet(myKeys, mySecret);
 
     print('[CLIENT] 🔒 bQ 計算完了 (${myEncKeys.length} 件)');
@@ -161,13 +178,16 @@ class GrpcClient {
 
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
 
-    print('[CLIENT] 🎯 PSI 共通集合 = ${clientCommon.length} 件');
-
     await stub.finalizePsi(
       ClientFinalReq()..clientReencServerKeys.addAll(abP),
       options: CallOptions(compression: GzipCodec()),
     );
 
+    psiSw.stop();
+    final psiTimeMs = psiSw.elapsedMilliseconds;
+
+    print('[CLIENT] 🎯 PSI 共通集合 = ${clientCommon.length} 件');
+    print('[CLIENT] ⏱ PSI処理時間 = ${psiTimeMs} ms');
     print('[CLIENT] === Phase5: PSI 共通集合抽出 終了 ===');
 
     // ------------------------------------------------------------
@@ -176,20 +196,33 @@ class GrpcClient {
     final commonHex = clientCommon.map(_hex).toList();
     final myGenHex = generated.map(_hex).toSet();
 
-    final familiarByPsi = commonHex.toSet().intersection(myGenHex).isNotEmpty;
+    final familiarByPsi =
+        commonHex.toSet().intersection(myGenHex).isNotEmpty;
 
     print('[CLIENT] 👤 PSIベースの顔見知り判定 = $familiarByPsi');
 
     // ------------------------------------------------------------
-    // Phase7: リング署名フェーズ
+    // Phase7: リング署名フェーズ（時間計測）
     // ------------------------------------------------------------
     bool ringOk = false;
+    int ringSize = 0;
+    int ringSigTimeMs = 0;
 
     if (familiarByPsi && clientCommon.length >= 2) {
-      ringOk = await _runRingSignaturePhase(
+      final sw = Stopwatch()..start();
+
+      final result = await _runRingSignaturePhase(
         stub: stub,
         intersection: clientCommon,
       );
+
+      sw.stop();
+
+      ringOk = result.$1;
+      ringSize = result.$2;
+      ringSigTimeMs = sw.elapsedMilliseconds;
+
+      print('[CLIENT] ⏱ リング署名・検証時間 = ${ringSigTimeMs} ms');
     } else {
       print('[CLIENT] ⚠ PSI条件不足のためリング署名フェーズは実施しません');
     }
@@ -198,8 +231,12 @@ class GrpcClient {
     // 最終結果
     // ------------------------------------------------------------
     final result = PsiResult(
-      commonKeys: commonHex,
       isFamiliar: familiarByPsi && ringOk,
+      commonKeys: commonHex,
+      psiKeyCount: myKeys.length + serverEncKeys.length,
+      ringSize: ringSize,
+      psiTimeMs: psiTimeMs,
+      ringSigTimeMs: ringSigTimeMs,
     );
 
     print('[CLIENT] ⭐ 最終判定 isFamiliar=${result.isFamiliar}');
@@ -209,7 +246,7 @@ class GrpcClient {
   }
 
   // ===============================================================
-  // 共通集合から署名者鍵を選ぶ（変更なし）
+  // 共通集合から署名者鍵を選ぶ
   // ===============================================================
   Future<KeyPair?> _selectSignerKeyFromIntersection(
       List<Uint8List> intersection) async {
@@ -251,22 +288,17 @@ class GrpcClient {
   }
 
   // ===============================================================
-  //               リング署名フェーズ（同日フィルタ版）
+  // リング署名フェーズ（結果 + リングサイズ）
   // ===============================================================
-  Future<bool> _runRingSignaturePhase({
+  Future<(bool, int)> _runRingSignaturePhase({
     required GrpcServiceClient stub,
     required List<Uint8List> intersection,
   }) async {
     print('[CLIENT] === Phase7: リング署名フェーズ開始 ===');
 
-    // 署名者（自分の鍵）を取得
     final signerKey = await _selectSignerKeyFromIntersection(intersection);
-    if (signerKey == null) {
-      print('[CLIENT] ❌ 署名者鍵が見つからない');
-      return false;
-    }
+    if (signerKey == null) return (false, 0);
 
-    // ★★★ signerKey の generate_time を取得
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
@@ -276,29 +308,17 @@ class GrpcClient {
       limit: 1,
     );
 
-    if (rows.isEmpty) {
-      print('[CLIENT] ❌ 署名者 generate_time が取得できない');
-      return false;
-    }
+    if (rows.isEmpty) return (false, 0);
 
     final generateTimeMs = rows.first['generate_time'] as int;
-    print('[CLIENT] 🔑 署名者 generate_time = $generateTimeMs');
 
-    // ★★★ 共通集合 → 同日部分集合にフィルタ
-    final filteredRing = await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
+    final filteredRing =
+    await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
 
-    print('[CLIENT] 🔍 同日フィルタ後のリングサイズ = ${filteredRing.length}');
-
-    if (filteredRing.length < 2) {
-      print('[CLIENT] ❌ 同日リングが小さすぎて署名不可');
-      return false;
-    }
+    if (filteredRing.length < 2) return (false, filteredRing.length);
 
     filteredRing.sort(_compare);
 
-    // ------------------------------------------------------------
-    // Challenge 交換
-    // ------------------------------------------------------------
     final challengeC = _keyService.generateRandomSecret();
     final resp = await stub.exchangeChallenges(
       ClientChallenge()..challengeC = challengeC,
@@ -309,34 +329,22 @@ class GrpcClient {
     final msgForServer = _hex(challengeS);
     final msgForClient = _hex(challengeC);
 
-    // ------------------------------------------------------------
-    // サーバ向け署名
-    // ------------------------------------------------------------
     final sigForServer =
     _createRingSignature(msgForServer, signerKey.privateKey, filteredRing);
+    if (sigForServer == null) return (false, filteredRing.length);
 
-    if (sigForServer == null) {
-      print('[CLIENT] ❌ 署名生成失敗');
-      return false;
-    }
-
-    // ------------------------------------------------------------
-    // サーバ署名受信
-    // ------------------------------------------------------------
     final sigResp = await stub.exchangeRingSignatures(
       RingSignatureReq()..signatureForServer = sigForServer,
     );
 
     final sigFromServer = Uint8List.fromList(sigResp.signatureForClient);
 
-    // ------------------------------------------------------------
-    // サーバ署名の検証
-    // ------------------------------------------------------------
-    final ok = _verifyRingSignature(msgForClient, sigFromServer, filteredRing);
+    final ok =
+    _verifyRingSignature(msgForClient, sigFromServer, filteredRing);
 
     print('[CLIENT] === Phase7: 完了（署名検証結果=$ok） ===');
 
-    return ok;
+    return (ok, filteredRing.length);
   }
 
   // ===============================================================

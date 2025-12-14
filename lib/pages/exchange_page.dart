@@ -430,36 +430,67 @@ class _ExchangePageState extends State<ExchangePage> {
                 ),
               ),
 
-              const SizedBox(height: 10),
-
               // ======================
-              // デバッグ情報（下）
+              // デバッグ情報（下）※折りたたみ
               // ======================
               Divider(color: Colors.grey.shade300),
 
-              const SizedBox(height: 8),
-
-              Text(
-                'デバッグ情報',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  initiallyExpanded: false,
+                  title: Text(
+                    'デバッグ情報',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.expand_more,
+                    size: 20,
+                    color: Colors.grey.shade600,
+                  ),
+                  children: [
+                    _debugRow(
+                      '判定側',
+                      isServerSide ? 'サーバ側' : 'クライアント側',
+                    ),
+                    _debugRow(
+                      'PSI使用鍵総数',
+                      '${psi.psiKeyCount} 件',
+                    ),
+                    _debugRow(
+                      '共通鍵数',
+                      '${psi.commonKeys.length} 件',
+                    ),
+                    _debugRow(
+                      '自身の鍵との一致',
+                      familiar ? 'あり' : 'なし',
+                    ),
+                    _debugRow(
+                      'リングサイズ',
+                      '${psi.ringSize} 件',
+                    ),
+                    if (!isServerSide) ...[
+                      _debugRow(
+                        'PSI処理時間',
+                        '${psi.psiTimeMs} ms',
+                      ),
+                      _debugRow(
+                        'リング署名・検証時間',
+                        '${psi.ringSigTimeMs} ms',
+                      ),
+                    ],
+                  ],
                 ),
               ),
 
-              const SizedBox(height: 8),
 
-              _debugRow('共通鍵数', '${psi.commonKeys.length} 件'),
-              _debugRow(
-                '自身の生成鍵との一致',
-                familiar ? 'あり' : 'なし',
-              ),
-              _debugRow(
-                '判定側',
-                isServerSide ? 'サーバ側' : 'クライアント側',
-              ),
-
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
 
               // ======================
               // OKボタン
