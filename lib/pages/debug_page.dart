@@ -648,27 +648,12 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   }
 
   Widget _buildSlotSelector() {
-    int current = _keyManager.slotMs;
+    final int current = _keyManager.slotMs;
 
-    Widget buildSlotButton(String label, int value) {
-      final bool selected = (current == value);
-
-      return OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          backgroundColor: selected ? Colors.blue : Colors.grey.shade200,
-          foregroundColor: selected ? Colors.white : Colors.black87,
-          side: BorderSide(
-            color: selected ? Colors.blue : Colors.grey,
-            width: selected ? 2 : 1,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        ),
-        onPressed: () {
-          setState(() {
-            _keyManager.slotMs = value;
-          });
-        },
-        child: Text(label, style: const TextStyle(fontSize: 14)),
+    Widget label(String text) {
+      return SizedBox(
+        width: 72, // リング範囲セレクタと同じ幅
+        child: Center(child: Text(text)),
       );
     }
 
@@ -677,21 +662,85 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       children: [
         Text(
           "現在のスロット時間: ${_keyManager.slotMs} ms",
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          children: [
-            buildSlotButton("10分", 10 * 60 * 1000),
-            buildSlotButton("1分", 1 * 60 * 1000),
-            buildSlotButton("10秒", 10 * 1000),
+        const SizedBox(height: 8),
+        SegmentedButton<int>(
+          segments: [
+            ButtonSegment(
+              value: 10 * 60 * 1000,
+              label: label('10分'),
+            ),
+            ButtonSegment(
+              value: 1 * 60 * 1000,
+              label: label('1分'),
+            ),
+            ButtonSegment(
+              value: 10 * 1000,
+              label: label('10秒'),
+            ),
           ],
+          selected: {current},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _keyManager.slotMs = selection.first;
+            });
+          },
         ),
       ],
     );
   }
 
+
+  Widget _buildRingRangeSelector() {
+    final RingSignatureRange range = _keyManager.ringRange;
+
+    Widget label(String text) {
+      return SizedBox(
+        width: 80, // ← ここで横幅を固定（好みで調整）
+        child: Center(child: Text(text)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'リング署名対象期間',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<RingSignatureRange>(
+          segments: [
+            ButtonSegment(
+              value: RingSignatureRange.slot,
+              label: label('スロット'),
+            ),
+            ButtonSegment(
+              value: RingSignatureRange.day,
+              label: label('1日'),
+            ),
+            ButtonSegment(
+              value: RingSignatureRange.all,
+              label: label('全期間'),
+            ),
+          ],
+          selected: {range},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _keyManager.ringRange = selection.first;
+            });
+          },
+        ),
+      ],
+    );
+  }
 
 
   Widget _buildKeyListTab(String tableName, bool isGenerated) {
@@ -877,6 +926,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
         children: [
           // ★ 追加：スロット選択UI
           _buildSlotSelector(),
+          _buildRingRangeSelector(),
 
           const SizedBox(height: 24),
 
