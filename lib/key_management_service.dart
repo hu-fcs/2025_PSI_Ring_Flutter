@@ -19,6 +19,7 @@ class KeyManagementService {
   static final KeyManagementService _instance = KeyManagementService._internal();
   factory KeyManagementService() => _instance;
   KeyManagementService._internal();
+  RingSignatureRange ringRange = RingSignatureRange.slot;
 
   // ================================================================
 
@@ -281,25 +282,55 @@ class KeyManagementService {
   }
 
   // ================================================================
-  // ★ 同スロットフィルタリング（slotMs を一元使用）
+  // ★ 同時間帯でフィルタリング
   // ================================================================
   Future<List<Uint8List>> filterKeysBySameSlot(
-      List<Uint8List> intersection, int signerGenerateTimeMs) async {
-    final targetSlot = signerGenerateTimeMs ~/ slotMs;
+      List<Uint8List> intersection,
+      int signerGenerateTimeMs,
+      ) async {
     final result = <Uint8List>[];
+
+    final range = ringRange;
+
+    // 基準値を先に計算
+    final targetSlot = signerGenerateTimeMs ~/ slotMs;
+
+    // 1日の開始（ローカル時間）
+    final signerDate = DateTime.fromMillisecondsSinceEpoch(signerGenerateTimeMs);
+    final dayStart = DateTime(
+      signerDate.year,
+      signerDate.month,
+      signerDate.day,
+    ).millisecondsSinceEpoch;
+    final dayEnd = dayStart + const Duration(days: 1).inMilliseconds;
 
     for (final pub in intersection) {
       final ts = await getTimestampForKey(pub);
       if (ts == null) continue;
 
-      final slot = ts ~/ slotMs;
-      if (slot == targetSlot) {
-        result.add(pub);
+      switch (range) {
+        case RingSignatureRange.slot:
+          final slot = ts ~/ slotMs;
+          if (slot == targetSlot) {
+            result.add(pub);
+          }
+          break;
+
+        case RingSignatureRange.day:
+          if (ts >= dayStart && ts < dayEnd) {
+            result.add(pub);
+          }
+          break;
+
+        case RingSignatureRange.all:
+          result.add(pub);
+          break;
       }
     }
 
     return result;
   }
+
 
   // ================================================================
   // DebugPage 用
@@ -330,4 +361,11 @@ class KeyManagementService {
     print("🗑 マスターキー削除");
     return _secureStorage.delete(key: _masterKeyAlias);
   }
+}
+
+/// リング署名対象期間
+enum RingSignatureRange {
+  slot,   // 現在スロット
+  day,    // 直近24時間
+  all,    // 全期間
 }
