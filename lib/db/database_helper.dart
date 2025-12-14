@@ -115,4 +115,27 @@ class DatabaseHelper {
 
     return generated + collected;
   }
+
+  static Future<void> deleteKey({
+    required KeyTable table,
+    required int id,
+  }) async {
+    final db = await getDatabase();
+
+    final tableName = switch (table) {
+      KeyTable.generated => 'generated_keys',
+      KeyTable.collected => 'collected_keys',
+    };
+
+    await db.delete(
+      tableName,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+}
+
+enum KeyTable {
+  generated,
+  collected,
 }

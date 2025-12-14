@@ -171,6 +171,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
         ringSize: 0,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
+        totalTimeMs: 0,
       ),
     );
 
@@ -378,6 +379,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
           ringSize: filteredRing.length,
           psiTimeMs: 0,
           ringSigTimeMs: 0,
+          totalTimeMs: 0,
         ),
       );
     } else {

@@ -311,15 +311,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   }
 
   /// 収集した鍵（1つ）を詳細表示するダイアログ
-  void _showFullKeyDialog(BuildContext context, String title, List<int>? keyBytes) {
+  void _showFullKeyDialog(BuildContext context, String title, List<int>? keyBytes, int keyId) {
     if (keyBytes == null) return;
     final String fullHexKey = _fullHex(keyBytes);
-    _showFullStringDialog(context, title, fullHexKey);
-  }
-
-  /// ★★★ マスターキー(String)表示用のダイアログを汎用化 ★★★
-  void _showFullStringDialog(BuildContext context, String title, String? content) {
-    if (content == null || content.isEmpty) {
+    if (fullHexKey == null || fullHexKey.isEmpty) {
       _showErrorSnackbar("キーがありません。");
       return;
     }
@@ -335,16 +330,37 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SelectableText(
-                  content,
+                  fullHexKey,
                   style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
                 ),
               ],
             ),
           ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('閉じる'),
-              onPressed: () => Navigator.of(context).pop(),
+          actions: [
+            Row(
+              children: [
+                // ---- 左端：削除 ----
+                TextButton.icon(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  onPressed: () async {
+                    await DatabaseHelper.deleteKey(
+                      table: KeyTable.collected,
+                      id: keyId,
+                    );
+                    Navigator.of(context).pop();
+                    setState(() {});
+                  },
+                ),
+
+                const Spacer(), // ★ これが肝
+
+                // ---- 右端：閉じる ----
+                TextButton(
+                  child: const Text('閉じる'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
             ),
           ],
         );
@@ -353,7 +369,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   }
 
   /// 生成した鍵ペア（2つ）を詳細表示するダイアログ
-  void _showGeneratedKeyDialog(BuildContext context, List<int>? pubKeyBytes, List<int>? secKeyBytes) {
+  void _showGeneratedKeyDialog(BuildContext context, List<int>? pubKeyBytes, List<int>? secKeyBytes, int keyId) {
     final String fullHexPub = _fullHex(pubKeyBytes);
     final String fullHexSec = _fullHex(secKeyBytes);
 
@@ -381,7 +397,62 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
               ],
             ),
           ),
-          actions: <Widget>[
+          actions: [
+            Row(
+              children: [
+                // ---- 左端：削除 ----
+                TextButton.icon(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  onPressed: () async {
+                    await DatabaseHelper.deleteKey(
+                      table: KeyTable.generated,
+                      id: keyId,
+                    );
+                    Navigator.of(context).pop();
+                    setState(() {});
+                  },
+                ),
+
+                const Spacer(),
+
+                // ---- 右端：閉じる ----
+                TextButton(
+                  child: const Text('閉じる'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showFullStringDialog(BuildContext context, String title, String? content) {
+    if (content == null || content.isEmpty) {
+      _showErrorSnackbar("キーがありません。");
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  content,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: [
             TextButton(
               child: const Text('閉じる'),
               onPressed: () => Navigator.of(context).pop(),
@@ -827,12 +898,14 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                             context,
                             row['pubkey_ecd'] as List<int>?,
                             row['seckey_ecd'] as List<int>?,
+                            row['id'] as int,
                           );
                         } else {
                           _showFullKeyDialog(
                             context,
                             '収集した鍵',
                             row['pubkey_ecd'] as List<int>?,
+                            row['id'] as int,
                           );
                         }
                       },
