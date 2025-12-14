@@ -53,7 +53,6 @@ class GrpcServiceImpl extends GrpcServiceBase {
     });
   }
 
-
   // ===============================================================
   // 初期化
   // ===============================================================
@@ -72,7 +71,6 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _myGeneratedKeysHex = generated.map(_hex).toList();
 
     print('[SERVER] 🔑 読み込み: generated=${generated.length}, collected=${collected.length}');
-
     print('[SERVER] 🔒 aP 計算...');
     _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
   }
@@ -165,10 +163,16 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final familiar =
         commonHex.toSet().intersection(_myGeneratedKeysHex.toSet()).isNotEmpty;
 
-    _psiEventController.add(PsiResult(
-      commonKeys: commonHex,
-      isFamiliar: familiar,
-    ));
+    _psiEventController.add(
+      PsiResult(
+        isFamiliar: familiar,
+        commonKeys: commonHex,
+        psiKeyCount: _myKeys.length + _serverAbQ.length,
+        ringSize: 0,
+        psiTimeMs: 0,
+        ringSigTimeMs: 0,
+      ),
+    );
 
     _lastChallengeC = null;
     _lastChallengeS = null;
@@ -191,25 +195,23 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _lastChallengeC = Uint8List.fromList(req.challengeC);
     _lastChallengeS = _keyService.generateRandomSecret();
 
-    // ★ 署名生成を非同期実行
+    // 署名生成を非同期実行
     _serverSignatureFuture = _computeServerSignatureAsync();
 
     return ServerChallenge()..challengeS = _lastChallengeS!;
   }
 
   // ===============================================================
-  // ★★★ サーバ署名生成（同じ日の鍵でリング構成）
+  // サーバ署名生成（同日フィルタ）
   // ===============================================================
   Future<Uint8List> _computeServerSignatureAsync() async {
     print('[SERVER] ✍️ サーバ署名生成開始');
 
-    // 署名者選択
     final signer = await _selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) {
       throw GrpcError.failedPrecondition('No signer key');
     }
 
-    // ★★★ signer の generate_time を取得
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
@@ -218,11 +220,12 @@ class GrpcServiceImpl extends GrpcServiceBase {
       whereArgs: [signer.publicKey],
       limit: 1,
     );
+
     if (rows.isEmpty) {
       throw GrpcError.failedPrecondition('No generate_time for signer');
     }
-    final signerGenerateTimeMs = rows.first['generate_time'] as int;
 
+    final signerGenerateTimeMs = rows.first['generate_time'] as int;
     print('[SERVER] 🔑 signer generate_time = $signerGenerateTimeMs');
 
     final filteredRing = await _kms.filterKeysBySameSlot(
@@ -238,7 +241,6 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     filteredRing.sort(_compare);
 
-    // ---------- 署名生成 ----------
     final msgHex = _hex(_lastChallengeC!);
     const pubLen = 33;
 
@@ -305,16 +307,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
   }
 
   // ===============================================================
-  // ★★★ クライアント署名検証（リングも同日でなければならない）
+  // クライアント署名検証（同日リング）
   // ===============================================================
   Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
     print('[SERVER] 🔍 クライアント署名検証開始');
 
-    // 署名者再取得（同じ signer を使う必要がある）
     final signer = await _selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) return;
 
-    // signer の generate_time
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
@@ -332,7 +332,6 @@ class GrpcServiceImpl extends GrpcServiceBase {
       signerGenerateTimeMs,
     );
 
-
     if (filteredRing.length < 2) {
       print('[SERVER] ❌ Filtered ring too small');
       return;
@@ -341,8 +340,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
     filteredRing.sort(_compare);
 
     final msgHex = _hex(_lastChallengeS!);
-
     const pubLen = 33;
+
     final ringPtr = calloc<Uint8>(pubLen * filteredRing.length);
     final ringList = ringPtr.asTypedList(pubLen * filteredRing.length);
 
@@ -373,8 +372,12 @@ class GrpcServiceImpl extends GrpcServiceBase {
       print('[SERVER] 🎉 クライアント署名 → 正当');
       _ringAuthController.add(
         PsiResult(
-          commonKeys: _lastIntersection.map(_hex).toList(),
           isFamiliar: true,
+          commonKeys: _lastIntersection.map(_hex).toList(),
+          psiKeyCount: _myKeys.length + _serverAbQ.length,
+          ringSize: filteredRing.length,
+          psiTimeMs: 0,
+          ringSigTimeMs: 0,
         ),
       );
     } else {

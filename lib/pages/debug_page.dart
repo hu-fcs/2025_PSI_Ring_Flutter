@@ -652,7 +652,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
 
     Widget label(String text) {
       return SizedBox(
-        width: 72, // リング範囲セレクタと同じ幅
+        width: 80, // リング範囲セレクタと同じ幅
         child: Center(child: Text(text)),
       );
     }
