@@ -1,3 +1,5 @@
+// lib/grpc/grpc_server.dart
+
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
@@ -65,8 +67,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final collected = await _kms.getAllCollectedPublicKeys();
 
     _myKeys = [...generated, ...collected];
-    _myGeneratedKeysHex =
-        generated.map(GrpcCommon.bytesToHex).toList();
+    _myGeneratedKeysHex = generated.map(GrpcCommon.bytesToHex).toList();
 
     _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
 
@@ -97,8 +98,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
   // Phase2: FinalizePsi
   // ===============================================================
   @override
-  Future<PsiDone> finalizePsi(
-      ServiceCall call, ClientFinalReq req) async {
+  Future<PsiDone> finalizePsi(ServiceCall call, ClientFinalReq req) async {
     await _ensureReady();
 
     print('[SERVER] === Phase2: FinalizePsi ===');
@@ -109,8 +109,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final intersection = _computeIntersection(clientAbP);
     _lastIntersection = intersection;
 
-    final commonHex =
-    intersection.map(GrpcCommon.bytesToHex).toList();
+    final commonHex = intersection.map(GrpcCommon.bytesToHex).toList();
 
     final familiar =
         commonHex.toSet().intersection(_myGeneratedKeysHex.toSet()).isNotEmpty;
@@ -159,20 +158,17 @@ class GrpcServiceImpl extends GrpcServiceBase {
   Future<Uint8List> _computeServerSignatureAsync() async {
     print('[SERVER] ✍️ サーバ署名生成');
 
-    final signer =
-    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
+    final signer = await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) {
       throw GrpcError.failedPrecondition('No signer key');
     }
 
-    final signerTime =
-    await _kms.getTimestampForKey(signer.publicKey);
+    final signerTime = await _kms.getTimestampForKey(signer.publicKey);
     if (signerTime == null) {
       throw GrpcError.failedPrecondition('No signer timestamp');
     }
 
-    final ring =
-    await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
+    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
     if (ring.length < 2) {
       throw GrpcError.failedPrecondition('Ring too small');
     }
@@ -215,8 +211,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       throw GrpcError.internal('Server signature failed');
     }
 
-    final sig =
-    Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
+    final sig = Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
     calloc.free(sigPtr);
 
     return sig;
@@ -230,8 +225,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ServiceCall call, RingSignatureReq request) async {
     await _ensureReady();
 
-    final sigFromClient =
-    Uint8List.fromList(request.signatureForServer);
+    final sigFromClient = Uint8List.fromList(request.signatureForServer);
 
     final sigForClient = await _serverSignatureFuture!;
     unawaited(_verifyClientSignatureLater(sigFromClient));
@@ -243,16 +237,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
   // クライアント署名検証
   // ===============================================================
   Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
-    final signer =
-    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
+    final signer = await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) return;
 
-    final signerTime =
-    await _kms.getTimestampForKey(signer.publicKey);
+    final signerTime = await _kms.getTimestampForKey(signer.publicKey);
     if (signerTime == null) return;
 
-    final ring =
-    await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
+    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
     if (ring.length < 2) return;
 
     ring.sort(GrpcCommon.comparePubKey);
@@ -290,8 +281,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       _ringAuthController.add(
         PsiResult(
           isFamiliar: true,
-          commonKeys:
-          _lastIntersection.map(GrpcCommon.bytesToHex).toList(),
+          commonKeys: _lastIntersection.map(GrpcCommon.bytesToHex).toList(),
           psiKeyCount: _myKeys.length + _serverAbQ.length,
           ringSize: ring.length,
           psiTimeMs: 0,
@@ -310,17 +300,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
   // PSI 共通集合
   // ===============================================================
   List<Uint8List> _computeIntersection(List<Uint8List> clientAbP) {
-    final abQSet =
-    _serverAbQ.map(GrpcCommon.bytesToHex).toSet();
+    final abQSet = _serverAbQ.map(GrpcCommon.bytesToHex).toSet();
     final result = <Uint8List>[];
 
-    final n = clientAbP.length < _myKeys.length
-        ? clientAbP.length
-        : _myKeys.length;
+    final n = clientAbP.length < _myKeys.length ? clientAbP.length : _myKeys.length;
 
     for (int i = 0; i < n; i++) {
-      if (abQSet.contains(
-          GrpcCommon.bytesToHex(clientAbP[i]))) {
+      if (abQSet.contains(GrpcCommon.bytesToHex(clientAbP[i]))) {
         result.add(_myKeys[i]);
       }
     }
@@ -341,22 +327,14 @@ class PsiGrpcServer {
 
   bool get isRunning => _server != null;
 
-  Future<int> start({
-    int port = 50051,
-    List<int>? tlsCertificatePem,
-    List<int>? tlsPrivateKeyPem,
-  }) async {
+  Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
     service = GrpcServiceImpl();
     await service._ready;
 
-    final security = _grpcCommon.enableTls
-        ? _grpcCommon.buildServerSecurity(
-      certificate: tlsCertificatePem!,
-      privateKey: tlsPrivateKeyPem!,
-    )
-        : null;
+    // ★ enableTls に応じて security を構築（OFFなら null）
+    final security = _grpcCommon.buildServerSecurity();
 
     final s = Server.create(
       services: [service],

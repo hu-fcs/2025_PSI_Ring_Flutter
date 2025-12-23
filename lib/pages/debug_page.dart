@@ -9,12 +9,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
-
 import '../ble/ble_scanner.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
 import '../ffi/native_key_service.dart';
-
+import '../grpc/grpc_common.dart';
 
 // ================================================================
 // Isolateで実行する関数 (変更なし)
@@ -89,6 +88,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   late TabController _tabController;
 
   final KeyManagementService _keyManager = KeyManagementService();
+
+  final GrpcCommon _grpcCommon = GrpcCommon();
 
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
@@ -782,6 +783,41 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
+  Widget _buildGrpcOptionToggles() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'gRPC 通信設定',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('gzip 圧縮'),
+          subtitle: const Text('アプリケーションレベル圧縮'),
+          value: _grpcCommon.enableGzip,
+          onChanged: (v) {
+            setState(() {
+              _grpcCommon.enableGzip = v;
+            });
+          },
+        ),
+
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Text(
+            '※ 次回の gRPC 接続から有効になります',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildKeyListTab(String tableName, bool isGenerated) {
     final fetchData = Future.wait([
@@ -969,6 +1005,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
           // ★ 追加：スロット選択UI
           _buildSlotSelector(),
           _buildRingRangeSelector(),
+
+          const SizedBox(height: 24),
+
+          _buildGrpcOptionToggles(),
 
           const SizedBox(height: 24),
 

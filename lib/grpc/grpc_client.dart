@@ -44,7 +44,6 @@ class GrpcClient {
 
     print('\n[CLIENT] === gRPC 接続開始 ===');
     print('[CLIENT] 接続先: $host:$port');
-    print('[CLIENT] 設定: gzip=${_grpcCommon.enableGzip}, tls=${_grpcCommon.enableTls}');
 
     try {
       await disconnect();
@@ -59,8 +58,9 @@ class GrpcClient {
 
       _stub = GrpcServiceClient(_channel!);
       print('[CLIENT] ✅ サーバへの接続成功');
-    } catch (e) {
+    } catch (e, st) {
       print('[CLIENT] ❌ 接続失敗: $e');
+      print(st);
       rethrow;
     }
   }
@@ -190,11 +190,9 @@ class GrpcClient {
     required GrpcServiceClient stub,
     required List<Uint8List> intersection,
   }) async {
-    // ★ 署名者選択は KeyManagementService に移動
     final signerKey = await _kms.selectSignerKeyFromIntersection(intersection);
     if (signerKey == null) return (false, 0);
 
-    // signer の generate_time を取得（リング期間フィルタに使う）
     final generateTimeMs =
     await _kms.getTimestampForKey(signerKey.publicKey);
     if (generateTimeMs == null) return (false, 0);
@@ -204,7 +202,6 @@ class GrpcClient {
 
     if (filteredRing.length < 2) return (false, filteredRing.length);
 
-    // ★ 33B 公開鍵ソートは共通 comparator
     filteredRing.sort(GrpcCommon.comparePubKey);
 
     final challengeC = _keyService.generateRandomSecret();
@@ -214,7 +211,6 @@ class GrpcClient {
 
     final challengeS = Uint8List.fromList(resp.challengeS);
 
-    // ★ hex 変換は共通ユーティリティ
     final msgForServer = GrpcCommon.bytesToHex(challengeS);
     final msgForClient = GrpcCommon.bytesToHex(challengeC);
 

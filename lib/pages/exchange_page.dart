@@ -11,7 +11,6 @@ import 'package:flutter/services.dart';
 import '../ble/ble_exchange_controller.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
-import '../grpc/grpc_client.dart'; // PsiResult
 import '../db/database_helper.dart';
 import 'debug_page.dart';
 

@@ -1,3 +1,5 @@
+// lib/grpc/grpc_common.dart
+
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
@@ -13,10 +15,17 @@ class GrpcCommon {
   GrpcCommon._internal();
 
   // ===============================
-  // 計測用フラグ
+  // 計測用フラグ（UI から切替）
   // ===============================
   bool enableGzip = false;
-  bool enableTls = false;
+
+  // ===============================================================
+  // TLS は無効化（互換のため残す）
+  // ===============================================================
+  Future<void> ensureTlsAssetsLoaded() async {
+    // TLS を使わないため何もしない
+    return;
+  }
 
   // ===============================
   // CodecRegistry
@@ -31,10 +40,9 @@ class GrpcCommon {
   // Client 用 ChannelOptions
   // ===============================
   ChannelOptions buildClientOptions({Duration? idleTimeout}) {
+    // ✅ TLS は常に無効（insecure）
     return ChannelOptions(
-      credentials: enableTls
-          ? ChannelCredentials.secure()
-          : ChannelCredentials.insecure(),
+      credentials: ChannelCredentials.insecure(),
       codecRegistry: codecRegistry,
       idleTimeout: idleTimeout,
     );
@@ -43,19 +51,13 @@ class GrpcCommon {
   // ===============================
   // Server 用 TLS 設定
   // ===============================
-  ServerTlsCredentials? buildServerSecurity({
-    required List<int> certificate,
-    required List<int> privateKey,
-  }) {
-    if (!enableTls) return null;
-    return ServerTlsCredentials(
-      certificate: certificate,
-      privateKey: privateKey,
-    );
+  ServerTlsCredentials? buildServerSecurity() {
+    // ✅ TLS は常に無効（null）
+    return null;
   }
 
   // ===============================================================
-  // ===== 以下：共通モデル / ユーティリティ =====
+  // ===== 共通ユーティリティ =====
   // ===============================================================
 
   /// Uint8List -> hex 文字列
