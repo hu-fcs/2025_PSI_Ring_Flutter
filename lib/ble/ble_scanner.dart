@@ -1,4 +1,5 @@
 // lib/ble/ble_scanner.dart
+
 import 'dart:async';
 import 'dart:collection';
 import 'dart:typed_data';
@@ -7,56 +8,45 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:pointycastle/export.dart' as pc;
 
-import '../db/database_helper.dart';
 import '../key_management_service.dart';
-import 'ble_constants.dart';
+import 'ble_protocol.dart';
 
 class BleScanner {
   StreamSubscription<List<ScanResult>>? _sub;
   Timer? _gcTimer;
 
   static const int _companyId = 0xFFFF;
+  static const Duration _halfTtl = Duration(minutes: 10);
 
   bool _isScanning = false;
   bool get isScanning => _isScanning;
 
-  static const Duration _halfTtl = Duration(minutes: 10);
+  final KeyManagementService _kms = KeyManagementService();
 
   final Map<String, _HalfState> _halves = {};
   final Queue<_QueueEntry> _queue = Queue<_QueueEntry>();
 
-  // 🔥 グローバルキャッシュ
+  // 🔥 スロット内キャッシュ（重複防止）
   static final Set<String> _globalCacheKeys = {};
-
-  // 🔥 現在のスロット
   static int _currentSlot = -1;
 
-  // 外部（DebugPage 等）からキャッシュクリア
+  // 外部（DebugPage 等）から呼べる
   static void clearCollectedCache() {
     _globalCacheKeys.clear();
     if (kDebugMode) {
-      print("BLE_SCAN: 🧹 collected key cache cleared (manual)");
+      print('BLE_SCAN: 🧹 collected key cache cleared');
     }
   }
 
-  int _calcSlot(int timestampMs, int slotMillis) {
-    return timestampMs ~/ slotMillis;
-  }
+  // ===============================================================
+  // START / STOP
+  // ===============================================================
 
-  Uint8List _getKeyHashId(Uint8List key33) {
-    final digest = pc.SHA256Digest();
-    final hash = digest.process(key33);
-    return hash.sublist(0, 4);
-  }
-
-  // --------------------------------------------------------
-  // START SCAN
-  // --------------------------------------------------------
   Future<void> start() async {
     if (_isScanning) return;
     _isScanning = true;
 
-    if (kDebugMode) print('BLE_SCAN: 🚀 startScan() called.');
+    if (kDebugMode) print('BLE_SCAN: 🚀 startScan');
 
     await FlutterBluePlus.stopScan();
     await FlutterBluePlus.startScan(
@@ -64,8 +54,7 @@ class BleScanner {
     );
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    final slotMillis = 10 * 60 * 1000;
-    _currentSlot = _calcSlot(now, slotMillis);
+    _currentSlot = now ~/ _kms.slotMs;
 
     _sub = FlutterBluePlus.scanResults.listen(
           (results) {
@@ -84,9 +73,6 @@ class BleScanner {
     );
   }
 
-  // --------------------------------------------------------
-  // STOP SCAN
-  // --------------------------------------------------------
   Future<void> stop() async {
     if (!_isScanning) return;
 
@@ -103,12 +89,13 @@ class BleScanner {
 
     _isScanning = false;
 
-    if (kDebugMode) print('BLE_SCAN: 🛑 stopScan() called.');
+    if (kDebugMode) print('BLE_SCAN: 🛑 stopScan');
   }
 
-  // --------------------------------------------------------
-  // DISCOVERY HANDLER
-  // --------------------------------------------------------
+  // ===============================================================
+  // DISCOVERY
+  // ===============================================================
+
   void _onDiscover(ScanResult r) async {
     final adv = r.advertisementData;
     if (!adv.manufacturerData.containsKey(_companyId)) return;
@@ -126,15 +113,14 @@ class BleScanner {
     final body16 = Uint8List.fromList(payload.sublist(5, 21));
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    final slotMillis = 10 * 60 * 1000;
-    final slot = _calcSlot(now, slotMillis);
+    final slot = now ~/ _kms.slotMs;
 
-    // 🔥 スロット変化 → キャッシュクリア
+    // 🔄 スロット変更検出
     if (slot != _currentSlot) {
       _globalCacheKeys.clear();
       _currentSlot = slot;
       if (kDebugMode) {
-        print("BLE_SCAN: 🔄 time slot changed → cache reset");
+        print('BLE_SCAN: 🔄 slot changed → cache reset');
       }
     }
 
@@ -169,40 +155,39 @@ class BleScanner {
       ]);
 
       final calculatedHash = _getKeyHashId(merged);
-      if (listEquals(st.keyId, calculatedHash)) {
-        final hex = merged
-            .map((b) => b.toRadixString(16).padLeft(2, '0'))
-            .join();
+      if (!listEquals(st.keyId, calculatedHash)) {
+        _halves.remove(cacheKey);
+        return;
+      }
 
-        // 1️⃣ キャッシュチェック
-        if (_globalCacheKeys.contains(hex)) {
-          _halves.remove(cacheKey);
-          return;
+      final hex = _bytesToHex(merged);
+
+      // 1️⃣ スロット内キャッシュ
+      if (_globalCacheKeys.contains(hex)) {
+        _halves.remove(cacheKey);
+        return;
+      }
+
+      // 2️⃣ KMS チェック
+      if (await _kms.hasCollectedKey(merged)) {
+        _globalCacheKeys.add(hex);
+        _halves.remove(cacheKey);
+        return;
+      }
+
+      // 3️⃣ KMS 登録
+      final inserted = await _kms.insertCollectedKeyIfAbsent(
+        pubkey33: merged,
+        receivedAtMs: now,
+      );
+
+      if (inserted) {
+        _globalCacheKeys.add(hex);
+        if (kDebugMode) {
+          print('BLE_SCAN: 🔑 new collected key stored');
         }
-
-        // 2️⃣ DB チェック
-        final exists =
-        await DatabaseHelper.existsCollectedKey(merged);
-        if (exists) {
-          _globalCacheKeys.add(hex);
-          _halves.remove(cacheKey);
-          return;
-        }
-
-        // 3️⃣ DB Insert（位置情報なし）
-        final inserted =
-        await DatabaseHelper.insertCollectedKeyIfAbsent(
-          pubkey33: merged,
-          tms: now,
-        );
-
-        if (inserted) {
-          if (kDebugMode) {
-            print("BLE_SCAN: 🔑 新規鍵をDBに追加しました");
-          }
-          _globalCacheKeys.add(hex);
-          KeyManagementService().notifyKeyUpdated();
-        }
+        // ❌ notifyKeyUpdated() は呼ばない
+        // → KMS 内部でのみ notify される
       }
 
       _halves.remove(cacheKey);
@@ -211,9 +196,10 @@ class BleScanner {
     _gcSweep();
   }
 
-  // --------------------------------------------------------
-  // GC SWEEP
-  // --------------------------------------------------------
+  // ===============================================================
+  // GC
+  // ===============================================================
+
   void _gcSweep() {
     final now = DateTime.now().millisecondsSinceEpoch;
     while (_queue.isNotEmpty) {
@@ -224,6 +210,20 @@ class BleScanner {
         break;
       }
     }
+  }
+
+  // ===============================================================
+  // Utils
+  // ===============================================================
+
+  Uint8List _getKeyHashId(Uint8List key33) {
+    final digest = pc.SHA256Digest();
+    final hash = digest.process(key33);
+    return Uint8List.fromList(hash.sublist(0, 4));
+  }
+
+  String _bytesToHex(Uint8List bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 }
 
@@ -239,8 +239,8 @@ class _HalfState {
 
   final Uint8List keyId;
   final int seq2;
-  int yParity;
-  int firstSeenMs;
+  final int yParity;
+  final int firstSeenMs;
 
   Uint8List? front16;
   Uint8List? back16;

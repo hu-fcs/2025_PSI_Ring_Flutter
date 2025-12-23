@@ -1,4 +1,4 @@
-// lib/ble/ble_constants.dart
+// lib/ble/ble_protocol.dart
 import 'dart:typed_data';
 import '../key_management_service.dart';
 

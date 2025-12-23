@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'db/database_helper.dart';
 import 'ffi/native_key_service.dart';
@@ -43,9 +44,17 @@ class KeyManagementService {
   }
 
   // ================================================================
-  // 位置情報（非同期で後付け）
+  // BLE向けユーティリティ（依存を外に漏らさないためKMS内に保持）
   // ================================================================
+  bool _isValidCompressedPubkey33(Uint8List key33) {
+    if (key33.length != 33) return false;
+    final p = key33[0];
+    return (p == 0x02 || p == 0x03);
+  }
 
+  // ================================================================
+  // 位置情報（非同期で後付け） ※ generated_keys のみ
+  // ================================================================
   void _attachLocationAsync({required Uint8List pubkey33}) {
     // 非同期で実行（鍵生成・UIは一切ブロックしない）
     () async {
@@ -92,7 +101,7 @@ class KeyManagementService {
         final lonE6 = (pos.longitude * 1e6).round();
 
         // ============================
-        // ④ DB 更新
+        // ④ DB 更新（generated_keys のみ）
         // ============================
         final db = await DatabaseHelper.getDatabase();
         await db.update(
@@ -150,7 +159,7 @@ class KeyManagementService {
   }
 
   // ================================================================
-  // Advertise（公開鍵生成）
+  // Advertise（公開鍵生成）: 既存
   // ================================================================
   Future<Uint8List?> getPublicKeyForAdvertise() async {
     final masterKey = await _ensureMasterKey();
@@ -211,6 +220,94 @@ class KeyManagementService {
     _attachLocationAsync(pubkey33: keyPair.publicKey);
 
     return keyPair.publicKey;
+  }
+
+  // ================================================================
+  // ★ BLE Advertise用（旧 KeyAdvertiseRepository を吸収）
+  // ================================================================
+  Future<Uint8List> getPublicKeyForBleAdvertise() async {
+    final Uint8List? pubKey33 = await getPublicKeyForAdvertise();
+    if (pubKey33 == null) {
+      throw StateError('Failed to obtain public key from KeyManagementService.');
+    }
+    if (!_isValidCompressedPubkey33(pubKey33)) {
+      throw StateError(
+        'Invalid compressed public key (expected 33 bytes starting with 0x02/0x03).',
+      );
+    }
+    return pubKey33;
+  }
+
+  // ================================================================
+  // ★ collected_keys: 存在チェック（BleScanner 用）
+  // ================================================================
+  Future<bool> hasCollectedKey(Uint8List pubkey33) async {
+    if (!_isValidCompressedPubkey33(pubkey33)) return false;
+
+    final db = await DatabaseHelper.getDatabase();
+    final rows = await db.query(
+      'collected_keys',
+      columns: const ['id'],
+      where: 'pubkey_ecd = ?',
+      whereArgs: [pubkey33],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  // ================================================================
+  // ★ collected_keys: なければ insert（BleScanner 用）
+  // - collected_keys には lat/lon を入れない（スキーマ準拠）
+  // - inserted=true のときだけ notifyKeyUpdated() する
+  // ================================================================
+  Future<bool> insertCollectedKeyIfAbsent({
+    required Uint8List pubkey33,
+    required int receivedAtMs,
+  }) async {
+    if (!_isValidCompressedPubkey33(pubkey33)) {
+      throw StateError('Invalid compressed public key for insert.');
+    }
+
+    final Database db = await DatabaseHelper.getDatabase();
+
+    final values = <String, Object?>{
+      'pubkey_ecd': pubkey33,
+      'receive_time': receivedAtMs, // ★ ms で統一
+    };
+
+    try {
+      final rowId = await db.insert(
+        'collected_keys',
+        values,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+
+      final inserted = rowId > 0;
+      if (inserted) {
+        notifyKeyUpdated();
+      }
+      return inserted;
+    } catch (e, st) {
+      if (kDebugMode) {
+        print('KMS: ❌ insertCollectedKeyIfAbsent failed: $e');
+        print(st);
+      }
+      return false;
+    }
+  }
+
+  // ================================================================
+  // ★ BLEで収集した鍵の保存（旧 EcdKeysDao を吸収）
+  // - 互換のため残す（内部は insertCollectedKeyIfAbsent に統一）
+  // ================================================================
+  Future<void> insertCollectedBlePublicKey({
+    required Uint8List pubkey33,
+    required int receivedAtMs,
+  }) async {
+    await insertCollectedKeyIfAbsent(
+      pubkey33: pubkey33,
+      receivedAtMs: receivedAtMs,
+    );
   }
 
   // ================================================================
