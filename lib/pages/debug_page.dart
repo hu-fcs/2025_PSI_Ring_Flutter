@@ -11,7 +11,6 @@ import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../ble/ble_scanner.dart';
-import '../boringssl_service.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
 import '../ffi/native_key_service.dart';
@@ -90,7 +89,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   late TabController _tabController;
 
   final KeyManagementService _keyManager = KeyManagementService();
-  final BoringSSLService _boringSSLService = BoringSSLService();
 
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
@@ -222,35 +220,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     if (confirm == true) {
       await _keyManager.deleteMasterKey();
       setState(() {});
-    }
-  }
-
-  // --- 機能検証ロジック ---
-  void _testRandBytes() {
-    try {
-      final result = _boringSSLService.testRandomBytes();
-      _showResultDialog(
-        title: 'BoringSSL RAND_bytes テスト',
-        isSuccess: true,
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('正常にランダムなバイト列が生成されました。'),
-            const SizedBox(height: 8),
-            SelectableText(
-              result,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      _showResultDialog(
-        title: 'BoringSSL RAND_bytes テスト',
-        isSuccess: false,
-        content: Text('エラー: $e'),
-      );
     }
   }
 
@@ -1001,13 +970,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
           _buildSlotSelector(),
           _buildRingRangeSelector(),
 
-          const SizedBox(height: 24),
-
-          ElevatedButton.icon(
-            onPressed: _testRandBytes,
-            icon: const Icon(Icons.science_outlined),
-            label: const Text('BoringSSLのRAND_bytesをテスト'),
-          ),
           const SizedBox(height: 24),
 
           ElevatedButton.icon(
