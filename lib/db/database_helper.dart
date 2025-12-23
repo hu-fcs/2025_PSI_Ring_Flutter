@@ -7,11 +7,6 @@ import 'package:convert/convert.dart';
 class DatabaseHelper {
   static Database? _db;
 
-  // ============================
-  // ダミー鍵投入数（初回DB作成時）
-  // ============================
-  static const int kDummyKeyInsertCount = 100;
-
   // ----------------------------
   // DB インスタンス取得
   // ----------------------------
@@ -26,12 +21,6 @@ class DatabaseHelper {
       version: 1,
       onCreate: (Database db, int version) async {
         await _createTables(db);
-
-        // ★ 初回作成時も同じ API を使う
-        await insertDummyKeys(
-          db: db,
-          count: kDummyKeyInsertCount,
-        );
       },
     );
 
@@ -66,7 +55,7 @@ class DatabaseHelper {
   // ============================================================
   // ★ ダミー鍵を assets から先頭 count 件投入（唯一の実装）
   // ============================================================
-  static Future<int> insertDummyKeys({
+  static Future<int> insertCommonDummyKeys({
     Database? db,
     required int count,
   }) async {
@@ -151,6 +140,27 @@ class DatabaseHelper {
     );
 
     return true;
+  }
+
+  static Future<void> insertCollectedKeysBatch({
+    required List<Uint8List> publicKeys,
+  }) async {
+    final db = await getDatabase();
+    final batch = db.batch();
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    for (final pubkey in publicKeys) {
+      batch.insert(
+        'collected_keys',
+        {
+          'pubkey_ecd': pubkey,
+          'receive_time': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    await batch.commit(noResult: true);
   }
 
   // ----------------------------

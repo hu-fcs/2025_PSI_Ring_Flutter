@@ -178,13 +178,28 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
 
   Future<void> _insertMultipleDummyCollectedKeys(int count) async {
     if (count <= 0) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('追加中...')),
+      SnackBar(content: Text('ダミー鍵を $count 件追加中...')),
     );
+
+    final keys = <Uint8List>[];
+
     for (int i = 0; i < count; i++) {
-      await _generateAndInsertSingleDummyCollectedKey();
-      _progressCountNotifier.value = i + 1;
+      final keyPair = _keyManager.generateDummyKeyPair();
+      if (keyPair != null) {
+        keys.add(keyPair.publicKey);
+      }
     }
+
+    await DatabaseHelper.insertCollectedKeysBatch(publicKeys: keys);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('ダミー鍵の追加を完了しました。')),
+    );
+
     setState(() {});
   }
 
@@ -195,7 +210,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       SnackBar(content: Text('共通ダミー鍵を $count 件追加中...')),
     );
 
-    final inserted = await DatabaseHelper.insertDummyKeys(count: count);
+    final inserted = await DatabaseHelper.insertCommonDummyKeys(count: count);
 
     if (!mounted) return;
 
