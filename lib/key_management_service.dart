@@ -46,9 +46,7 @@ class KeyManagementService {
   // 位置情報（非同期で後付け）
   // ================================================================
 
-  void _attachLocationAsync({
-    required Uint8List pubkey33
-  }) {
+  void _attachLocationAsync({required Uint8List pubkey33}) {
     // 非同期で実行（鍵生成・UIは一切ブロックしない）
     () async {
       try {
@@ -66,8 +64,7 @@ class KeyManagementService {
         // ============================
         // ② Permission 確認・要求
         // ============================
-        LocationPermission permission =
-            await Geolocator.checkPermission();
+        LocationPermission permission = await Geolocator.checkPermission();
 
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
@@ -121,7 +118,6 @@ class KeyManagementService {
       }
     }();
   }
-
 
   // ================================================================
   // 初期化（マスターキー生成）
@@ -282,6 +278,48 @@ class KeyManagementService {
   }
 
   // ================================================================
+  // ★ 署名者鍵選択（intersection 内・expire_time 最大）
+  // ================================================================
+  Future<KeyPair?> selectSignerKeyFromIntersection(
+      List<Uint8List> intersection) async {
+    if (intersection.isEmpty) return null;
+
+    final db = await DatabaseHelper.getDatabase();
+
+    int? bestExpire;
+    Uint8List? bestSec;
+    Uint8List? bestPub;
+
+    for (final pub in intersection) {
+      final rows = await db.query(
+        'generated_keys',
+        columns: ['seckey_ecd', 'pubkey_ecd', 'expire_time'],
+        where: 'pubkey_ecd = ?',
+        whereArgs: [pub],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) continue;
+
+      final row = rows.first;
+      final sec = row['seckey_ecd'] as Uint8List?;
+      final p = row['pubkey_ecd'] as Uint8List?;
+      final expire = row['expire_time'] as int?;
+
+      if (sec != null && p != null && expire != null) {
+        if (bestExpire == null || expire > bestExpire) {
+          bestExpire = expire;
+          bestSec = sec;
+          bestPub = p;
+        }
+      }
+    }
+
+    if (bestSec == null || bestPub == null) return null;
+    return KeyPair(bestSec, bestPub);
+  }
+
+  // ================================================================
   // ★ 同時間帯でフィルタリング
   // ================================================================
   Future<List<Uint8List>> filterKeysBySameSlot(
@@ -331,7 +369,6 @@ class KeyManagementService {
     return result;
   }
 
-
   // ================================================================
   // DebugPage 用
   // ================================================================
@@ -365,7 +402,7 @@ class KeyManagementService {
 
 /// リング署名対象期間
 enum RingSignatureRange {
-  slot,   // 現在スロット
-  day,    // 直近24時間
-  all,    // 全期間
+  slot, // 現在スロット
+  day, // 直近24時間
+  all, // 全期間
 }
