@@ -1,11 +1,16 @@
-// lib/db/database_helper.dart
-
 import 'dart:typed_data';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:convert/convert.dart';
 
 class DatabaseHelper {
   static Database? _db;
+
+  // ============================
+  // ダミー鍵投入数（初回DB作成時）
+  // ============================
+  static const int kDummyKeyInsertCount = 100;
 
   // ----------------------------
   // DB インスタンス取得
@@ -19,9 +24,14 @@ class DatabaseHelper {
     _db = await openDatabase(
       path,
       version: 1,
-      // ★ 初回作成時のみテーブル作成
       onCreate: (Database db, int version) async {
         await _createTables(db);
+
+        // ★ 初回作成時も同じ API を使う
+        await insertDummyKeys(
+          db: db,
+          count: kDummyKeyInsertCount,
+        );
       },
     );
 
@@ -32,7 +42,6 @@ class DatabaseHelper {
   // テーブル定義
   // ----------------------------
   static Future<void> _createTables(Database db) async {
-    // 生成鍵
     await db.execute('''
     CREATE TABLE generated_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +54,6 @@ class DatabaseHelper {
     )
   ''');
 
-    // 収集鍵
     await db.execute('''
     CREATE TABLE collected_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +63,51 @@ class DatabaseHelper {
   ''');
   }
 
+  // ============================================================
+  // ★ ダミー鍵を assets から先頭 count 件投入（唯一の実装）
+  // ============================================================
+  static Future<int> insertDummyKeys({
+    Database? db,
+    required int count,
+  }) async {
+    final Database database = db ?? await getDatabase();
+
+    if (count <= 0) return 0;
+
+    final text = await rootBundle.loadString('assets/dummy_keys.txt');
+    final lines = text.split('\n');
+
+    if (lines.isEmpty) return 0;
+
+    final batch = database.batch();
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    int inserted = 0;
+
+    for (final line in lines) {
+      if (inserted >= count) break;
+
+      final key = line.trim();
+      if (key.isEmpty) continue;
+
+      // 圧縮公開鍵: 33 bytes = 66 hex chars
+      if (key.length != 66) continue;
+
+      batch.insert(
+        'collected_keys',
+        {
+          'pubkey_ecd': Uint8List.fromList(hex.decode(key)),
+          'receive_time': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+
+      inserted++;
+    }
+
+    await batch.commit(noResult: true);
+    return inserted;
+  }
 
   // ----------------------------
   // 収集鍵が存在するかチェック
@@ -72,7 +125,6 @@ class DatabaseHelper {
 
   // ----------------------------
   // 新規収集鍵 INSERT（存在しない場合のみ）
-  // ★ 位置情報は扱わない
   // ----------------------------
   static Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
@@ -102,7 +154,7 @@ class DatabaseHelper {
   }
 
   // ----------------------------
-  // キー合計数（任意）
+  // キー合計数
   // ----------------------------
   Future<int> getTotalKeyCount() async {
     final db = await getDatabase();
@@ -118,6 +170,9 @@ class DatabaseHelper {
     return generated + collected;
   }
 
+  // ----------------------------
+  // 削除
+  // ----------------------------
   static Future<void> deleteKey({
     required KeyTable table,
     required int id,

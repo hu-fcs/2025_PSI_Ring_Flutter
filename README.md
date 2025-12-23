@@ -101,7 +101,25 @@ sequenceDiagram
 | `VerifyRingSignature` | リング署名を検証する                           | `const std::vector<std::string>& publicKeys`,<br>`const std::string& message`,<br>`const std::vector<uint8_t>& signature` | `bool` 検証成功なら`true`                           |
 
 ---
+
 ## protoのビルドコマンド
 ```agsl
 protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
+```
+
+---
+
+## OpenSSLのダミー鍵生成
+
+共通したダミー鍵が欲しい場合、以下コマンドで生成後、`asset/dummy_keys.txt`に追加
+(コマンド内で自動追加されるようになっているはず)
+
+初回のみ
+```agsl
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+実行(1000鍵)
+```agsl
+.\generate_dummy_keys.ps1 -Count 1000
 ```

@@ -188,6 +188,23 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     setState(() {});
   }
 
+  Future<void> _insertCommonDummyKeysFromAsset(int count) async {
+    if (count <= 0) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('共通ダミー鍵を $count 件追加中...')),
+    );
+
+    final inserted = await DatabaseHelper.insertDummyKeys(count: count);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('共通ダミー鍵を $inserted 件追加しました')),
+    );
+
+    setState(() {}); // UI 更新
+  }
 
   Future<void> _insertDummyGeneratedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
@@ -588,6 +605,41 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
+  Future<void> _showAddCommonDummyDialog() async {
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('共通ダミー鍵を追加（assets）'),
+          content: TextField(
+            controller: _dummyCountController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              labelText: '追加する個数',
+              hintText: '例: 1000',
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final count = int.tryParse(_dummyCountController.text) ?? 0;
+                Navigator.of(context).pop();
+                _insertCommonDummyKeysFromAsset(count);
+              },
+              child: const Text('追加実行'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // --- UI構築ヘルパー (変更なし) ---
   String _shortHex(List<int>? bytes, {int length = 10}) {
     if (bytes == null || bytes.isEmpty) return 'N/A';
@@ -856,15 +908,34 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             ] else ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
-                  ElevatedButton(onPressed: _insertDummyCollectedKey, child: const Text('ダミー追加')),
-                  ElevatedButton(onPressed: _showAddMultipleDummiesDialog, child: const Text('複数追加')),
-                  ElevatedButton(
-                    onPressed: () => _deleteAllKeys('collected_keys'),
-                    child: const Text('全削除'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
-                  ),
-                ]),
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 0,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _insertDummyCollectedKey,
+                      child: const Text('ダミー追加'),
+                    ),
+
+                    ElevatedButton(
+                      onPressed: _showAddMultipleDummiesDialog,
+                      child: const Text('複数ダミー追加'),
+                    ),
+
+                    // ★ 追加：共通ダミー（assets）
+                    ElevatedButton(
+                      onPressed: _showAddCommonDummyDialog,
+                      child: const Text('複数共通ダミー追加'),
+                    ),
+
+                    ElevatedButton(
+                      onPressed: () => _deleteAllKeys('collected_keys'),
+                      child: const Text('全削除'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
+                    ),
+                  ],
+                ),
               ),
             ],
 
@@ -932,8 +1003,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                             const SizedBox(height: 6),
                             Text(
                               (row['lat'] == null || row['lon'] == null)
-                                  ? '位置情報: 未取得'
-                                  : '位置情報: '
+                                  ? '位置: 未取得'
+                                  : '位置: '
                                   '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
                                   '${_toDMS((row['lon'] as int) / 1e6, isLatitude: false)}',
                               style: TextStyle(
