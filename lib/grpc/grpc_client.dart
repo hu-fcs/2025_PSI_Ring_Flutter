@@ -86,36 +86,43 @@ class GrpcClient {
     print('\n[CLIENT] === PSI フロー開始 ===');
 
     // ------------------------------------------------------------
-    // Phase1: 鍵読み込み
+    // Phase1: 鍵読み込み（SQLite）
     // ------------------------------------------------------------
+    final dbSw = Stopwatch()..start();
     final generated = await _kms.getAllGeneratedPublicKeys();
     final collected = await _kms.getAllCollectedPublicKeys();
+    dbSw.stop();
+
     final myKeys = [...generated, ...collected];
+
+    // クライアント側集合サイズ（|S_A|）
+    final saKeyCount = myKeys.length;
 
     if (myKeys.isEmpty) {
       totalSw.stop();
       return PsiResult(
         isFamiliar: false,
-        commonKeys: [],
-        psiKeyCount: 0,
+        saKeyCount: 0,
+        sbKeyCount: 0,
+        commonKeys: const [],
         ringSize: 0,
+        dbLoadTimeMs: dbSw.elapsedMilliseconds,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
         totalTimeMs: totalSw.elapsedMilliseconds,
       );
     }
 
+    // ------------------------------------------------------------
+    // Phase2-5: PSI 計測
+    // ------------------------------------------------------------
     final psiSw = Stopwatch()..start();
 
-    // ------------------------------------------------------------
     // Phase2: bQ 計算
-    // ------------------------------------------------------------
     final mySecret = _keyService.generateRandomSecret();
     final myEncKeys = _keyService.encryptSet(myKeys, mySecret);
 
-    // ------------------------------------------------------------
     // Phase3: ExchangeKeys
-    // ------------------------------------------------------------
     final resp = await stub.exchangeKeys(
       KeyExchangeReq()..encKeys.addAll(myEncKeys),
     );
@@ -125,14 +132,13 @@ class GrpcClient {
     final abQ =
     resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
 
-    // ------------------------------------------------------------
+    // サーバ側集合サイズ（|S_B|）※サーバが投入した鍵数と一致
+    final sbKeyCount = serverEncKeys.length;
+
     // Phase4: abP 計算
-    // ------------------------------------------------------------
     final abP = _keyService.encryptSet(serverEncKeys, mySecret);
 
-    // ------------------------------------------------------------
     // Phase5: PSI 共通集合
-    // ------------------------------------------------------------
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
 
     await stub.finalizePsi(
@@ -150,38 +156,41 @@ class GrpcClient {
     final familiarByPsi = commonHex.toSet().intersection(myGenHex).isNotEmpty;
 
     // ------------------------------------------------------------
-    // Phase7: リング署名
+    // Phase7: リング署名（計測）
     // ------------------------------------------------------------
     bool ringOk = false;
     int ringSize = 0;
     int ringSigTimeMs = 0;
 
     if (familiarByPsi && clientCommon.length >= 2) {
-      final sw = Stopwatch()..start();
+      final ringSw = Stopwatch()..start();
 
       final result = await _runRingSignaturePhase(
         stub: stub,
         intersection: clientCommon,
       );
 
-      sw.stop();
+      ringSw.stop();
       ringOk = result.$1;
       ringSize = result.$2;
-      ringSigTimeMs = sw.elapsedMilliseconds;
+      ringSigTimeMs = ringSw.elapsedMilliseconds;
     }
 
     totalSw.stop();
 
     return PsiResult(
       isFamiliar: familiarByPsi && ringOk,
+      saKeyCount: saKeyCount,
+      sbKeyCount: sbKeyCount,
       commonKeys: commonHex,
-      psiKeyCount: myKeys.length + serverEncKeys.length,
       ringSize: ringSize,
+      dbLoadTimeMs: dbSw.elapsedMilliseconds,
       psiTimeMs: psiTimeMs,
       ringSigTimeMs: ringSigTimeMs,
       totalTimeMs: totalSw.elapsedMilliseconds,
     );
   }
+
 
   // ===============================================================
   // リング署名フェーズ（結果 + リングサイズ）

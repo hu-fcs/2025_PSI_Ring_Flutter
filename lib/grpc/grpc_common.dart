@@ -80,18 +80,36 @@ class GrpcCommon {
 /// ===============================================================
 class PsiResult {
   final bool isFamiliar;
-  final int psiKeyCount;
+
+  /// |S_A|, |S_B|（論文の区分に合わせて保持）
+  final int saKeyCount;
+  final int sbKeyCount;
+
+  /// 互換のため残す（= |S_A| + |S_B|）
+  int get psiKeyCount => saKeyCount + sbKeyCount;
+
   final List<String> commonKeys;
   final int ringSize;
+
+  /// SQLite からの鍵読み込み時間（ms）
+  final int dbLoadTimeMs;
+
+  /// PSI 計算時間（ms）
   final int psiTimeMs;
+
+  /// リング署名生成・検証時間（ms）
   final int ringSigTimeMs;
+
+  /// 総時間（ms）
   final int totalTimeMs;
 
   PsiResult({
     required this.isFamiliar,
-    required this.psiKeyCount,
+    required this.saKeyCount,
+    required this.sbKeyCount,
     required this.commonKeys,
     required this.ringSize,
+    required this.dbLoadTimeMs,
     required this.psiTimeMs,
     required this.ringSigTimeMs,
     required this.totalTimeMs,

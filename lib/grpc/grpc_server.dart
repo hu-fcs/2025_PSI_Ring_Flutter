@@ -31,6 +31,10 @@ class GrpcServiceImpl extends GrpcServiceBase {
   List<Uint8List> _serverAbQ = [];
   List<Uint8List> _lastIntersection = [];
 
+  // ★ 追加：直近セッションの集合サイズ（論文の |S_A|, |S_B| 用）
+  int _lastSaKeyCount = 0; // client keys
+  int get _sbKeyCount => _myKeys.length; // server keys（常に現在の _myKeys）
+
   Uint8List? _lastChallengeC;
   Uint8List? _lastChallengeS;
   Future<Uint8List>? _serverSignatureFuture;
@@ -86,6 +90,9 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     print('[SERVER] === Phase1: ExchangeKeys ===');
 
+    // クライアント投入鍵数（|S_A|）を保持
+    _lastSaKeyCount = request.encKeys.length;
+
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
     _serverAbQ = _keyService.encryptSet(bQ, _mySecret);
 
@@ -117,9 +124,12 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _psiEventController.add(
       PsiResult(
         isFamiliar: familiar,
+        saKeyCount: _lastSaKeyCount,
+        sbKeyCount: _sbKeyCount,
         commonKeys: commonHex,
-        psiKeyCount: _myKeys.length + _serverAbQ.length,
         ringSize: 0,
+        // サーバ側は UI 通知用なので計測値は 0 埋め（必要なら後で拡張）
+        dbLoadTimeMs: 0,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
         totalTimeMs: 0,
@@ -281,9 +291,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
       _ringAuthController.add(
         PsiResult(
           isFamiliar: true,
+          saKeyCount: _lastSaKeyCount,
+          sbKeyCount: _sbKeyCount,
           commonKeys: _lastIntersection.map(GrpcCommon.bytesToHex).toList(),
-          psiKeyCount: _myKeys.length + _serverAbQ.length,
           ringSize: ring.length,
+          dbLoadTimeMs: 0,
           psiTimeMs: 0,
           ringSigTimeMs: 0,
           totalTimeMs: 0,
