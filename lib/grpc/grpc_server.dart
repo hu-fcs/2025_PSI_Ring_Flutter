@@ -11,7 +11,7 @@ import 'package:grpc/grpc.dart';
 
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
-import '../key_management_service.dart';
+import '../key_management.dart';
 import 'grpc_common.dart';
 
 /// gRPC サーバ実装（PSI + リング署名）。

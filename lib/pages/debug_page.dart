@@ -10,7 +10,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../ble/ble_scanner.dart';
 import '../db/database_helper.dart';
-import '../key_management_service.dart';
+import '../key_management.dart';
 import '../grpc/grpc_common.dart';
 
 class DebugPage extends StatefulWidget {

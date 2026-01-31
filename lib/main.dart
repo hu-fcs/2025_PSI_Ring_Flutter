@@ -7,7 +7,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'db/database_helper.dart';
-import 'key_management_service.dart';
+import 'key_management.dart';
 import 'pages/debug_page.dart';
 import 'pages/exchange_page.dart';
 import 'pages/scanner_page.dart';

@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:pointycastle/export.dart' as pc;
 
-import '../key_management_service.dart';
+import '../key_management.dart';
 import 'ble_protocol.dart';
 
 class BleScanner {

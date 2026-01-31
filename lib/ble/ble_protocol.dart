@@ -1,6 +1,6 @@
 // lib/ble/ble_protocol.dart
 import 'dart:typed_data';
-import '../key_management_service.dart';
+import '../key_management.dart';
 
 /// Manufacturer Specific Data に格納するヘッダ(1B)。
 ///

@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:pointycastle/export.dart' as pc;
 
-import '../key_management_service.dart';
+import '../key_management.dart';
 import 'ble_protocol.dart';
 
 /// BLE 広告で仮名（圧縮公開鍵）を送信するための Advertiser。
