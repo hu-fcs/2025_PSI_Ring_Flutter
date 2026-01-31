@@ -10,21 +10,23 @@
 #define EXPORT
 #endif
 
-// --- 定数定義 ---
+/* 定数 */
 #define HASH_LEN 32
 #define PRIV_KEY_LEN 32
-// 圧縮形式 (0x02/0x03 + 32-byte X) を採用
-#define PUB_KEY_LEN 33
+#define PUB_KEY_LEN 33 /* 圧縮公開鍵 (0x02/0x03 + X座標32B) */
 
 /**
  * @brief リング署名を生成する。
- * @param msg 入力: 署名対象のメッセージ。
- * @param msg_len 入力: メッセージの長さ。
- * @param signer_priv_key_32b 入力: 署名者の32バイトの秘密鍵。
- * @param ring_pub_keys 入力: リングを構成する公開鍵のリスト（圧縮形式33B）。(ring_size * PUB_KEY_LEN) バイト。
- * @param ring_size 入力: リングのサイズ。
- * @param out_signature 出力: 生成された署名を格納するバッファ。サイズは (1 + ring_size) * HASH_LEN バイト必要。
- * @return 成功した場合は1、失敗した場合は0。
+ *
+ * 署名形式は (c0 || s0 || ... || s_{n-1}) とし，サイズは (1 + ring_size) * HASH_LEN とする。
+ *
+ * @param msg                 入力: 署名対象メッセージ。
+ * @param msg_len             入力: メッセージ長。
+ * @param signer_priv_key_32b 入力: 署名者秘密鍵(32B)。
+ * @param ring_pub_keys       入力: リング公開鍵列(圧縮33B)（ring_size * PUB_KEY_LEN B）。
+ * @param ring_size           入力: リングサイズ。
+ * @param out_signature       出力: 署名出力バッファ（(1 + ring_size) * HASH_LEN B が必要）。
+ * @return 成功時は 1，失敗時は 0。
  */
 EXPORT int create_ring_signature(
         const char* msg,
@@ -37,12 +39,13 @@ EXPORT int create_ring_signature(
 
 /**
  * @brief リング署名を検証する。
- * @param msg 入力: 署名対象のメッセージ。
- * @param msg_len 入力: メッセージの長さ。
- * @param signature 入力: 検証する署名データ。サイズは (1 + ring_size) * HASH_LEN バイト。
- * @param ring_pub_keys 入力: リングを構成する公開鍵のリスト（圧縮形式33B）。(ring_size * PUB_KEY_LEN) バイト。
- * @param ring_size 入力: リングのサイズ。
- * @return 検証に成功した場合は1、失敗した場合は0。
+ *
+ * @param msg           入力: 署名対象メッセージ。
+ * @param msg_len       入力: メッセージ長。
+ * @param signature     入力: 署名データ（(1 + ring_size) * HASH_LEN B）。
+ * @param ring_pub_keys 入力: リング公開鍵列(圧縮33B)（ring_size * PUB_KEY_LEN B）。
+ * @param ring_size     入力: リングサイズ。
+ * @return 検証に成功した場合は 1，それ以外は 0。
  */
 EXPORT int verify_ring_signature(
         const char* msg,

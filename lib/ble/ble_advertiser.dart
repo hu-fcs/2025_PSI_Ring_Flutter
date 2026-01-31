@@ -1,39 +1,33 @@
 // lib/ble/ble_advertiser.dart
+
 import 'dart:async';
 import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:pointycastle/export.dart' as pc;
 
-import 'ble_constants.dart';
-import 'key_advertise_repository.dart';
+import '../key_management.dart';
+import 'ble_protocol.dart';
 
-/// 2パート(front/back)を Manufacturer Data で交互送信する Advertiser。
+/// BLE 広告で仮名（圧縮公開鍵）を送信するための Advertiser。
 ///
-/// 31B Manufacturer Data (ペイロード) 構成:
-/// - [0]   : 1B ヘッダ (seq2, part, ver, yParity)
-/// - [1-4] : 4B 鍵ハッシュID (SHA256(pubkey[0..32]) の先頭4B)
-/// - [5-20]: 16B 鍵データ (part 0: pubkey[1..16])
-/// - [21-30]:10B 鍵データ (part 1: pubkey[17..32] ※末尾6Bパディング)
+/// Legacy Advertising の Manufacturer Specific Data(最大 31B) に収めるため，
+/// 圧縮公開鍵(33B)を 2 断片に分割し，断片を交互に広告する。
 ///
+/// ペイロード(31B)の構成:
+/// - [0]    : ヘッダ 1B (seq2, part, ver, yParity)
+/// - [1-4]  : KeyID 4B (SHA-256(公開鍵33B)の先頭4B)
+/// - [5-20] : 鍵データ 16B (part=0: 公開鍵[1..16])
+/// - [21-30]: 鍵データ 10B (part=1: 公開鍵[17..32] のうち先頭10B, 残りはパディング)
 class BleAdvertiser {
   final _peripheral = FlutterBlePeripheral();
-  final _repo = KeyAdvertiseRepository();
+  final _kms = KeyManagementService();
 
-  // Manufacturer ID を 0xFFFF (未割り当て)
+  /// Manufacturer ID（0xFFFF はテスト用途でよく用いられる値）
   static const int _companyId = 0xFFFF;
 
-  bool _isAdvertising = false;
-  Timer? _rotateTimer;
-  bool _sendFrontNext = true;
-
-  // 2パート分のペイロード (31B x 2)
-  Uint8List? _payloadFront;
-  Uint8List? _payloadBack;
-  int? _lastSeq2;
-
-  bool _isStarted = false;
-
+  /// 断片の切り替え間隔
   static const Duration _rotateInterval = Duration(milliseconds: 500);
 
   final _settings = AdvertiseSettings(
@@ -43,91 +37,34 @@ class BleAdvertiser {
     timeout: 0,
   );
 
+  bool _isAdvertising = false;
+  bool _isStarted = false;
+  bool _sendFrontNext = true;
+
+  Timer? _rotateTimer;
+
+  // 断片ごとのペイロード (31B x 2)
+  Uint8List? _payloadFront;
+  Uint8List? _payloadBack;
+  int? _lastSeq2;
+
   bool get isAdvertising => _isAdvertising;
 
-  Future<void> _rotateAndSend() async {
-    if (!_isAdvertising) return;
-
-    try {
-      // -----------------------------------------------------------------------
-      // 【修正箇所】開始済みの場合、次の start を呼ぶ前に必ず stop し、少し待機する
-      // これを行わないと Android では 'TOO_MANY_ADVERTISERS' エラーでクラッシュします。
-      // -----------------------------------------------------------------------
-      if (_isStarted) {
-        await _peripheral.stop();
-        // OSがリソースを解放する時間を稼ぐ (100ms程度が安全圏)
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-
-      // 10分ごとの鍵更新チェック
-      if (_isStarted) {
-        final nowSeq2 = currentTenMinSeq2();
-        if (_lastSeq2 == null || nowSeq2 != _lastSeq2) {
-          if (kDebugMode) print('BLE_AD: 10分境界を検出。ペイロードを再生成します。');
-          await _preparePayloadsForCurrentSeq();
-          _sendFrontNext = true;
-        }
-      }
-
-      final Uint8List? payload;
-      final int partSent = _sendFrontNext ? 0 : 1;
-
-      if (_sendFrontNext) {
-        payload = _payloadFront;
-      } else {
-        payload = _payloadBack;
-      }
-      _sendFrontNext = !_sendFrontNext; // 次回のために反転
-
-      if (payload == null) throw StateError('payload not prepared');
-
-      final data = AdvertiseData(
-        includeDeviceName: false,
-        manufacturerId: _companyId,
-        manufacturerData: payload, // 31Bのペイロード
-      );
-
-      // 新しいアドバタイズセットを開始
-      await _peripheral.start(advertiseData: data, advertiseSettings: _settings);
-
-      if (!_isStarted) {
-        _isStarted = true;
-        if (kDebugMode) print('BLE_AD: 🚀 Advertising started (Part $partSent).');
-      } else {
-        if (kDebugMode) {
-          // 実際には update ではなく restart している状態
-          print('BLE_AD: 📡 Advertising rotated (Part $partSent).');
-        }
-      }
-
-    } catch (e) {
-      if (kDebugMode) print('BLE_AD: ❌ advertise rotate/update failed: $e');
-
-      // エラー発生時は安全のため stop を試みてクリーンアップする
-      try {
-        await _peripheral.stop();
-      } catch (_) {}
-
-    } finally {
-      if (_isAdvertising) {
-        _rotateTimer = Timer(_rotateInterval, _rotateAndSend);
-      }
-    }
-  }
+  // ----- Public API -----
 
   Future<void> start() async {
     if (_isAdvertising) return;
 
-    // 開始前にも念のため停止を呼んでおく
+    // 既存の広告を停止して状態を初期化する
     try {
       await _peripheral.stop();
     } catch (_) {}
 
     _isAdvertising = true;
-    await _preparePayloadsForCurrentSeq();
-    _sendFrontNext = true;
     _isStarted = false;
+    _sendFrontNext = true;
 
+    await _preparePayloadsForCurrentSeq();
     await _rotateAndSend();
   }
 
@@ -140,45 +77,130 @@ class BleAdvertiser {
     _rotateTimer?.cancel();
     _rotateTimer = null;
 
-    await _peripheral.stop();
+    try {
+      await _peripheral.stop();
+    } catch (_) {}
 
-    if (kDebugMode) print('BLE_AD: 🛑 Advertising stopped.');
+    if (kDebugMode) {
+      debugPrint('BLE_AD: advertising stopped');
+    }
   }
+
+  // ----- Core loop -----
+
+  Future<void> _rotateAndSend() async {
+    if (!_isAdvertising) return;
+
+    try {
+      // Android では連続 start が不安定な場合があるため，stop/start を挟む
+      if (_isStarted) {
+        await _peripheral.stop();
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // 時刻スロット(10分)の更新を検出したら，仮名に対応するペイロードを再生成する
+      if (_isStarted) {
+        final nowSeq2 = currentTenMinSeq2();
+        if (_lastSeq2 == null || nowSeq2 != _lastSeq2) {
+          if (kDebugMode) {
+            debugPrint('BLE_AD: slot changed; rebuild payload');
+          }
+          await _preparePayloadsForCurrentSeq();
+          _sendFrontNext = true;
+        }
+      }
+
+      final payload = _sendFrontNext ? _payloadFront : _payloadBack;
+      final partSent = _sendFrontNext ? 0 : 1;
+      _sendFrontNext = !_sendFrontNext;
+
+      if (payload == null) {
+        throw StateError('BLE payload not prepared');
+      }
+
+      final data = AdvertiseData(
+        includeDeviceName: false,
+        manufacturerId: _companyId,
+        manufacturerData: payload,
+      );
+
+      await _peripheral.start(
+        advertiseData: data,
+        advertiseSettings: _settings,
+      );
+
+      if (!_isStarted) {
+        _isStarted = true;
+        if (kDebugMode) {
+          debugPrint('BLE_AD: advertising started (part=$partSent)');
+        }
+      } else {
+        if (kDebugMode) {
+          debugPrint('BLE_AD: advertising rotated (part=$partSent)');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('BLE_AD: advertise failed: $e');
+      }
+      try {
+        await _peripheral.stop();
+      } catch (_) {}
+    } finally {
+      if (_isAdvertising) {
+        _rotateTimer = Timer(_rotateInterval, _rotateAndSend);
+      }
+    }
+  }
+
+  // ----- Payload preparation -----
+
+  Future<void> _preparePayloadsForCurrentSeq() async {
+    final Uint8List pubKey33 =
+    await _kms.getPublicKeyForBleAdvertise().catchError((e, st) {
+      if (kDebugMode) {
+        debugPrint('BLE_AD: getPublicKeyForBleAdvertise failed: $e');
+      }
+      throw e;
+    });
+
+    final seq2 = currentTenMinSeq2();
+    final yParity = pubKey33[0] & 0x01;
+
+    // KeyID: SHA-256(公開鍵33B)の先頭4バイト
+    final keyId = _getKeyHashId(pubKey33);
+
+    final hdrFront = BleHdr.make(seq2: seq2, part: 0, yParity: yParity);
+    final hdrBack = BleHdr.make(seq2: seq2, part: 1, yParity: yParity);
+
+    // 圧縮公開鍵(33B)の先頭1B(圧縮プレフィクス)を除いた 32B を断片化する
+    final keyData = pubKey33.sublist(1); // 32B
+    final dataP0 = keyData.sublist(0, 16);
+    final dataP1 = keyData.sublist(16, 32);
+
+    // 31B に合わせるためのパディング
+    final padding = Uint8List(31 - 1 - 4 - 16); // 10B
+
+    _payloadFront =
+        Uint8List.fromList([hdrFront, ...keyId, ...dataP0, ...padding]);
+    _payloadBack =
+        Uint8List.fromList([hdrBack, ...keyId, ...dataP1, ...padding]);
+
+    _lastSeq2 = seq2;
+
+    if (kDebugMode) {
+      debugPrint(
+        'BLE_AD: payload prepared seq2=$seq2 keyId=${_bytesToHex(keyId)}',
+      );
+    }
+  }
+
+  // ----- Utils -----
 
   Uint8List _getKeyHashId(Uint8List key33) {
     final digest = pc.SHA256Digest();
     final hash = digest.process(key33);
-    return hash.sublist(0, 4);
-  }
-
-  /// 31Bのペイロードを2パート分準備
-  Future<void> _preparePayloadsForCurrentSeq() async {
-    final Uint8List pubKey33 = await _repo.getPublicKeyForAdvertise().catchError((e, st) {
-      if (kDebugMode) print('BLE_AD: ❌ getPublicKeyForAdvertise failed: $e');
-      throw e;
-    });
-
-    final yParity = pubKey33[0] & 0x01;
-    final seq2 = currentTenMinSeq2();
-    final keyId = _getKeyHashId(pubKey33); // 4B
-
-    final hdrFront = BleHdr.make(seq2: seq2, part: 0, yParity: yParity);
-    final hdrBack  = BleHdr.make(seq2: seq2, part: 1, yParity: yParity);
-
-    final keyData = pubKey33.sublist(1); // pubkey[1..32] (32B)
-    final dataP0 = keyData.sublist(0, 16);  // 16B
-    final dataP1 = keyData.sublist(16, 32); // 16B
-
-    // 31Bペイロード = [Hdr(1B)] + [KeyId(4B)] + [Data(16B)] + [Padding(10B)]
-    final paddingFront = Uint8List(31 - 1 - 4 - 16); // 10B
-    _payloadFront = Uint8List.fromList([hdrFront, ...keyId, ...dataP0, ...paddingFront]);
-
-    final paddingBack = Uint8List(31 - 1 - 4 - 16); // 10B
-    _payloadBack = Uint8List.fromList([hdrBack, ...keyId, ...dataP1, ...paddingBack]);
-
-    _lastSeq2 = seq2;
-
-    if (kDebugMode) print('BLE_AD: 🔑 Payloads prepared for seq2=$seq2, keyId=${_bytesToHex(keyId)}');
+    return Uint8List.fromList(hash.sublist(0, 4));
   }
 
   String _bytesToHex(Uint8List bytes) {

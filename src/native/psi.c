@@ -18,13 +18,13 @@
 #include <openssl/bn.h>
 #include <openssl/obj_mac.h>
 
-// ===============================================================
-// PSI intersect 用: ソート＋マージの補助型 / 比較関数
-// ★ 必ず ecc_intersect_sets より前に定義
-// ===============================================================
+/*
+ * PSI の共通集合抽出では，(二重暗号化集合, 元の公開鍵) を対応付けて保持し，
+ * 二重暗号化集合どうしの一致から元の公開鍵を復元する。
+ */
 typedef struct {
-    const uint8_t* dbl;   // my_double_set[i]（33B）
-    const uint8_t* orig;  // original_keys[i]（33B）
+    const uint8_t* dbl;   // my_double_set[i] (33B)
+    const uint8_t* orig;  // original_keys[i] (33B)
 } dbl_pair_t;
 
 static int cmp_pubkey_33b(const void* a, const void* b) {
@@ -37,15 +37,14 @@ static int cmp_dbl_pair(const void* a, const void* b) {
     return memcmp(pa->dbl, pb->dbl, PUB_KEY_LEN);
 }
 
-// ===============================================================
-
 static EC_GROUP* g_curve_group = NULL;
 
+/* 初期化: secp256r1(prime256v1) の曲線グループを用意する */
 EXPORT int psi_init() {
     if (g_curve_group) return 1;
     g_curve_group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
     if (!g_curve_group) {
-        LOGE("psi_init: EC_GROUP作成失敗");
+        LOGE("psi_init: failed to create EC_GROUP");
         return 0;
     }
     return 1;
@@ -58,9 +57,7 @@ EXPORT void psi_cleanup() {
     }
 }
 
-// ===============================================================
-// ダミー鍵生成
-// ===============================================================
+/* テスト用: ランダムな圧縮公開鍵(33B)を生成する */
 EXPORT int generate_random_dummy_key_bytes(uint8_t* out33b) {
     if (!g_curve_group && !psi_init()) return 0;
 
@@ -73,7 +70,7 @@ EXPORT int generate_random_dummy_key_bytes(uint8_t* out33b) {
     }
 
     const EC_POINT* pub = EC_KEY_get0_public_key(pkey);
-    size_t len = EC_POINT_point2oct(
+    const size_t len = EC_POINT_point2oct(
             g_curve_group,
             pub,
             POINT_CONVERSION_COMPRESSED,
@@ -86,9 +83,7 @@ EXPORT int generate_random_dummy_key_bytes(uint8_t* out33b) {
     return (len == PUB_KEY_LEN) ? 1 : 0;
 }
 
-// ===============================================================
-// 内部ヘルパー: EC 点倍算
-// ===============================================================
+/* 内部: EC点をスカラー倍し，圧縮形式(33B)で出力する */
 static int ecc_point_mul(
         const uint8_t* input_33b,
         const uint8_t* secret_32b,
@@ -125,9 +120,10 @@ static int ecc_point_mul(
     return ret;
 }
 
-// ===============================================================
-// 単一暗号化集合
-// ===============================================================
+/*
+ * 単一暗号化集合の計算:
+ * input_keys[i] を secret_32b でスカラー倍し，out_keys[i] に格納する。
+ */
 EXPORT int ecc_single_encrypt_set(
         const uint8_t* input_keys,
         int count,
@@ -148,9 +144,12 @@ EXPORT int ecc_single_encrypt_set(
     return 1;
 }
 
-// ===============================================================
-// PSI 共通集合抽出（ソート＋マージ方式）
-// ===============================================================
+/*
+ * PSI の共通集合抽出（ソート＋マージ）:
+ * - A側: (my_double_set, original_keys) をペア化して my_double_set でソート
+ * - B側: remote_double_set をコピーしてソート
+ * - 両者をマージして一致した要素に対応する original_keys を result_keys に格納する
+ */
 EXPORT int ecc_intersect_sets(
         const uint8_t* original_keys,
         const uint8_t* my_double_set,
@@ -170,7 +169,6 @@ EXPORT int ecc_intersect_sets(
         return 1;
     }
 
-    // (my_double_set, original_keys) をペア化
     dbl_pair_t* a = (dbl_pair_t*)malloc(sizeof(dbl_pair_t) * (size_t)count_a);
     if (!a) return 0;
 
@@ -179,7 +177,6 @@ EXPORT int ecc_intersect_sets(
         a[i].orig = original_keys + (size_t)i * PUB_KEY_LEN;
     }
 
-    // remote_double_set をコピー（ソート用）
     uint8_t* b = (uint8_t*)malloc((size_t)count_b * PUB_KEY_LEN);
     if (!b) {
         free(a);
@@ -187,17 +184,15 @@ EXPORT int ecc_intersect_sets(
     }
     memcpy(b, remote_double_set, (size_t)count_b * PUB_KEY_LEN);
 
-    // ソート
     qsort(a, (size_t)count_a, sizeof(dbl_pair_t), cmp_dbl_pair);
     qsort(b, (size_t)count_b, PUB_KEY_LEN, cmp_pubkey_33b);
 
-    // マージ比較
     int i = 0, j = 0;
     int found = 0;
 
     while (i < count_a && j < count_b) {
         const uint8_t* bj = b + (size_t)j * PUB_KEY_LEN;
-        int c = memcmp(a[i].dbl, bj, PUB_KEY_LEN);
+        const int c = memcmp(a[i].dbl, bj, PUB_KEY_LEN);
 
         if (c == 0) {
             memcpy(

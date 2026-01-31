@@ -1,24 +1,27 @@
+// lib/ffi/native_key_bindings.dart
 import 'dart:ffi' as ffi;
 
-/// C関数をDartから呼ぶためのバインディング定義
+/// C 関数を Dart から呼び出すための FFI バインディング。
+///
+/// シンボル名・引数は各ヘッダ（key_derivation.h / ring_signature.h / psi.h）に合わせる。
 class NativeKeyBindings {
-  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) _lookup;
+  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
+  _lookup;
 
   NativeKeyBindings(ffi.DynamicLibrary dynamicLibrary)
       : _lookup = dynamicLibrary.lookup;
 
-  // ============================================================
-  // 1. Key Derivation (鍵導出)  — key_derivation.h と一致
-  // ============================================================
+  // ----- Key derivation (key_derivation.h) -----
 
   int generate_master_key(ffi.Pointer<ffi.Uint8> outMasterKey) {
     return _generate_master_key(outMasterKey);
   }
+
   late final _generate_master_keyPtr =
   _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Uint8>)>>(
       'generate_master_key');
-  late final _generate_master_key = _generate_master_keyPtr
-      .asFunction<int Function(ffi.Pointer<ffi.Uint8>)>();
+  late final _generate_master_key =
+  _generate_master_keyPtr.asFunction<int Function(ffi.Pointer<ffi.Uint8>)>();
 
   int derive_keypair_from_timestamp(
       ffi.Pointer<ffi.Uint8> masterKey,
@@ -36,25 +39,27 @@ class NativeKeyBindings {
     );
   }
 
-  late final _derive_keypair_from_timestampPtr =
-  _lookup<
+  late final _derive_keypair_from_timestampPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int Function(
               ffi.Pointer<ffi.Uint8>, // master_key
-              ffi.Uint64,             // timestamp_ms
-              ffi.Uint64,             // slot_ms
+              ffi.Uint64, // timestamp_ms
+              ffi.Uint64, // slot_ms
               ffi.Pointer<ffi.Uint8>, // out_priv_key_32b
               ffi.Pointer<ffi.Uint8>, // out_pub_key_33b
               )>>('derive_keypair_from_timestamp');
 
   late final _derive_keypair_from_timestamp =
   _derive_keypair_from_timestampPtr.asFunction<
-      int Function(ffi.Pointer<ffi.Uint8>, int, int, ffi.Pointer<ffi.Uint8>,
-          ffi.Pointer<ffi.Uint8>)>();
+      int Function(
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          )>();
 
-  // ============================================================
-  // 2. Ring Signature — 既存そのまま
-  // ============================================================
+  // ----- Ring signature (ring_signature.h) -----
 
   int create_ring_signature(
       ffi.Pointer<ffi.Char> msg,
@@ -65,19 +70,35 @@ class NativeKeyBindings {
       ffi.Pointer<ffi.Uint8> outSignature,
       ) {
     return _create_ring_signature(
-        msg, msgLen, signerPrivKey, ringPubKeys, ringSize, outSignature);
+      msg,
+      msgLen,
+      signerPrivKey,
+      ringPubKeys,
+      ringSize,
+      outSignature,
+    );
   }
 
   late final _create_ring_signaturePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Size,
-              ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint8>, ffi.Int, ffi.Pointer<ffi.Uint8>)>>(
-      'create_ring_signature');
+          ffi.Int Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Int,
+              ffi.Pointer<ffi.Uint8>,
+              )>>('create_ring_signature');
 
-  late final _create_ring_signature =
-  _create_ring_signaturePtr.asFunction<
-      int Function(ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Uint8>,
-          ffi.Pointer<ffi.Uint8>, int, ffi.Pointer<ffi.Uint8>)>();
+  late final _create_ring_signature = _create_ring_signaturePtr.asFunction<
+      int Function(
+          ffi.Pointer<ffi.Char>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          )>();
 
   int verify_ring_signature(
       ffi.Pointer<ffi.Char> msg,
@@ -87,23 +108,34 @@ class NativeKeyBindings {
       int ringSize,
       ) {
     return _verify_ring_signature(
-        msg, msgLen, signature, ringPubKeys, ringSize);
+      msg,
+      msgLen,
+      signature,
+      ringPubKeys,
+      ringSize,
+    );
   }
 
   late final _verify_ring_signaturePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Size,
-              ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint8>, ffi.Int)>>(
-      'verify_ring_signature');
+          ffi.Int Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.Size,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Int,
+              )>>('verify_ring_signature');
 
-  late final _verify_ring_signature =
-  _verify_ring_signaturePtr.asFunction<
-      int Function(ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Uint8>,
-          ffi.Pointer<ffi.Uint8>, int)>();
+  late final _verify_ring_signature = _verify_ring_signaturePtr.asFunction<
+      int Function(
+          ffi.Pointer<ffi.Char>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          )>();
 
-  // ============================================================
-  // 3. PSI 演算 — psi.h と完全一致
-  // ============================================================
+  // ----- PSI (psi.h) -----
 
   int psi_init() => _psi_init();
   late final _psi_initPtr =
@@ -126,14 +158,21 @@ class NativeKeyBindings {
 
   late final _ecc_single_encrypt_setPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<ffi.Uint8>, ffi.Int32,
-              ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint8>)>>(
-      'ecc_single_encrypt_set');
+          ffi.Int Function(
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Int32,
+              ffi.Pointer<ffi.Uint8>,
+              ffi.Pointer<ffi.Uint8>,
+              )>>('ecc_single_encrypt_set');
 
   late final _ecc_single_encrypt_set =
   _ecc_single_encrypt_setPtr.asFunction<
-      int Function(ffi.Pointer<ffi.Uint8>, int, ffi.Pointer<ffi.Uint8>,
-          ffi.Pointer<ffi.Uint8>)>();
+      int Function(
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          )>();
 
   int ecc_intersect_sets(
       ffi.Pointer<ffi.Uint8> original,
@@ -145,7 +184,14 @@ class NativeKeyBindings {
       ffi.Pointer<ffi.Int32> resultCount,
       ) {
     return _ecc_intersect_sets(
-        original, myDouble, remoteDouble, countA, countB, result, resultCount);
+      original,
+      myDouble,
+      remoteDouble,
+      countA,
+      countB,
+      result,
+      resultCount,
+    );
   }
 
   late final _ecc_intersect_setsPtr = _lookup<
@@ -154,8 +200,8 @@ class NativeKeyBindings {
               ffi.Pointer<ffi.Uint8>, // original_keys
               ffi.Pointer<ffi.Uint8>, // my_double_set
               ffi.Pointer<ffi.Uint8>, // remote_double_set
-              ffi.Int32,              // count_a
-              ffi.Int32,              // count_b
+              ffi.Int32, // count_a
+              ffi.Int32, // count_b
               ffi.Pointer<ffi.Uint8>, // result_keys
               ffi.Pointer<ffi.Int32>, // result_count
               )>>('ecc_intersect_sets');
@@ -169,5 +215,6 @@ class NativeKeyBindings {
           int,
           int,
           ffi.Pointer<ffi.Uint8>,
-          ffi.Pointer<ffi.Int32>)>();
+          ffi.Pointer<ffi.Int32>,
+          )>();
 }

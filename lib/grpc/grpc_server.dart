@@ -4,18 +4,17 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
-import '../key_management_service.dart';
-import '../db/database_helper.dart';
-import 'grpc_client.dart';
+import '../key_management.dart';
+import 'grpc_common.dart';
 
-/// ===============================================================
-///                     ECC-PSI サーバ
-/// ===============================================================
+/// gRPC サーバ実装（PSI + リング署名）。
 class GrpcServiceImpl extends GrpcServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
   final KeyManagementService _kms = KeyManagementService();
@@ -31,11 +30,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
   List<Uint8List> _serverAbQ = [];
   List<Uint8List> _lastIntersection = [];
 
+  // 直近セッションの集合サイズ（|S_A|, |S_B|）
+  int _lastSaKeyCount = 0; // client keys
+  int get _sbKeyCount => _myKeys.length; // server keys
+
   Uint8List? _lastChallengeC;
   Uint8List? _lastChallengeS;
   Future<Uint8List>? _serverSignatureFuture;
 
-  // イベント
   final _psiEventController = StreamController<PsiResult>.broadcast();
   Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
 
@@ -45,22 +47,23 @@ class GrpcServiceImpl extends GrpcServiceBase {
   GrpcServiceImpl() {
     _ready = _initialize();
 
-    // BLE鍵更新 → 再ロード
+    // 鍵更新を検知したら PSI 用の鍵セットを再構築する
     _kms.onKeyUpdated.listen((_) async {
-      print('[SERVER] 🔔 BLE鍵更新 → PSI鍵セットを再構築します');
+      if (kDebugMode) {
+        debugPrint('[SERVER] keys updated; reload PSI set');
+      }
       await _reloadKeys();
-      print('[SERVER] 🔄 PSI鍵セット更新完了');
     });
   }
 
-  // ===============================================================
-  // 初期化
-  // ===============================================================
+  // ----- Init -----
+
   Future<void> _initialize() async {
-    print('[SERVER] === サーバ初期化開始 ===');
+    if (kDebugMode) {
+      debugPrint('[SERVER] init');
+    }
     _mySecret = _keyService.generateRandomSecret();
     await _reloadKeys();
-    print('[SERVER] === サーバ初期化完了 ===');
   }
 
   Future<void> _reloadKeys() async {
@@ -68,70 +71,30 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final collected = await _kms.getAllCollectedPublicKeys();
 
     _myKeys = [...generated, ...collected];
-    _myGeneratedKeysHex = generated.map(_hex).toList();
+    _myGeneratedKeysHex = generated.map(GrpcCommon.bytesToHex).toList();
 
-    print('[SERVER] 🔑 読み込み: generated=${generated.length}, collected=${collected.length}');
-    print('[SERVER] 🔒 aP 計算...');
     _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
-  }
 
-  Future<void> _ensureReady() async => await _ready;
-
-  // ===============================================================
-  // 署名者鍵選択（最新 expire_time）
-  // ===============================================================
-  Future<KeyPair?> _selectSignerKeyFromIntersection(
-      List<Uint8List> intersection) async {
-    if (intersection.isEmpty) return null;
-
-    final db = await DatabaseHelper.getDatabase();
-    int? bestExpire;
-    Uint8List? bestSec;
-    Uint8List? bestPub;
-
-    for (final pub in intersection) {
-      final rows = await db.query(
-        'generated_keys',
-        columns: ['seckey_ecd', 'pubkey_ecd', 'expire_time'],
-        where: 'pubkey_ecd = ?',
-        whereArgs: [pub],
-        limit: 1,
+    if (kDebugMode) {
+      debugPrint(
+        '[SERVER] keys loaded: generated=${generated.length}, collected=${collected.length}',
       );
-
-      if (rows.isEmpty) continue;
-
-      final row = rows.first;
-      final sec = row['seckey_ecd'] as Uint8List?;
-      final p = row['pubkey_ecd'] as Uint8List?;
-      final expire = row['expire_time'] as int?;
-
-      if (sec != null && p != null) {
-        if (bestExpire == null || expire! > bestExpire) {
-          bestExpire = expire;
-          bestSec = sec;
-          bestPub = p;
-        }
-      }
     }
-
-    if (bestSec == null || bestPub == null) {
-      print('[SERVER] ❌ Server generated_keys から署名者候補が見つからない');
-      return null;
-    }
-
-    print('[SERVER] 🔑 サーバ署名者鍵選択 (expire_time=$bestExpire)');
-    return KeyPair(bestSec, bestPub);
   }
 
-  // ===============================================================
-  // Phase 1: ExchangeKeys
-  // ===============================================================
+  Future<void> _ensureReady() async => _ready;
+
+  // ----- PSI: exchangeKeys -----
+
   @override
   Future<KeyExchangeResp> exchangeKeys(
-      ServiceCall call, KeyExchangeReq request) async {
+      ServiceCall call,
+      KeyExchangeReq request,
+      ) async {
     await _ensureReady();
 
-    print('\n[SERVER] === Phase1: ExchangeKeys ===');
+    // クライアント側集合サイズ（|S_A|）
+    _lastSaKeyCount = request.encKeys.length;
 
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
     _serverAbQ = _keyService.encryptSet(bQ, _mySecret);
@@ -141,15 +104,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ..clientReencKeys.addAll(_serverAbQ);
   }
 
-  // ===============================================================
-  // Phase 2: FinalizePsi
-  // ===============================================================
+  // ----- PSI: finalizePsi -----
+
   @override
   Future<PsiDone> finalizePsi(
-      ServiceCall call, ClientFinalReq req) async {
+      ServiceCall call,
+      ClientFinalReq req,
+      ) async {
     await _ensureReady();
-
-    print('\n[SERVER] === Phase2: FinalizePsi ===');
 
     final clientAbP =
     req.clientReencServerKeys.map(Uint8List.fromList).toList();
@@ -157,18 +119,21 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final intersection = _computeIntersection(clientAbP);
     _lastIntersection = intersection;
 
-    print('[SERVER] 🎯 PSI intersection = ${intersection.length}');
+    final commonHex = intersection.map(GrpcCommon.bytesToHex).toList();
 
-    final commonHex = intersection.map(_hex).toList();
+    // 共通集合に生成鍵が含まれるかで判定する
     final familiar =
         commonHex.toSet().intersection(_myGeneratedKeysHex.toSet()).isNotEmpty;
 
     _psiEventController.add(
       PsiResult(
         isFamiliar: familiar,
+        saKeyCount: _lastSaKeyCount,
+        sbKeyCount: _sbKeyCount,
         commonKeys: commonHex,
-        psiKeyCount: _myKeys.length + _serverAbQ.length,
         ringSize: 0,
+        // サーバ側は UI 通知用のため計測値は保持しない
+        dbLoadTimeMs: 0,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
         totalTimeMs: 0,
@@ -181,12 +146,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
     return PsiDone();
   }
 
-  // ===============================================================
-  // Phase 3A: ExchangeChallenges
-  // ===============================================================
+  // ----- Ring signature: exchangeChallenges -----
+
   @override
   Future<ServerChallenge> exchangeChallenges(
-      ServiceCall call, ClientChallenge req) async {
+      ServiceCall call,
+      ClientChallenge req,
+      ) async {
     await _ensureReady();
 
     if (_lastIntersection.isEmpty) {
@@ -196,77 +162,62 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _lastChallengeC = Uint8List.fromList(req.challengeC);
     _lastChallengeS = _keyService.generateRandomSecret();
 
-    // 署名生成を非同期実行
     _serverSignatureFuture = _computeServerSignatureAsync();
 
     return ServerChallenge()..challengeS = _lastChallengeS!;
   }
 
-  // ===============================================================
-  // サーバ署名生成（同日フィルタ）
-  // ===============================================================
-  Future<Uint8List> _computeServerSignatureAsync() async {
-    print('[SERVER] ✍️ サーバ署名生成開始');
+  // ----- Ring signature (server) -----
 
-    final signer = await _selectSignerKeyFromIntersection(_lastIntersection);
+  Future<Uint8List> _computeServerSignatureAsync() async {
+    if (kDebugMode) {
+      debugPrint('[SERVER] create ring signature');
+    }
+
+    final signer =
+    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) {
       throw GrpcError.failedPrecondition('No signer key');
     }
 
-    final db = await DatabaseHelper.getDatabase();
-    final rows = await db.query(
-      'generated_keys',
-      columns: ['generate_time'],
-      where: 'pubkey_ecd = ?',
-      whereArgs: [signer.publicKey],
-      limit: 1,
-    );
-
-    if (rows.isEmpty) {
-      throw GrpcError.failedPrecondition('No generate_time for signer');
+    final signerTime = await _kms.getTimestampForKey(signer.publicKey);
+    if (signerTime == null) {
+      throw GrpcError.failedPrecondition('No signer timestamp');
     }
 
-    final signerGenerateTimeMs = rows.first['generate_time'] as int;
-    print('[SERVER] 🔑 signer generate_time = $signerGenerateTimeMs');
-
-    final filteredRing = await _kms.filterKeysBySameSlot(
-      _lastIntersection,
-      signerGenerateTimeMs,
-    );
-
-    print('[SERVER] 🔍 同日リングサイズ = ${filteredRing.length}');
-
-    if (filteredRing.length < 2) {
-      throw GrpcError.failedPrecondition('Ring size too small after filtering');
+    // 同一時刻スロット内の鍵に限定してリングを構成する
+    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
+    if (ring.length < 2) {
+      throw GrpcError.failedPrecondition('Ring too small');
     }
 
-    filteredRing.sort(_compare);
+    ring.sort(GrpcCommon.comparePubKey);
 
-    final msgHex = _hex(_lastChallengeC!);
+    final msgHex = GrpcCommon.bytesToHex(_lastChallengeC!);
+
     const pubLen = 33;
-
     final msgPtr = msgHex.toNativeUtf8().cast<Char>();
-    final ringPtr = calloc<Uint8>(pubLen * filteredRing.length);
-    final ringList = ringPtr.asTypedList(pubLen * filteredRing.length);
+    final ringPtr = calloc<Uint8>(pubLen * ring.length);
+    final ringView = ringPtr.asTypedList(pubLen * ring.length);
 
     int offset = 0;
-    for (final pk in filteredRing) {
-      ringList.setAll(offset, pk);
-      offset += pk.length;
+    for (final k in ring) {
+      ringView.setAll(offset, k);
+      offset += k.length;
     }
 
     final privPtr = calloc<Uint8>(signer.privateKey.length)
       ..asTypedList(signer.privateKey.length).setAll(0, signer.privateKey);
 
-    final sigOut = calloc<Uint8>((1 + filteredRing.length) * 32);
+    final sigPtr = calloc<Uint8>((1 + ring.length) * 32);
 
     final rc = _keyService.createRingSignature(
       msgPtr,
       msgHex.length,
       privPtr,
       ringPtr,
-      filteredRing.length,
-      sigOut,
+      ring.length,
+      sigPtr,
     );
 
     calloc.free(msgPtr);
@@ -274,32 +225,27 @@ class GrpcServiceImpl extends GrpcServiceBase {
     calloc.free(ringPtr);
 
     if (rc != 1) {
-      calloc.free(sigOut);
-      throw GrpcError.internal('Server signature generation failed');
+      calloc.free(sigPtr);
+      throw GrpcError.internal('Server signature failed');
     }
 
     final sig =
-    Uint8List.fromList(sigOut.asTypedList((1 + filteredRing.length) * 32));
-    calloc.free(sigOut);
+    Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
+    calloc.free(sigPtr);
 
-    print('[SERVER] ✍️ サーバ署名生成完了');
     return sig;
   }
 
-  // ===============================================================
-  // Phase 3B: ExchangeRingSignatures
-  // ===============================================================
+  // ----- Ring signature: exchangeRingSignatures -----
+
   @override
   Future<RingSignatureResp> exchangeRingSignatures(
-      ServiceCall call, RingSignatureReq request) async {
+      ServiceCall call,
+      RingSignatureReq request,
+      ) async {
     await _ensureReady();
 
-    final sigFromClient =
-    Uint8List.fromList(request.signatureForServer);
-
-    if (_serverSignatureFuture == null) {
-      throw GrpcError.failedPrecondition('Signature not ready');
-    }
+    final sigFromClient = Uint8List.fromList(request.signatureForServer);
 
     final sigForClient = await _serverSignatureFuture!;
     unawaited(_verifyClientSignatureLater(sigFromClient));
@@ -307,48 +253,30 @@ class GrpcServiceImpl extends GrpcServiceBase {
     return RingSignatureResp()..signatureForClient = sigForClient;
   }
 
-  // ===============================================================
-  // クライアント署名検証（同日リング）
-  // ===============================================================
-  Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
-    print('[SERVER] 🔍 クライアント署名検証開始');
+  // ----- Ring signature (client verify) -----
 
-    final signer = await _selectSignerKeyFromIntersection(_lastIntersection);
+  Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
+    final signer =
+    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) return;
 
-    final db = await DatabaseHelper.getDatabase();
-    final rows = await db.query(
-      'generated_keys',
-      columns: ['generate_time'],
-      where: 'pubkey_ecd = ?',
-      whereArgs: [signer.publicKey],
-      limit: 1,
-    );
-    if (rows.isEmpty) return;
+    final signerTime = await _kms.getTimestampForKey(signer.publicKey);
+    if (signerTime == null) return;
 
-    final signerGenerateTimeMs = rows.first['generate_time'] as int;
+    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
+    if (ring.length < 2) return;
 
-    final filteredRing = await _kms.filterKeysBySameSlot(
-      _lastIntersection,
-      signerGenerateTimeMs,
-    );
+    ring.sort(GrpcCommon.comparePubKey);
 
-    if (filteredRing.length < 2) {
-      print('[SERVER] ❌ Filtered ring too small');
-      return;
-    }
+    final msgHex = GrpcCommon.bytesToHex(_lastChallengeS!);
 
-    filteredRing.sort(_compare);
-
-    final msgHex = _hex(_lastChallengeS!);
     const pubLen = 33;
-
-    final ringPtr = calloc<Uint8>(pubLen * filteredRing.length);
-    final ringList = ringPtr.asTypedList(pubLen * filteredRing.length);
+    final ringPtr = calloc<Uint8>(pubLen * ring.length);
+    final ringView = ringPtr.asTypedList(pubLen * ring.length);
 
     int offset = 0;
-    for (final k in filteredRing) {
-      ringList.setAll(offset, k);
+    for (final k in ring) {
+      ringView.setAll(offset, k);
       offset += k.length;
     }
 
@@ -362,7 +290,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       msgHex.length,
       sigPtr,
       ringPtr,
-      filteredRing.length,
+      ring.length,
     );
 
     calloc.free(msgPtr);
@@ -370,20 +298,19 @@ class GrpcServiceImpl extends GrpcServiceBase {
     calloc.free(ringPtr);
 
     if (rc == 1) {
-      print('[SERVER] 🎉 クライアント署名 → 正当');
       _ringAuthController.add(
         PsiResult(
           isFamiliar: true,
-          commonKeys: _lastIntersection.map(_hex).toList(),
-          psiKeyCount: _myKeys.length + _serverAbQ.length,
-          ringSize: filteredRing.length,
+          saKeyCount: _lastSaKeyCount,
+          sbKeyCount: _sbKeyCount,
+          commonKeys: _lastIntersection.map(GrpcCommon.bytesToHex).toList(),
+          ringSize: ring.length,
+          dbLoadTimeMs: 0,
           psiTimeMs: 0,
           ringSigTimeMs: 0,
           totalTimeMs: 0,
         ),
       );
-    } else {
-      print('[SERVER] ❌ クライアント署名 → 不正');
     }
 
     _lastChallengeC = null;
@@ -391,47 +318,32 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _serverSignatureFuture = null;
   }
 
-  // ===============================================================
-  // PSI 共通集合
-  // ===============================================================
+  // ----- Intersection -----
+
   List<Uint8List> _computeIntersection(List<Uint8List> clientAbP) {
-    final abQSet = _serverAbQ.map(_hex).toSet();
+    final abQSet = _serverAbQ.map(GrpcCommon.bytesToHex).toSet();
     final result = <Uint8List>[];
 
-    final n = clientAbP.length < _myKeys.length
-        ? clientAbP.length
-        : _myKeys.length;
+    final n =
+    clientAbP.length < _myKeys.length ? clientAbP.length : _myKeys.length;
 
     for (int i = 0; i < n; i++) {
-      if (abQSet.contains(_hex(clientAbP[i]))) {
+      if (abQSet.contains(GrpcCommon.bytesToHex(clientAbP[i]))) {
         result.add(_myKeys[i]);
       }
     }
     return result;
   }
-
-  // ===============================================================
-  // util
-  // ===============================================================
-  String _hex(Uint8List b) =>
-      b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
-
-  int _compare(Uint8List a, Uint8List b) {
-    for (int i = 0; i < a.length && i < b.length; i++) {
-      if (a[i] != b[i]) return a[i] - b[i];
-    }
-    return a.length - b.length;
-  }
 }
 
-/// ===============================================================
-/// gRPC サーバ管理
-/// ===============================================================
+/// gRPC サーバ管理。
 class PsiGrpcServer {
   Server? _server;
   int? _port;
 
   late GrpcServiceImpl service;
+
+  final GrpcCommon _grpcCommon = GrpcCommon();
 
   bool get isRunning => _server != null;
 
@@ -443,21 +355,21 @@ class PsiGrpcServer {
 
     final s = Server.create(
       services: [service],
-      codecRegistry: CodecRegistry(codecs: [
-        GzipCodec(),
-        IdentityCodec(),
-      ]),
+      codecRegistry: _grpcCommon.codecRegistry,
     );
 
     await s.serve(
       address: InternetAddress.anyIPv4,
       port: port,
+      security: _grpcCommon.buildServerSecurity(),
     );
 
     _server = s;
     _port = s.port;
 
-    print('[SERVER] 🚀 gRPCサーバ起動 : $_port');
+    if (kDebugMode) {
+      debugPrint('[SERVER] started: $_port');
+    }
     return _port!;
   }
 
@@ -465,10 +377,6 @@ class PsiGrpcServer {
     final s = _server;
     _server = null;
     _port = null;
-
-    if (s != null) {
-      await s.shutdown();
-      print('[SERVER] 🛑 gRPCサーバ停止');
-    }
+    if (s != null) await s.shutdown();
   }
 }

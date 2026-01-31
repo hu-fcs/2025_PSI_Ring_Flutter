@@ -1,23 +1,26 @@
+// lib/ffi/native_key_service.dart
+
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
-import 'dart:math';                 // ← Random.secure() のために追加
+
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 import './native_key_bindings.dart';
 
-// 定数
 const int pubKeyCompressedLen = 33;
 const int privateKeyLen = 32;
 
-/// Flutter側で保持する鍵ペア（KeyManagementService が利用する）
+/// Flutter 側で扱う鍵ペア。
 class KeyPair {
   final Uint8List privateKey;
   final Uint8List publicKey;
   KeyPair(this.privateKey, this.publicKey);
 }
 
-/// PSI・鍵導出・リング署名をまとめた FFI サービス
+/// 鍵導出・PSI・リング署名をまとめた FFI サービス。
 class NativeKeyService {
   static final NativeKeyService _instance = NativeKeyService._internal();
   factory NativeKeyService() => _instance;
@@ -41,17 +44,21 @@ class NativeKeyService {
 
       _bindings = NativeKeyBindings(dylib);
 
-      _bindings.psi_init(); // ECC グループ初期化
+      // PSI の初期化（ECC グループ）
+      _bindings.psi_init();
 
-      print('[NativeKeyService] Library loaded and initialized.');
+      if (kDebugMode) {
+        debugPrint('[NativeKeyService] library loaded');
+      }
     } catch (e) {
-      print('❌ Failed to load native library: $e');
+      if (kDebugMode) {
+        debugPrint('[NativeKeyService] failed to load native library: $e');
+      }
     }
   }
 
-  // ============================================================
-  //  1. マスターキー生成 (KeyManagementService が利用)
-  // ============================================================
+  // ----- Key derivation -----
+
   Uint8List? generateMasterKey() {
     final ptr = calloc<Uint8>(privateKeyLen);
     try {
@@ -65,13 +72,14 @@ class NativeKeyService {
     }
   }
 
-  // ============================================================
-  //  2. マスターキー + timestamp → 秘密鍵・公開鍵派生
-  // ============================================================
-  KeyPair? deriveNewKeyPair(Uint8List masterKey, int timestampMs, int slotMs) {
+  KeyPair? deriveNewKeyPair(
+      Uint8List masterKey,
+      int timestampMs,
+      int slotMs,
+      ) {
     final masterPtr = calloc<Uint8>(masterKey.length);
-    final privPtr = calloc<Uint8>(32);
-    final pubPtr = calloc<Uint8>(33);
+    final privPtr = calloc<Uint8>(privateKeyLen);
+    final pubPtr = calloc<Uint8>(pubKeyCompressedLen);
 
     try {
       masterPtr.asTypedList(masterKey.length).setAll(0, masterKey);
@@ -86,8 +94,8 @@ class NativeKeyService {
 
       if (ok == 1) {
         return KeyPair(
-          Uint8List.fromList(privPtr.asTypedList(32)),
-          Uint8List.fromList(pubPtr.asTypedList(33)),
+          Uint8List.fromList(privPtr.asTypedList(privateKeyLen)),
+          Uint8List.fromList(pubPtr.asTypedList(pubKeyCompressedLen)),
         );
       }
       return null;
@@ -98,18 +106,16 @@ class NativeKeyService {
     }
   }
 
-  // ============================================================
-  //  3. PSI用秘密スカラー生成（Dart側 Random.secure()）
-  // ============================================================
+  // ----- PSI -----
+
+  /// PSI の秘密スカラーを生成する。
   Uint8List generateRandomSecret() {
     final rand = Random.secure();
-    final bytes = List<int>.generate(32, (_) => rand.nextInt(256));
+    final bytes = List<int>.generate(privateKeyLen, (_) => rand.nextInt(256));
     return Uint8List.fromList(bytes);
   }
 
-  // ============================================================
-  //  4. PSI: aP / bQ の暗号化 (ecc_single_encrypt_set)
-  // ============================================================
+  /// 集合要素をスカラー倍して暗号化する（ecc_single_encrypt_set）。
   List<Uint8List> encryptSet(List<Uint8List> inputs, Uint8List secret) {
     final count = inputs.length;
     final flatIn = calloc<Uint8>(count * pubKeyCompressedLen);
@@ -126,17 +132,23 @@ class NativeKeyService {
         }
       }
 
-      final ok = _bindings.ecc_single_encrypt_set(flatIn, count, secretPtr, flatOut);
-      if (ok != 1) {
-        print('❌ ecc_single_encrypt_set failed');
+      final ok =
+      _bindings.ecc_single_encrypt_set(flatIn, count, secretPtr, flatOut);
+      if (ok != 1 && kDebugMode) {
+        debugPrint('[NativeKeyService] ecc_single_encrypt_set failed');
       }
 
       final result = <Uint8List>[];
       final typed = flatOut.asTypedList(count * pubKeyCompressedLen);
       for (int i = 0; i < count; i++) {
-        result.add(Uint8List.fromList(
-          typed.sublist(i * pubKeyCompressedLen, (i + 1) * pubKeyCompressedLen),
-        ));
+        result.add(
+          Uint8List.fromList(
+            typed.sublist(
+              i * pubKeyCompressedLen,
+              (i + 1) * pubKeyCompressedLen,
+            ),
+          ),
+        );
       }
       return result;
     } finally {
@@ -146,14 +158,12 @@ class NativeKeyService {
     }
   }
 
-  // ============================================================
-  //  5. PSI: 共通集合抽出 (ecc_intersect_sets)
-  // ============================================================
+  /// 共通集合を抽出する（ecc_intersect_sets）。
   List<Uint8List> intersect(
       List<Uint8List> originalKeys,
       List<Uint8List> myDoubleSet,
-      List<Uint8List> remoteDoubleSet) {
-
+      List<Uint8List> remoteDoubleSet,
+      ) {
     final countA = originalKeys.length;
     final countB = remoteDoubleSet.length;
 
@@ -191,13 +201,17 @@ class NativeKeyService {
 
       final typed = flatResult.asTypedList(countA * pubKeyCompressedLen);
       for (int i = 0; i < found; i++) {
-        results.add(Uint8List.fromList(
-          typed.sublist(i * pubKeyCompressedLen, (i + 1) * pubKeyCompressedLen),
-        ));
+        results.add(
+          Uint8List.fromList(
+            typed.sublist(
+              i * pubKeyCompressedLen,
+              (i + 1) * pubKeyCompressedLen,
+            ),
+          ),
+        );
       }
 
       return results;
-
     } finally {
       calloc.free(flatOrig);
       calloc.free(flatMine);
@@ -207,18 +221,24 @@ class NativeKeyService {
     }
   }
 
-  // ============================================================
-  //  6. リング署名 (既存のまま)
-  // ============================================================
+  // ----- Ring signature -----
+
   int createRingSignature(
       Pointer<Char> msg,
       int msgLen,
       Pointer<Uint8> privateKey,
       Pointer<Uint8> ringPublicKeys,
       int ringSize,
-      Pointer<Uint8> signatureOut) {
+      Pointer<Uint8> signatureOut,
+      ) {
     return _bindings.create_ring_signature(
-        msg, msgLen, privateKey, ringPublicKeys, ringSize, signatureOut);
+      msg,
+      msgLen,
+      privateKey,
+      ringPublicKeys,
+      ringSize,
+      signatureOut,
+    );
   }
 
   int verifyRingSignature(
@@ -226,8 +246,14 @@ class NativeKeyService {
       int msgLen,
       Pointer<Uint8> signature,
       Pointer<Uint8> ringPublicKeys,
-      int ringSize) {
+      int ringSize,
+      ) {
     return _bindings.verify_ring_signature(
-        msg, msgLen, signature, ringPublicKeys, ringSize);
+      msg,
+      msgLen,
+      signature,
+      ringPublicKeys,
+      ringSize,
+    );
   }
 }

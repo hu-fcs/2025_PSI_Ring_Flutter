@@ -1,75 +1,53 @@
+// grpc.proto
 syntax = "proto3";
 package grpc;
 
-// ================================================================
-// Phase 1 : PSI Key Exchange
-// ================================================================
+// PSI の3段階（鍵交換 → PSI確定 → 匿名認証）のための gRPC 定義。
+
+// ----- Phase 1: PSI 鍵交換 -----
 
 message KeyExchangeReq {
-  repeated bytes enc_keys = 1;
+  repeated bytes enc_keys = 1; // クライアントの暗号化鍵列
 }
 
 message KeyExchangeResp {
-  repeated bytes server_enc_keys = 1;
-  repeated bytes client_reenc_keys = 2;
+  repeated bytes server_enc_keys = 1;   // サーバの暗号化鍵列
+  repeated bytes client_reenc_keys = 2; // サーバが再暗号化したクライアント鍵列
 }
 
-
-// ================================================================
-// Phase 2 : PSI Finalization
-// ================================================================
+// ----- Phase 2: PSI 確定 -----
 
 message ClientFinalReq {
-  repeated bytes client_reenc_server_keys = 1;
+  repeated bytes client_reenc_server_keys = 1; // クライアントが再暗号化したサーバ鍵列
 }
 
 message PsiDone {}
 
+// ----- Phase 3A: チャレンジ交換 -----
 
-// ================================================================
-// Phase 3A : Challenge Exchange (Optimized)
-// ================================================================
-
-// クライアント → サーバ
 message ClientChallenge {
-  bytes challenge_c = 1;       // クライアント生成 32B
+  bytes challenge_c = 1; // クライアント生成のチャレンジ(32B)
 }
 
-// サーバ → クライアント
 message ServerChallenge {
-  bytes challenge_s = 1;       // サーバ生成 32B
+  bytes challenge_s = 1; // サーバ生成のチャレンジ(32B)
 }
 
+// ----- Phase 3B: リング署名交換 -----
 
-// ================================================================
-// Phase 3B : Ring Signature Exchange
-// ================================================================
-
-// クライアント → サーバ
 message RingSignatureReq {
-  bytes signature_for_server = 1;   // クライアント署名（challenge_S 用）
+  bytes signature_for_server = 1; // challenge_s に対する署名
 }
 
-// サーバ → クライアント
 message RingSignatureResp {
-  bytes signature_for_client = 1;   // サーバ署名（challenge_C 用）
+  bytes signature_for_client = 1; // challenge_c に対する署名
 }
 
-
-// ================================================================
-// gRPC Service
-// ================================================================
+// ----- gRPC service -----
 
 service GrpcService {
-  // Phase 1
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
-
-  // Phase 2
   rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
-
-  // Phase 3A : チャレンジ交換
-  rpc ExchangeChallenges(ClientChallenge) returns (ServerChallenge);
-
-  // Phase 3B : リング署名交換
-  rpc ExchangeRingSignatures(RingSignatureReq) returns (RingSignatureResp);
+  rpc ExchangeChallenges (ClientChallenge) returns (ServerChallenge);
+  rpc ExchangeRingSignatures (RingSignatureReq) returns (RingSignatureResp);
 }

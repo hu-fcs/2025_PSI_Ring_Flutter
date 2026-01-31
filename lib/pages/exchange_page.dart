@@ -3,17 +3,23 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:flutter/services.dart';
+
 import '../ble/ble_exchange_controller.dart';
-import '../grpc/grpc_server.dart';
-import '../grpc/grpc_client.dart'; // PsiResult
 import '../db/database_helper.dart';
+import '../grpc/grpc_common.dart';
+import '../grpc/grpc_server.dart';
 import 'debug_page.dart';
 
+/// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
+///
+/// - BLE: 周辺端末へ仮名（公開鍵断片）を広告し，同時に周囲の仮名を収集する。
+/// - gRPC: PSI とリング署名によって顔見知り判定を行い，結果を表示する。
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
 
@@ -22,11 +28,9 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
-  // ===== BLE =====
   final _ble = BleExchangeController();
   bool get _bleRunning => _ble.isRunning;
 
-  // ===== gRPC（QR表示側のみ）=====
   PsiGrpcServer? _grpcServer;
   bool get _grpcRunning => _grpcServer?.isRunning == true;
   String? _serverIp;
@@ -34,7 +38,6 @@ class _ExchangePageState extends State<ExchangePage> {
 
   final _db = DatabaseHelper();
 
-  // ==========================================================
   Future<bool> _hasAnyKey() async => (await _db.getTotalKeyCount()) > 0;
 
   Future<bool> _requireKeyWarning() async {
@@ -59,7 +62,6 @@ class _ExchangePageState extends State<ExchangePage> {
     return false;
   }
 
-  // ==========================================================
   Future<bool> _ensureBlePermissions() async {
     final perms = [
       Permission.bluetoothAdvertise,
@@ -99,7 +101,6 @@ class _ExchangePageState extends State<ExchangePage> {
     if (mounted) setState(() {});
   }
 
-  // ==========================================================
   Future<String?> _getLocalWifiIp() async {
     try {
       final interfaces = await NetworkInterface.list();
@@ -114,9 +115,6 @@ class _ExchangePageState extends State<ExchangePage> {
     return null;
   }
 
-  // ==========================================================
-  /// QRを表示する（表示側）
-  // ==========================================================
   Future<void> _showQr() async {
     if (!await _requireKeyWarning()) return;
     if (_grpcRunning) return;
@@ -151,9 +149,6 @@ class _ExchangePageState extends State<ExchangePage> {
     await s?.stop();
   }
 
-  // ==========================================================
-  /// QRを読み取る（読み取り側）
-  // ==========================================================
   Future<void> _scanQr() async {
     if (!await _requireKeyWarning()) return;
 
@@ -162,24 +157,16 @@ class _ExchangePageState extends State<ExchangePage> {
       _showUnifiedPsiDialog(result, isServerSide: false);
     }
   }
-  // ==========================================================
-  // 共通鍵 → 16進文字列
-  // ==========================================================
+
   String _bytesToHex(Uint8List b) =>
       b.map((e) => e.toRadixString(16).padLeft(2, '0')).join();
 
-  // ==========================================================
-  // 時刻フォーマット
-  // ==========================================================
   String _fmtTime(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
     String z(int v) => v.toString().padLeft(2, '0');
     return '${d.year}/${z(d.month)}/${z(d.day)} ${z(d.hour)}:${z(d.minute)}';
   }
 
-  // ==========================================================
-  // 会った回数 / 初回 / 最終回 を計算
-  // ==========================================================
   Future<({
   int count,
   int? first,
@@ -207,7 +194,6 @@ class _ExchangePageState extends State<ExchangePage> {
       columns: ['pubkey_ecd', 'generate_time', 'lat', 'lon'],
     );
 
-    // pubkey(hex) -> { time, lat, lon }
     final Map<String, Map<String, int?>> myKeys = {
       for (final r in rows)
         _bytesToHex(r['pubkey_ecd'] as Uint8List): {
@@ -235,12 +221,10 @@ class _ExchangePageState extends State<ExchangePage> {
       );
     }
 
-    // time 昇順
     hits.sort((a, b) => a['time']!.compareTo(b['time']!));
 
     final first = hits.first;
 
-    // 「最後」は前日以前を優先（なければ最新）
     final now = DateTime.now();
     final today0 = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
 
@@ -260,7 +244,6 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
 
-  // ==========================================================
   Future<void> _showUnifiedPsiDialog(
       PsiResult psi, {
         required bool isServerSide,
@@ -282,9 +265,6 @@ class _ExchangePageState extends State<ExchangePage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ======================
-              // タイトル
-              // ======================
               Row(
                 children: [
                   Icon(
@@ -303,9 +283,7 @@ class _ExchangePageState extends State<ExchangePage> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -318,9 +296,6 @@ class _ExchangePageState extends State<ExchangePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ======================
-                    // 会った回数
-                    // ======================
                     Text(
                       '会った回数',
                       style: TextStyle(
@@ -336,15 +311,9 @@ class _ExchangePageState extends State<ExchangePage> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
-                    // ======================
-                    // 初めて会った
-                    // ======================
                     Row(
                       children: [
-                        // 左：ラベル＋時刻
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,29 +336,18 @@ class _ExchangePageState extends State<ExchangePage> {
                             ],
                           ),
                         ),
-
-                        // 右：場所ボタン
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
                           onPressed: (stats.firstLat != null && stats.firstLon != null)
-                              ? () => _openExternalMap(
-                            stats.firstLat!,
-                            stats.firstLon!,
-                          )
+                              ? () => _openExternalMap(stats.firstLat!, stats.firstLon!)
                               : null,
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 10),
-
-                    // ======================
-                    // 最後に会った
-                    // ======================
                     Row(
                       children: [
-                        // 左：ラベル＋時刻
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,16 +370,11 @@ class _ExchangePageState extends State<ExchangePage> {
                             ],
                           ),
                         ),
-
-                        // 右：場所ボタン
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
                           onPressed: (stats.lastLat != null && stats.lastLon != null)
-                              ? () => _openExternalMap(
-                            stats.lastLat!,
-                            stats.lastLon!,
-                          )
+                              ? () => _openExternalMap(stats.lastLat!, stats.lastLon!)
                               : null,
                         ),
                       ],
@@ -429,12 +382,7 @@ class _ExchangePageState extends State<ExchangePage> {
                   ],
                 ),
               ),
-
-              // ======================
-              // デバッグ情報（下）※折りたたみ
-              // ======================
               Divider(color: Colors.grey.shade300),
-
               Theme(
                 data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
@@ -455,50 +403,37 @@ class _ExchangePageState extends State<ExchangePage> {
                     color: Colors.grey.shade600,
                   ),
                   children: [
-                    _debugRow(
-                      '判定側',
-                      isServerSide ? 'サーバ側' : 'クライアント側',
+                    _debugRow('判定側', isServerSide ? 'サーバ側' : 'クライアント側'),
+                    _debugRowWidget(
+                      _mathLabel(main: 'S', sub: 'A', suffix: 'クライアント鍵数'),
+                      '${psi.saKeyCount} 件',
                     ),
-                    _debugRow(
-                      'PSI使用鍵総数',
-                      '${psi.psiKeyCount} 件',
+                    _debugRowWidget(
+                      _mathLabel(main: 'S', sub: 'B', suffix: 'サーバ鍵数'),
+                      '${psi.sbKeyCount} 件',
                     ),
-                    _debugRow(
-                      '共通鍵数',
+                    _debugRowWidget(
+                      _mathLabel(main: 'I', suffix: '共通集合サイズ'),
                       '${psi.commonKeys.length} 件',
                     ),
-                    _debugRow(
-                      '自身の鍵との一致',
-                      familiar ? 'あり' : 'なし',
-                    ),
-                    _debugRow(
-                      'リングサイズ',
+                    _debugRowWidget(
+                      _mathLabel(main: 'R', suffix: 'リングサイズ'),
                       '${psi.ringSize} 件',
                     ),
+                    _debugRow('自身の鍵との一致', familiar ? 'あり' : 'なし'),
                     if (!isServerSide) ...[
-                      _debugRow(
-                        'PSI時間',
-                        '${psi.psiTimeMs} ms',
-                      ),
-                      _debugRow(
-                        'リング署名・検証時間',
-                        '${psi.ringSigTimeMs} ms',
-                      ),
-                      _debugRow(
-                        '全体処理時間',
-                        '${psi.totalTimeMs} ms',
-                      ),
+                      const SizedBox(height: 6),
+                      Divider(color: Colors.grey.shade300),
+                      const SizedBox(height: 6),
+                      _debugRow('SQLite鍵読み込み時間', '${psi.dbLoadTimeMs} ms'),
+                      _debugRow('PSI時間', '${psi.psiTimeMs} ms'),
+                      _debugRow('リング署名・検証時間', '${psi.ringSigTimeMs} ms'),
+                      _debugRow('総時間', '${psi.totalTimeMs} ms'),
                     ],
                   ],
                 ),
               ),
-
-
               const SizedBox(height: 10),
-
-              // ======================
-              // OKボタン
-              // ======================
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton(
@@ -520,10 +455,7 @@ class _ExchangePageState extends State<ExchangePage> {
     final lon = lonE6 / 1e6;
 
     try {
-      await _mapChannel.invokeMethod('openMap', {
-        'lat': lat,
-        'lon': lon,
-      });
+      await _mapChannel.invokeMethod('openMap', {'lat': lat, 'lon': lon});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -532,42 +464,79 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
-  // ----------------------------
-  // デバッグ用の1行UI
-  // ----------------------------
-  Widget _debugRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+  Widget _mathLabel({
+    required String main,
+    String? sub,
+    required String suffix,
+  }) {
+    final subText = (sub ?? '').trim();
+
+    if (subText.isEmpty) {
+      return Text.rich(
+        TextSpan(
+          children: [
+            const TextSpan(text: '|'),
+            TextSpan(text: main),
+            const TextSpan(text: '| '),
+            TextSpan(text: suffix),
+          ],
+        ),
+      );
+    }
+
+    return Text.rich(
+      TextSpan(
         children: [
-          Text(
-            '$label:',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade500,
+          const TextSpan(text: '|'),
+          TextSpan(text: main),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: Transform.translate(
+              offset: const Offset(0, 2),
+              child: Text(subText, style: const TextStyle(fontSize: 10.5)),
             ),
           ),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade500,
-            ),
-          ),
+          const TextSpan(text: '| '),
+          TextSpan(text: suffix),
         ],
       ),
     );
   }
 
+  Widget _debugRowWidget(Widget label, String value) {
+    final s = TextStyle(fontSize: 13, color: Colors.grey.shade600);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          DefaultTextStyle.merge(style: s, child: label),
+          const Spacer(),
+          Text(value, style: s),
+        ],
+      ),
+    );
+  }
 
-  // ==========================================================
+  Widget _debugRow(String label, String value) {
+    final s = TextStyle(fontSize: 13, color: Colors.grey.shade600);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text('$label:', style: s),
+          const Spacer(),
+          Text(value, style: s),
+        ],
+      ),
+    );
+  }
+
   String get _qrPayload => jsonEncode({
     'ip': _serverIp ?? '',
     'port': _serverPort,
   });
 
-  // ==========================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -596,28 +565,16 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
 
-  // ==========================================================
   Widget _statusRow() {
     return Row(
       children: [
-        _statusBadge(
-          Icons.bluetooth,
-          '近接記録(BLE)',
-          _bleRunning,
-        ),
+        _statusBadge(Icons.bluetooth, '近接記録(BLE)', _bleRunning),
         const SizedBox(width: 8),
-        _statusBadge(
-          Icons.cloud_sharp,
-          '顔見知り確認(gRPC)',
-          _grpcRunning,
-        ),
+        _statusBadge(Icons.cloud_sharp, '顔見知り確認(gRPC)', _grpcRunning),
       ],
     );
   }
 
-  // ==========================================================
-  // ★ 修正: 左側（タイトル+説明）を縦にグループ化し、右にトグル
-  // ==========================================================
   Widget _bleCard() {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
@@ -628,7 +585,6 @@ class _ExchangePageState extends State<ExchangePage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 左: タイトル + 説明（グループ）
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -637,10 +593,7 @@ class _ExchangePageState extends State<ExchangePage> {
                   children: [
                     const Icon(Icons.bluetooth, size: 22),
                     const SizedBox(width: 8),
-                    Text(
-                      '近くの人を記録',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    Text('近くの人を記録', style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -651,10 +604,7 @@ class _ExchangePageState extends State<ExchangePage> {
               ],
             ),
           ),
-
           const SizedBox(width: 12),
-
-          // 右: トグル
           Switch(
             value: _bleRunning,
             onChanged: (_) => _toggleBleExchange(),
@@ -674,8 +624,6 @@ class _ExchangePageState extends State<ExchangePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-
-          // ===== 使い方（現行UI準拠）=====
           Text(
             '使い方',
             style: TextStyle(
@@ -687,19 +635,16 @@ class _ExchangePageState extends State<ExchangePage> {
           const SizedBox(height: 6),
           Text(
             '・一方の端末で「QRを表示する」をタップ\n'
-            '・もう一方の端末で「QRを読み取る」をタップ',
+                '・もう一方の端末で「QRを読み取る」をタップ',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
           ),
-
           const SizedBox(height: 14),
-
           _grpcRunning ? _qrDisplaySection() : _qrActionButtons(),
         ],
       ),
     );
   }
 
-  // ==========================================================
   Widget _qrActionButtons() {
     return Row(
       children: [
@@ -753,7 +698,6 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
 
-  // ==========================================================
   Widget _card({
     required IconData icon,
     required String title,
@@ -774,10 +718,7 @@ class _ExchangePageState extends State<ExchangePage> {
             children: [
               Icon(icon, size: 22),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
               const Spacer(),
               trailing,
             ],
