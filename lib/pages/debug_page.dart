@@ -369,59 +369,7 @@ class _DebugPageState extends State<DebugPage>
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
-
-  void _showResultDialog({
-    required String title,
-    required bool isSuccess,
-    required Widget content,
-  }) {
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(title),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      isSuccess ? Icons.check_circle : Icons.cancel,
-                      color: isSuccess ? Colors.green : Colors.red,
-                      size: 28,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      isSuccess ? '成功' : '失敗',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                        color: isSuccess
-                            ? Colors.green.shade700
-                            : Colors.red.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                content,
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('OK'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
+  
   Future<void> _showAddMultipleDummiesDialog() async {
     return showDialog<void>(
       context: context,
