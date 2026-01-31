@@ -4,14 +4,10 @@
 
 平常時に **BLE** ですれ違い時の「仮名（公開鍵）」を収集し、再会時に **gRPC** 通信で **PSI（Private Set Intersection）** と **リング署名**を用いて「顔見知りかどうか」を判定します。
 
----
-
 ## できること
 
 * **近くの人を記録**：BLE で周囲の仮名（公開鍵）を広告・収集し、端末内 DB に保存
 * **顔見知りチェック**：QR で接続情報を共有し、gRPC で照合して結果表示
-
----
 
 ## 動作要件
 
@@ -19,8 +15,6 @@
 * Android 端末（カメラ / BLE / 位置情報を利用）
 * Android Studio + Android SDK/NDK（CMake を含む）
 * Protocol Buffers（`protoc`）※ `.proto` を変更する場合のみ
-
----
 
 ## セットアップ
 
@@ -36,17 +30,13 @@ flutter pub get
 flutter run
 ```
 
----
-
-## proto のコード生成（.proto を変更した場合）
+## proto のコード生成
 
 `.proto` を変更した場合のみ、以下で再生成してください。
 
 ```agsl
 protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
 ```
-
----
 
 ## OpenSSL のダミー鍵生成
 
@@ -64,11 +54,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\generate_dummy_keys.ps1 -Count 1000
 ```
 
----
-
 ## 主要ファイル構成
-
-ネイティブ実装（C）は `src/native/` にあります。
 
 ```
 .
@@ -104,8 +90,6 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
       ├─ psi.c/.h              # PSI
       └─ ring_signature.c/.h   # リング署名
 ```
-
----
 
 ## 所属
 
