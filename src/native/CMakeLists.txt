@@ -13,24 +13,22 @@ add_library(
         ring_signature.c
 )
 
-# include/ 内のヘッダー (psi.h, key_derivation.h, ring_signature.h)
+# include/ 配下のヘッダを参照する
 target_include_directories(
         psiring_auth
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# ============================
-# Android 専用設定
-# ============================
+# ---- プラットフォーム別のリンク設定 ----
 if(ANDROID)
     message(STATUS "Building for Android (${ANDROID_ABI})")
 
-    # Android log (logcat) ライブラリ
+    # logcat を使用するため Android の log ライブラリをリンクする
     find_library(log-lib log)
     target_link_libraries(psiring_auth ${log-lib})
 
-    # BoringSSL の libcrypto を ABI ごとにリンク
+    # BoringSSL の libcrypto.so を同梱してリンクする（ABI ごと）
     set(CRYPTO_PATH
             "${CMAKE_CURRENT_SOURCE_DIR}/../../android/app/src/main/jniLibs/${ANDROID_ABI}/libcrypto.so"
     )
@@ -43,14 +41,9 @@ if(ANDROID)
     endif()
 
 else()
-
-    # ============================
-    # Android 以外のプラットフォーム
-    # ============================
-
     message(STATUS "Non-Android platform build")
 
-    # 必要であればシステム OpenSSL を使用
+    # Android 以外ではシステムの OpenSSL(Crypto) を使用する
     find_package(OpenSSL REQUIRED)
 
     if(OPENSSL_FOUND)
@@ -59,5 +52,4 @@ else()
     else()
         message(WARNING "OpenSSL not found — continuing without explicit link")
     endif()
-
 endif()

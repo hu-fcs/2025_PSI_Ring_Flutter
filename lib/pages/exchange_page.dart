@@ -3,17 +3,23 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:flutter/services.dart';
+
 import '../ble/ble_exchange_controller.dart';
+import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
-import '../db/database_helper.dart';
 import 'debug_page.dart';
 
+/// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
+///
+/// - BLE: 周辺端末へ仮名（公開鍵断片）を広告し，同時に周囲の仮名を収集する。
+/// - gRPC: PSI とリング署名によって顔見知り判定を行い，結果を表示する。
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
 
@@ -321,9 +327,7 @@ class _ExchangePageState extends State<ExchangePage> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                stats.first == null
-                                    ? 'N/A'
-                                    : _fmtTime(stats.first!),
+                                stats.first == null ? 'N/A' : _fmtTime(stats.first!),
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
@@ -335,12 +339,8 @@ class _ExchangePageState extends State<ExchangePage> {
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
-                          onPressed:
-                          (stats.firstLat != null && stats.firstLon != null)
-                              ? () => _openExternalMap(
-                            stats.firstLat!,
-                            stats.firstLon!,
-                          )
+                          onPressed: (stats.firstLat != null && stats.firstLon != null)
+                              ? () => _openExternalMap(stats.firstLat!, stats.firstLon!)
                               : null,
                         ),
                       ],
@@ -361,9 +361,7 @@ class _ExchangePageState extends State<ExchangePage> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                stats.last == null
-                                    ? 'N/A'
-                                    : _fmtTime(stats.last!),
+                                stats.last == null ? 'N/A' : _fmtTime(stats.last!),
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
@@ -375,12 +373,8 @@ class _ExchangePageState extends State<ExchangePage> {
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
-                          onPressed:
-                          (stats.lastLat != null && stats.lastLon != null)
-                              ? () => _openExternalMap(
-                            stats.lastLat!,
-                            stats.lastLon!,
-                          )
+                          onPressed: (stats.lastLat != null && stats.lastLon != null)
+                              ? () => _openExternalMap(stats.lastLat!, stats.lastLon!)
                               : null,
                         ),
                       ],
@@ -409,10 +403,7 @@ class _ExchangePageState extends State<ExchangePage> {
                     color: Colors.grey.shade600,
                   ),
                   children: [
-                    _debugRow(
-                      '判定側',
-                      isServerSide ? 'サーバ側' : 'クライアント側',
-                    ),
+                    _debugRow('判定側', isServerSide ? 'サーバ側' : 'クライアント側'),
                     _debugRowWidget(
                       _mathLabel(main: 'S', sub: 'A', suffix: 'クライアント鍵数'),
                       '${psi.saKeyCount} 件',
@@ -429,30 +420,15 @@ class _ExchangePageState extends State<ExchangePage> {
                       _mathLabel(main: 'R', suffix: 'リングサイズ'),
                       '${psi.ringSize} 件',
                     ),
-                    _debugRow(
-                      '自身の鍵との一致',
-                      familiar ? 'あり' : 'なし',
-                    ),
+                    _debugRow('自身の鍵との一致', familiar ? 'あり' : 'なし'),
                     if (!isServerSide) ...[
                       const SizedBox(height: 6),
                       Divider(color: Colors.grey.shade300),
                       const SizedBox(height: 6),
-                      _debugRow(
-                        'SQLite鍵読み込み時間',
-                        '${psi.dbLoadTimeMs} ms',
-                      ),
-                      _debugRow(
-                        'PSI時間',
-                        '${psi.psiTimeMs} ms',
-                      ),
-                      _debugRow(
-                        'リング署名・検証時間',
-                        '${psi.ringSigTimeMs} ms',
-                      ),
-                      _debugRow(
-                        '総時間',
-                        '${psi.totalTimeMs} ms',
-                      ),
+                      _debugRow('SQLite鍵読み込み時間', '${psi.dbLoadTimeMs} ms'),
+                      _debugRow('PSI時間', '${psi.psiTimeMs} ms'),
+                      _debugRow('リング署名・検証時間', '${psi.ringSigTimeMs} ms'),
+                      _debugRow('総時間', '${psi.totalTimeMs} ms'),
                     ],
                   ],
                 ),
@@ -479,10 +455,7 @@ class _ExchangePageState extends State<ExchangePage> {
     final lon = lonE6 / 1e6;
 
     try {
-      await _mapChannel.invokeMethod('openMap', {
-        'lat': lat,
-        'lon': lon,
-      });
+      await _mapChannel.invokeMethod('openMap', {'lat': lat, 'lon': lon});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -521,10 +494,7 @@ class _ExchangePageState extends State<ExchangePage> {
             baseline: TextBaseline.alphabetic,
             child: Transform.translate(
               offset: const Offset(0, 2),
-              child: Text(
-                subText,
-                style: const TextStyle(fontSize: 10.5),
-              ),
+              child: Text(subText, style: const TextStyle(fontSize: 10.5)),
             ),
           ),
           const TextSpan(text: '| '),
@@ -540,10 +510,7 @@ class _ExchangePageState extends State<ExchangePage> {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          DefaultTextStyle.merge(
-            style: s,
-            child: label,
-          ),
+          DefaultTextStyle.merge(style: s, child: label),
           const Spacer(),
           Text(value, style: s),
         ],
@@ -601,17 +568,9 @@ class _ExchangePageState extends State<ExchangePage> {
   Widget _statusRow() {
     return Row(
       children: [
-        _statusBadge(
-          Icons.bluetooth,
-          '近接記録(BLE)',
-          _bleRunning,
-        ),
+        _statusBadge(Icons.bluetooth, '近接記録(BLE)', _bleRunning),
         const SizedBox(width: 8),
-        _statusBadge(
-          Icons.cloud_sharp,
-          '顔見知り確認(gRPC)',
-          _grpcRunning,
-        ),
+        _statusBadge(Icons.cloud_sharp, '顔見知り確認(gRPC)', _grpcRunning),
       ],
     );
   }
@@ -634,10 +593,7 @@ class _ExchangePageState extends State<ExchangePage> {
                   children: [
                     const Icon(Icons.bluetooth, size: 22),
                     const SizedBox(width: 8),
-                    Text(
-                      '近くの人を記録',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    Text('近くの人を記録', style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -762,10 +718,7 @@ class _ExchangePageState extends State<ExchangePage> {
             children: [
               Icon(icon, size: 22),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
               const Spacer(),
               trailing,
             ],

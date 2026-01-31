@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/grpc.pbgrpc.dart';
@@ -13,9 +14,7 @@ import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
 import 'grpc_common.dart';
 
-/// ===============================================================
-///                     ECC-PSI サーバ
-/// ===============================================================
+/// gRPC サーバ実装（PSI + リング署名）。
 class GrpcServiceImpl extends GrpcServiceBase {
   final NativeKeyService _keyService = NativeKeyService();
   final KeyManagementService _kms = KeyManagementService();
@@ -31,15 +30,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
   List<Uint8List> _serverAbQ = [];
   List<Uint8List> _lastIntersection = [];
 
-  // ★ 追加：直近セッションの集合サイズ（論文の |S_A|, |S_B| 用）
+  // 直近セッションの集合サイズ（|S_A|, |S_B|）
   int _lastSaKeyCount = 0; // client keys
-  int get _sbKeyCount => _myKeys.length; // server keys（常に現在の _myKeys）
+  int get _sbKeyCount => _myKeys.length; // server keys
 
   Uint8List? _lastChallengeC;
   Uint8List? _lastChallengeS;
   Future<Uint8List>? _serverSignatureFuture;
 
-  // イベント
   final _psiEventController = StreamController<PsiResult>.broadcast();
   Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
 
@@ -49,21 +47,23 @@ class GrpcServiceImpl extends GrpcServiceBase {
   GrpcServiceImpl() {
     _ready = _initialize();
 
-    // BLE鍵更新 → 再ロード
+    // 鍵更新を検知したら PSI 用の鍵セットを再構築する
     _kms.onKeyUpdated.listen((_) async {
-      print('[SERVER] 🔔 BLE鍵更新 → PSI鍵セット再構築');
+      if (kDebugMode) {
+        debugPrint('[SERVER] keys updated; reload PSI set');
+      }
       await _reloadKeys();
     });
   }
 
-  // ===============================================================
-  // 初期化
-  // ===============================================================
+  // ----- Init -----
+
   Future<void> _initialize() async {
-    print('[SERVER] === サーバ初期化開始 ===');
+    if (kDebugMode) {
+      debugPrint('[SERVER] init');
+    }
     _mySecret = _keyService.generateRandomSecret();
     await _reloadKeys();
-    print('[SERVER] === サーバ初期化完了 ===');
   }
 
   Future<void> _reloadKeys() async {
@@ -75,22 +75,25 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     _myEncKeys = _keyService.encryptSet(_myKeys, _mySecret);
 
-    print('[SERVER] 🔑 generated=${generated.length}, collected=${collected.length}');
+    if (kDebugMode) {
+      debugPrint(
+        '[SERVER] keys loaded: generated=${generated.length}, collected=${collected.length}',
+      );
+    }
   }
 
   Future<void> _ensureReady() async => _ready;
 
-  // ===============================================================
-  // Phase1: ExchangeKeys
-  // ===============================================================
+  // ----- PSI: exchangeKeys -----
+
   @override
   Future<KeyExchangeResp> exchangeKeys(
-      ServiceCall call, KeyExchangeReq request) async {
+      ServiceCall call,
+      KeyExchangeReq request,
+      ) async {
     await _ensureReady();
 
-    print('[SERVER] === Phase1: ExchangeKeys ===');
-
-    // クライアント投入鍵数（|S_A|）を保持
+    // クライアント側集合サイズ（|S_A|）
     _lastSaKeyCount = request.encKeys.length;
 
     final bQ = request.encKeys.map(Uint8List.fromList).toList();
@@ -101,14 +104,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ..clientReencKeys.addAll(_serverAbQ);
   }
 
-  // ===============================================================
-  // Phase2: FinalizePsi
-  // ===============================================================
-  @override
-  Future<PsiDone> finalizePsi(ServiceCall call, ClientFinalReq req) async {
-    await _ensureReady();
+  // ----- PSI: finalizePsi -----
 
-    print('[SERVER] === Phase2: FinalizePsi ===');
+  @override
+  Future<PsiDone> finalizePsi(
+      ServiceCall call,
+      ClientFinalReq req,
+      ) async {
+    await _ensureReady();
 
     final clientAbP =
     req.clientReencServerKeys.map(Uint8List.fromList).toList();
@@ -118,6 +121,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     final commonHex = intersection.map(GrpcCommon.bytesToHex).toList();
 
+    // 共通集合に生成鍵が含まれるかで判定する
     final familiar =
         commonHex.toSet().intersection(_myGeneratedKeysHex.toSet()).isNotEmpty;
 
@@ -128,7 +132,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
         sbKeyCount: _sbKeyCount,
         commonKeys: commonHex,
         ringSize: 0,
-        // サーバ側は UI 通知用なので計測値は 0 埋め（必要なら後で拡張）
+        // サーバ側は UI 通知用のため計測値は保持しない
         dbLoadTimeMs: 0,
         psiTimeMs: 0,
         ringSigTimeMs: 0,
@@ -142,12 +146,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
     return PsiDone();
   }
 
-  // ===============================================================
-  // Phase3A: ExchangeChallenges
-  // ===============================================================
+  // ----- Ring signature: exchangeChallenges -----
+
   @override
   Future<ServerChallenge> exchangeChallenges(
-      ServiceCall call, ClientChallenge req) async {
+      ServiceCall call,
+      ClientChallenge req,
+      ) async {
     await _ensureReady();
 
     if (_lastIntersection.isEmpty) {
@@ -162,13 +167,15 @@ class GrpcServiceImpl extends GrpcServiceBase {
     return ServerChallenge()..challengeS = _lastChallengeS!;
   }
 
-  // ===============================================================
-  // サーバ署名生成
-  // ===============================================================
-  Future<Uint8List> _computeServerSignatureAsync() async {
-    print('[SERVER] ✍️ サーバ署名生成');
+  // ----- Ring signature (server) -----
 
-    final signer = await _kms.selectSignerKeyFromIntersection(_lastIntersection);
+  Future<Uint8List> _computeServerSignatureAsync() async {
+    if (kDebugMode) {
+      debugPrint('[SERVER] create ring signature');
+    }
+
+    final signer =
+    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) {
       throw GrpcError.failedPrecondition('No signer key');
     }
@@ -178,6 +185,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       throw GrpcError.failedPrecondition('No signer timestamp');
     }
 
+    // 同一時刻スロット内の鍵に限定してリングを構成する
     final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
     if (ring.length < 2) {
       throw GrpcError.failedPrecondition('Ring too small');
@@ -221,18 +229,20 @@ class GrpcServiceImpl extends GrpcServiceBase {
       throw GrpcError.internal('Server signature failed');
     }
 
-    final sig = Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
+    final sig =
+    Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
     calloc.free(sigPtr);
 
     return sig;
   }
 
-  // ===============================================================
-  // Phase3B: ExchangeRingSignatures
-  // ===============================================================
+  // ----- Ring signature: exchangeRingSignatures -----
+
   @override
   Future<RingSignatureResp> exchangeRingSignatures(
-      ServiceCall call, RingSignatureReq request) async {
+      ServiceCall call,
+      RingSignatureReq request,
+      ) async {
     await _ensureReady();
 
     final sigFromClient = Uint8List.fromList(request.signatureForServer);
@@ -243,11 +253,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
     return RingSignatureResp()..signatureForClient = sigForClient;
   }
 
-  // ===============================================================
-  // クライアント署名検証
-  // ===============================================================
+  // ----- Ring signature (client verify) -----
+
   Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
-    final signer = await _kms.selectSignerKeyFromIntersection(_lastIntersection);
+    final signer =
+    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
     if (signer == null) return;
 
     final signerTime = await _kms.getTimestampForKey(signer.publicKey);
@@ -308,14 +318,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _serverSignatureFuture = null;
   }
 
-  // ===============================================================
-  // PSI 共通集合
-  // ===============================================================
+  // ----- Intersection -----
+
   List<Uint8List> _computeIntersection(List<Uint8List> clientAbP) {
     final abQSet = _serverAbQ.map(GrpcCommon.bytesToHex).toSet();
     final result = <Uint8List>[];
 
-    final n = clientAbP.length < _myKeys.length ? clientAbP.length : _myKeys.length;
+    final n =
+    clientAbP.length < _myKeys.length ? clientAbP.length : _myKeys.length;
 
     for (int i = 0; i < n; i++) {
       if (abQSet.contains(GrpcCommon.bytesToHex(clientAbP[i]))) {
@@ -326,9 +336,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
   }
 }
 
-/// ===============================================================
-/// gRPC サーバ管理
-/// ===============================================================
+/// gRPC サーバ管理。
 class PsiGrpcServer {
   Server? _server;
   int? _port;
@@ -345,9 +353,6 @@ class PsiGrpcServer {
     service = GrpcServiceImpl();
     await service._ready;
 
-    // ★ enableTls に応じて security を構築（OFFなら null）
-    final security = _grpcCommon.buildServerSecurity();
-
     final s = Server.create(
       services: [service],
       codecRegistry: _grpcCommon.codecRegistry,
@@ -356,13 +361,15 @@ class PsiGrpcServer {
     await s.serve(
       address: InternetAddress.anyIPv4,
       port: port,
-      security: security,
+      security: _grpcCommon.buildServerSecurity(),
     );
 
     _server = s;
     _port = s.port;
 
-    print('[SERVER] 🚀 gRPC サーバ起動 : $_port');
+    if (kDebugMode) {
+      debugPrint('[SERVER] started: $_port');
+    }
     return _port!;
   }
 

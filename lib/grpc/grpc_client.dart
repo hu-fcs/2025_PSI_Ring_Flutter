@@ -1,9 +1,9 @@
 // lib/grpc/grpc_client.dart
 
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/grpc.pbgrpc.dart';
@@ -11,9 +11,7 @@ import '../ffi/native_key_service.dart';
 import '../key_management_service.dart';
 import 'grpc_common.dart';
 
-/// ===============================================================
-///                    ECC-PSI クライアント
-/// ===============================================================
+/// gRPC クライアント（PSI + リング署名）。
 class GrpcClient {
   ClientChannel? _channel;
   GrpcServiceClient? _stub;
@@ -30,20 +28,21 @@ class GrpcClient {
   }
 
   Future<void> _initialize() async {
-    print('[CLIENT] === クライアント初期化開始 ===');
-    print('[CLIENT] === クライアント初期化完了 ===');
+    if (kDebugMode) {
+      debugPrint('[CLIENT] init');
+    }
   }
 
-  Future<void> _ensureReady() async => await _ready;
+  Future<void> _ensureReady() async => _ready;
 
-  // ===============================================================
-  // gRPC 接続
-  // ===============================================================
+  // ----- Connection -----
+
   Future<void> connect(String host, int port) async {
     await _ensureReady();
 
-    print('\n[CLIENT] === gRPC 接続開始 ===');
-    print('[CLIENT] 接続先: $host:$port');
+    if (kDebugMode) {
+      debugPrint('[CLIENT] connect: $host:$port');
+    }
 
     try {
       await disconnect();
@@ -57,10 +56,15 @@ class GrpcClient {
       );
 
       _stub = GrpcServiceClient(_channel!);
-      print('[CLIENT] ✅ サーバへの接続成功');
+
+      if (kDebugMode) {
+        debugPrint('[CLIENT] connected');
+      }
     } catch (e, st) {
-      print('[CLIENT] ❌ 接続失敗: $e');
-      print(st);
+      if (kDebugMode) {
+        debugPrint('[CLIENT] connect failed: $e');
+        debugPrint('$st');
+      }
       rethrow;
     }
   }
@@ -73,21 +77,16 @@ class GrpcClient {
     _stub = null;
   }
 
-  // ===============================================================
-  //               PSI + リング署名 フロー（全体）
-  // ===============================================================
+  // ----- PSI + Ring signature -----
+
   Future<PsiResult> executePsi() async {
     await _ensureReady();
     final stub = _stub;
-    if (stub == null) throw StateError('[CLIENT] ❌ サーバ未接続');
+    if (stub == null) throw StateError('[CLIENT] not connected');
 
     final totalSw = Stopwatch()..start();
 
-    print('\n[CLIENT] === PSI フロー開始 ===');
-
-    // ------------------------------------------------------------
-    // Phase1: 鍵読み込み（SQLite）
-    // ------------------------------------------------------------
+    // 1) 鍵読み込み（生成鍵 + 収集鍵）
     final dbSw = Stopwatch()..start();
     final generated = await _kms.getAllGeneratedPublicKeys();
     final collected = await _kms.getAllCollectedPublicKeys();
@@ -113,16 +112,14 @@ class GrpcClient {
       );
     }
 
-    // ------------------------------------------------------------
-    // Phase2-5: PSI 計測
-    // ------------------------------------------------------------
+    // 2) PSI
     final psiSw = Stopwatch()..start();
 
-    // Phase2: bQ 計算
+    // bQ 計算
     final mySecret = _keyService.generateRandomSecret();
     final myEncKeys = _keyService.encryptSet(myKeys, mySecret);
 
-    // Phase3: ExchangeKeys
+    // サーバと暗号化集合を交換
     final resp = await stub.exchangeKeys(
       KeyExchangeReq()..encKeys.addAll(myEncKeys),
     );
@@ -132,13 +129,13 @@ class GrpcClient {
     final abQ =
     resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
 
-    // サーバ側集合サイズ（|S_B|）※サーバが投入した鍵数と一致
+    // サーバ側集合サイズ（|S_B|）
     final sbKeyCount = serverEncKeys.length;
 
-    // Phase4: abP 計算
+    // abP 計算
     final abP = _keyService.encryptSet(serverEncKeys, mySecret);
 
-    // Phase5: PSI 共通集合
+    // 共通集合（クライアント側復元）
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
 
     await stub.finalizePsi(
@@ -148,16 +145,12 @@ class GrpcClient {
     psiSw.stop();
     final psiTimeMs = psiSw.elapsedMilliseconds;
 
-    // ------------------------------------------------------------
-    // Phase6: PSI 顔見知り判定
-    // ------------------------------------------------------------
+    // 3) PSI による顔見知り判定（共通集合に自端末の生成鍵が含まれるか）
     final commonHex = clientCommon.map(GrpcCommon.bytesToHex).toList();
     final myGenHex = generated.map(GrpcCommon.bytesToHex).toSet();
     final familiarByPsi = commonHex.toSet().intersection(myGenHex).isNotEmpty;
 
-    // ------------------------------------------------------------
-    // Phase7: リング署名（計測）
-    // ------------------------------------------------------------
+    // 4) リング署名（必要時のみ）
     bool ringOk = false;
     int ringSize = 0;
     int ringSigTimeMs = 0;
@@ -191,10 +184,8 @@ class GrpcClient {
     );
   }
 
+  // ----- Ring signature phase -----
 
-  // ===============================================================
-  // リング署名フェーズ（結果 + リングサイズ）
-  // ===============================================================
   Future<(bool, int)> _runRingSignaturePhase({
     required GrpcServiceClient stub,
     required List<Uint8List> intersection,
@@ -202,10 +193,10 @@ class GrpcClient {
     final signerKey = await _kms.selectSignerKeyFromIntersection(intersection);
     if (signerKey == null) return (false, 0);
 
-    final generateTimeMs =
-    await _kms.getTimestampForKey(signerKey.publicKey);
+    final generateTimeMs = await _kms.getTimestampForKey(signerKey.publicKey);
     if (generateTimeMs == null) return (false, 0);
 
+    // 同一時刻スロット内の鍵に限定してリングを構成する
     final filteredRing =
     await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
 
@@ -237,11 +228,13 @@ class GrpcClient {
     return (ok, filteredRing.length);
   }
 
-  // ===============================================================
-  // 署名生成
-  // ===============================================================
+  // ----- Signature -----
+
   Uint8List? _createRingSignature(
-      String msgHex, Uint8List privKey, List<Uint8List> ring) {
+      String msgHex,
+      Uint8List privKey,
+      List<Uint8List> ring,
+      ) {
     final msgPtr = msgHex.toNativeUtf8().cast<Char>();
     final privPtr = calloc<Uint8>(privKey.length)
       ..asTypedList(privKey.length).setAll(0, privKey);
@@ -283,11 +276,11 @@ class GrpcClient {
     return result;
   }
 
-  // ===============================================================
-  // 署名検証
-  // ===============================================================
   bool _verifyRingSignature(
-      String msgHex, Uint8List sig, List<Uint8List> ring) {
+      String msgHex,
+      Uint8List sig,
+      List<Uint8List> ring,
+      ) {
     final msgPtr = msgHex.toNativeUtf8().cast<Char>();
 
     const pubLen = 33;

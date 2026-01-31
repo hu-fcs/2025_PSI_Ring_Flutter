@@ -1,10 +1,12 @@
+// lib/ble/ble_exchange_controller.dart
 
 import 'ble_advertiser.dart';
 import 'ble_scanner.dart';
 
-/// exchange_page のトグルから呼ぶ制御層：
-/// - ON の間だけ広告＋スキャンを同時に実行
-/// - 一時DBは使わず、スキャナ内のメモリ管理に任せる
+/// BLE による仮名の広告・収集をまとめて制御する。
+///
+/// 有効化中は広告(Advertiser)とスキャン(Scanner)を同時に動作させる。
+/// 収集結果の一時保存は行わず，スキャナ側のメモリ管理に委ねる。
 class BleExchangeController {
   final _advertiser = BleAdvertiser();
   final _scanner = BleScanner();

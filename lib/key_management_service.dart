@@ -13,83 +13,68 @@ import 'package:sqflite/sqflite.dart';
 import 'db/database_helper.dart';
 import 'ffi/native_key_service.dart';
 
+/// マスターキー管理と，時刻スロットに基づく鍵生成・保存を提供する。
+///
+/// - マスターキーは Secure Storage に保存する。
+/// - 各時刻スロットごとに一時鍵対を導出し，公開鍵を仮名として用いる。
+/// - 生成鍵（generated_keys）と収集鍵（collected_keys）を SQLite に保存する。
 class KeyManagementService {
-  // ================================================================
-  //  ★★★★★ Singleton 化（これが最重要）★★★★★
-  // ================================================================
+  // Singleton
   static final KeyManagementService _instance = KeyManagementService._internal();
   factory KeyManagementService() => _instance;
   KeyManagementService._internal();
-  RingSignatureRange ringRange = RingSignatureRange.slot;
 
-  // ================================================================
+  /// リング署名の対象期間（同一スロット/同日/全期間）
+  RingSignatureRange ringRange = RingSignatureRange.slot;
 
   static const _masterKeyAlias = 'app_master_key';
   final _secureStorage = const FlutterSecureStorage();
   final _nativeKeyService = NativeKeyService();
 
-  /// 🔥 スロット幅（ms）。DebugPage などから変更可能。
-  /// 例：10分 → 10*60*1000、1分 → 60000、1秒 → 1000
+  /// 時刻スロット幅（ミリ秒）
+  ///
+  /// 既定は 10 分。DebugPage 等から変更できる。
   int slotMs = 10 * 60 * 1000;
 
-  /// 🔔 BLE / UI / PSI サーバへ通知するためのストリーム
+  /// 鍵の追加・更新を通知するストリーム（BLE / UI / gRPC で利用）
   final StreamController<void> _keyUpdatedController =
   StreamController<void>.broadcast();
 
   Stream<void> get onKeyUpdated => _keyUpdatedController.stream;
 
   void notifyKeyUpdated() {
-    print("🔔 KeyManagementService: notifyKeyUpdated()");
+    if (kDebugMode) {
+      debugPrint('KMS: notifyKeyUpdated()');
+    }
     _keyUpdatedController.add(null);
   }
 
-  // ================================================================
-  // BLE向けユーティリティ（依存を外に漏らさないためKMS内に保持）
-  // ================================================================
+  // ----- BLE 向けユーティリティ -----
+
   bool _isValidCompressedPubkey33(Uint8List key33) {
     if (key33.length != 33) return false;
     final p = key33[0];
     return (p == 0x02 || p == 0x03);
   }
 
-  // ================================================================
-  // 位置情報（非同期で後付け） ※ generated_keys のみ
-  // ================================================================
+  // ----- 位置情報の後付け（generated_keys のみ） -----
+
   void _attachLocationAsync({required Uint8List pubkey33}) {
-    // 非同期で実行（鍵生成・UIは一切ブロックしない）
+    // 位置情報の取得は非同期で行い，鍵生成や UI をブロックしない
     () async {
       try {
-        // ============================
-        // ① Location Service 確認
-        // ============================
         final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-        if (!serviceEnabled) {
-          if (kDebugMode) {
-            print('📍 Location service is disabled');
-          }
-          return;
-        }
+        if (!serviceEnabled) return;
 
-        // ============================
-        // ② Permission 確認・要求
-        // ============================
         LocationPermission permission = await Geolocator.checkPermission();
-
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
         }
-
         if (permission == LocationPermission.denied ||
             permission == LocationPermission.deniedForever) {
-          if (kDebugMode) {
-            print('📍 Location permission denied: $permission');
-          }
           return;
         }
 
-        // ============================
-        // ③ GPS を「必ず起動」して取得
-        // ============================
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
@@ -100,37 +85,26 @@ class KeyManagementService {
         final latE6 = (pos.latitude * 1e6).round();
         final lonE6 = (pos.longitude * 1e6).round();
 
-        // ============================
-        // ④ DB 更新（generated_keys のみ）
-        // ============================
         final db = await DatabaseHelper.getDatabase();
         await db.update(
           'generated_keys',
-          {
-            'lat': latE6,
-            'lon': lonE6,
-          },
+          {'lat': latE6, 'lon': lonE6},
           where: 'pubkey_ecd = ?',
           whereArgs: [pubkey33],
         );
 
-        if (kDebugMode) {
-          print('📍 generated_keys: location updated ($latE6, $lonE6)');
-        }
-
         notifyKeyUpdated();
       } catch (e, st) {
         if (kDebugMode) {
-          print('📍 location attach failed: $e');
-          print(st);
+          debugPrint('KMS: attach location failed: $e');
+          debugPrint('$st');
         }
       }
     }();
   }
 
-  // ================================================================
-  // 初期化（マスターキー生成）
-  // ================================================================
+  // ----- 初期化（マスターキー） -----
+
   Future<void> init() async {
     await _ensureMasterKey();
   }
@@ -138,46 +112,47 @@ class KeyManagementService {
   Future<Uint8List?> _ensureMasterKey() async {
     final stored = await _secureStorage.read(key: _masterKeyAlias);
     if (stored != null) {
-      print("🔑 既存のマスターキーを読み込みました。");
+      if (kDebugMode) {
+        debugPrint('KMS: master key loaded');
+      }
       return base64Decode(stored);
     }
 
-    print("⚙️ 新しいマスターキーを生成（FFI）...");
     final mk = _nativeKeyService.generateMasterKey();
-    if (mk != null) {
-      await _secureStorage.write(
-        key: _masterKeyAlias,
-        value: base64Encode(mk),
-      );
-      print("🔑 マスターキー新規生成: "
-          "${mk.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}");
-      return mk;
-    }
-
-    print("🚨 マスターキーの生成に失敗しました。");
-    return null;
-  }
-
-  // ================================================================
-  // Advertise（公開鍵生成）: 既存
-  // ================================================================
-  Future<Uint8List?> getPublicKeyForAdvertise() async {
-    final masterKey = await _ensureMasterKey();
-    if (masterKey == null) {
-      print("🚨 マスターキーが無いためキー生成不可");
+    if (mk == null) {
+      if (kDebugMode) {
+        debugPrint('KMS: failed to generate master key');
+      }
       return null;
     }
 
+    await _secureStorage.write(
+      key: _masterKeyAlias,
+      value: base64Encode(mk),
+    );
+
+    if (kDebugMode) {
+      debugPrint('KMS: master key generated');
+    }
+    return mk;
+  }
+
+  // ----- Advertise（仮名公開鍵の取得） -----
+
+  Future<Uint8List?> getPublicKeyForAdvertise() async {
+    final masterKey = await _ensureMasterKey();
+    if (masterKey == null) return null;
+
     final now = DateTime.now().millisecondsSinceEpoch;
 
-    // ★ slotMs を一元的に使用
+    // 時刻スロットの開始時刻と失効時刻
     final slotStartTime = (now ~/ slotMs) * slotMs;
     final expireTime = slotStartTime + slotMs;
 
     final db = await DatabaseHelper.getDatabase();
 
-    // ★ すでにそのスロットの鍵があるか？
-    // 位置情報も読み、未設定なら非同期で付与を試みる
+    // 同一スロットの鍵が存在すれば再利用する
+    // 位置情報が未設定の場合のみ，後付けを試みる
     final existing = await db.query(
       'generated_keys',
       columns: const ['pubkey_ecd', 'lat', 'lon'],
@@ -190,23 +165,17 @@ class KeyManagementService {
       final pub = existing.first['pubkey_ecd'] as Uint8List;
       final lat = existing.first['lat'] as int?;
       final lon = existing.first['lon'] as int?;
-
-      // 未設定なら後付けを試みる（ブロックしない）
       if (lat == null || lon == null) {
         _attachLocationAsync(pubkey33: pub);
       }
-
       return pub;
     }
 
-    // ★ 新規鍵生成も slotMs を利用（ここは瞬時）
+    // スロットに対応する鍵対を導出する
     final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
-    if (keyPair == null) {
-      print("🚨 生成失敗");
-      return null;
-    }
+    if (keyPair == null) return null;
 
-    // 位置情報は “後付け” なので、まずは NULL でINSERTして即返す
+    // 位置情報は後付けのため，まず NULL で保存する
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
@@ -216,15 +185,12 @@ class KeyManagementService {
       'expire_time': expireTime,
     });
 
-    // 🔥 GPS取得→取得できたらUPDATE（ブロックしない）
     _attachLocationAsync(pubkey33: keyPair.publicKey);
-
     return keyPair.publicKey;
   }
 
-  // ================================================================
-  // ★ BLE Advertise用（旧 KeyAdvertiseRepository を吸収）
-  // ================================================================
+  // ----- BLE 用（圧縮公開鍵の検証つき） -----
+
   Future<Uint8List> getPublicKeyForBleAdvertise() async {
     final Uint8List? pubKey33 = await getPublicKeyForAdvertise();
     if (pubKey33 == null) {
@@ -238,9 +204,8 @@ class KeyManagementService {
     return pubKey33;
   }
 
-  // ================================================================
-  // ★ collected_keys: 存在チェック（BleScanner 用）
-  // ================================================================
+  // ----- collected_keys: 存在確認（BleScanner 用） -----
+
   Future<bool> hasCollectedKey(Uint8List pubkey33) async {
     if (!_isValidCompressedPubkey33(pubkey33)) return false;
 
@@ -255,11 +220,8 @@ class KeyManagementService {
     return rows.isNotEmpty;
   }
 
-  // ================================================================
-  // ★ collected_keys: なければ insert（BleScanner 用）
-  // - collected_keys には lat/lon を入れない（スキーマ準拠）
-  // - inserted=true のときだけ notifyKeyUpdated() する
-  // ================================================================
+  // ----- collected_keys: 追加（BleScanner 用） -----
+
   Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int receivedAtMs,
@@ -272,7 +234,7 @@ class KeyManagementService {
 
     final values = <String, Object?>{
       'pubkey_ecd': pubkey33,
-      'receive_time': receivedAtMs, // ★ ms で統一
+      'receive_time': receivedAtMs,
     };
 
     try {
@@ -289,17 +251,14 @@ class KeyManagementService {
       return inserted;
     } catch (e, st) {
       if (kDebugMode) {
-        print('KMS: ❌ insertCollectedKeyIfAbsent failed: $e');
-        print(st);
+        debugPrint('KMS: insertCollectedKeyIfAbsent failed: $e');
+        debugPrint('$st');
       }
       return false;
     }
   }
 
-  // ================================================================
-  // ★ BLEで収集した鍵の保存（旧 EcdKeysDao を吸収）
-  // - 互換のため残す（内部は insertCollectedKeyIfAbsent に統一）
-  // ================================================================
+  /// 互換のために残す。内部は insertCollectedKeyIfAbsent を呼ぶ。
   Future<void> insertCollectedBlePublicKey({
     required Uint8List pubkey33,
     required int receivedAtMs,
@@ -310,9 +269,8 @@ class KeyManagementService {
     );
   }
 
-  // ================================================================
-  // 鍵取得系
-  // ================================================================
+  // ----- 鍵取得 -----
+
   Future<KeyPair?> getLatestKeyPair() async {
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
@@ -327,7 +285,6 @@ class KeyManagementService {
       if (sec != null && pub != null) return KeyPair(sec, pub);
     }
 
-    // 無ければ生成
     final pub = await getPublicKeyForAdvertise();
     if (pub != null) return getLatestKeyPair();
     return null;
@@ -345,13 +302,11 @@ class KeyManagementService {
     return rows.map((row) => row['pubkey_ecd'] as Uint8List).toList();
   }
 
-  // ================================================================
-  // 時刻取得
-  // ================================================================
+  // ----- 鍵の時刻取得 -----
+
   Future<int?> getTimestampForKey(Uint8List pub) async {
     final db = await DatabaseHelper.getDatabase();
 
-    // 自分の鍵
     final g = await db.query(
       'generated_keys',
       columns: ['generate_time'],
@@ -361,7 +316,6 @@ class KeyManagementService {
     );
     if (g.isNotEmpty) return g.first['generate_time'] as int;
 
-    // 収集鍵
     final c = await db.query(
       'collected_keys',
       columns: ['receive_time'],
@@ -374,11 +328,11 @@ class KeyManagementService {
     return null;
   }
 
-  // ================================================================
-  // ★ 署名者鍵選択（intersection 内・expire_time 最大）
-  // ================================================================
+  // ----- 署名者鍵選択（交差集合内で最も新しいもの） -----
+
   Future<KeyPair?> selectSignerKeyFromIntersection(
-      List<Uint8List> intersection) async {
+      List<Uint8List> intersection,
+      ) async {
     if (intersection.isEmpty) return null;
 
     final db = await DatabaseHelper.getDatabase();
@@ -416,9 +370,8 @@ class KeyManagementService {
     return KeyPair(bestSec, bestPub);
   }
 
-  // ================================================================
-  // ★ 同時間帯でフィルタリング
-  // ================================================================
+  // ----- リング対象のフィルタリング -----
+
   Future<List<Uint8List>> filterKeysBySameSlot(
       List<Uint8List> intersection,
       int signerGenerateTimeMs,
@@ -427,10 +380,8 @@ class KeyManagementService {
 
     final range = ringRange;
 
-    // 基準値を先に計算
     final targetSlot = signerGenerateTimeMs ~/ slotMs;
 
-    // 1日の開始（ローカル時間）
     final signerDate = DateTime.fromMillisecondsSinceEpoch(signerGenerateTimeMs);
     final dayStart = DateTime(
       signerDate.year,
@@ -446,15 +397,11 @@ class KeyManagementService {
       switch (range) {
         case RingSignatureRange.slot:
           final slot = ts ~/ slotMs;
-          if (slot == targetSlot) {
-            result.add(pub);
-          }
+          if (slot == targetSlot) result.add(pub);
           break;
 
         case RingSignatureRange.day:
-          if (ts >= dayStart && ts < dayEnd) {
-            result.add(pub);
-          }
+          if (ts >= dayStart && ts < dayEnd) result.add(pub);
           break;
 
         case RingSignatureRange.all:
@@ -466,16 +413,13 @@ class KeyManagementService {
     return result;
   }
 
-  // ================================================================
-  // DebugPage 用
-  // ================================================================
+  // ----- DebugPage 用 -----
+
   KeyPair? generateDummyKeyPair() {
     final rnd = Random.secure();
     final dummyMasterkey =
     Uint8List.fromList(List<int>.generate(32, (_) => rnd.nextInt(256)));
     final ts = DateTime.now().millisecondsSinceEpoch;
-
-    // ★ ダミー鍵も現在の slotMs に合わせる
     return _nativeKeyService.deriveNewKeyPair(dummyMasterkey, ts, slotMs);
   }
 
@@ -492,14 +436,16 @@ class KeyManagementService {
   }
 
   Future<void> deleteMasterKey() async {
-    print("🗑 マスターキー削除");
+    if (kDebugMode) {
+      debugPrint('KMS: delete master key');
+    }
     return _secureStorage.delete(key: _masterKeyAlias);
   }
 }
 
-/// リング署名対象期間
+/// リング署名の対象期間
 enum RingSignatureRange {
-  slot, // 現在スロット
-  day, // 直近24時間
+  slot, // 同一時刻スロット
+  day, // 同日
   all, // 全期間
 }

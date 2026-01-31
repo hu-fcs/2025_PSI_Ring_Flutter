@@ -8,6 +8,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../grpc/grpc_client.dart';
 
+/// QR コードから接続先(IP/Port)を取得し，gRPC で PSI を実行する画面。
+///
+/// QR を読み取れない場合に備えて，手入力による接続も提供する。
 class ScannerPage extends StatefulWidget {
   const ScannerPage({super.key});
 
@@ -24,6 +27,7 @@ class _ScannerPageState extends State<ScannerPage> {
 
   final MobileScannerController _scannerController = MobileScannerController();
 
+  // start/stop の連続呼び出しを避けるための排他
   bool _cameraLock = false;
 
   final TextEditingController ipController = TextEditingController();
@@ -56,7 +60,6 @@ class _ScannerPageState extends State<ScannerPage> {
     super.dispose();
   }
 
-  // ==========================================================
   Future<void> _confirmAndConnect(String ip, int port) async {
     await safeStopCamera();
 
@@ -133,17 +136,15 @@ class _ScannerPageState extends State<ScannerPage> {
     }
   }
 
-  // ==========================================================
   @override
   Widget build(BuildContext context) {
     final topInset = MediaQuery.of(context).padding.top;
     final size = MediaQuery.of(context).size;
 
-    // ステータスバー文字を白に（背景は透明）
     final overlay = const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light, // Android
-      statusBarBrightness: Brightness.dark, // iOS（dark=文字白）
+      statusBarBrightness: Brightness.dark, // iOS
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -151,9 +152,8 @@ class _ScannerPageState extends State<ScannerPage> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
-          fit: StackFit.expand, // ★ これで「左上に縮む」事故を防ぐ
+          fit: StackFit.expand,
           children: [
-            // ===== カメラ（ステータスバー領域を避ける）=====
             if (!_isManualInputMode)
               Positioned.fill(
                 child: Padding(
@@ -161,18 +161,17 @@ class _ScannerPageState extends State<ScannerPage> {
                   child: MobileScanner(
                     controller: _scannerController,
                     onDetect: _onDetect,
-                    fit: BoxFit.cover, // ★ 画面に覆うように表示
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),
 
-            // ===== 上部（PayPay風：グラデ＋タイトル＋×）=====
             Positioned(
               left: 0,
               right: 0,
               top: 0,
               child: Container(
-                height: topInset + 96, // ステータスバー + ヘッダー
+                height: topInset + 96,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -206,7 +205,6 @@ class _ScannerPageState extends State<ScannerPage> {
               ),
             ),
 
-            // ===== QR枠（上寄り）=====
             if (!_isManualInputMode)
               Positioned(
                 top: size.height * 0.25,
@@ -221,8 +219,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 ),
               ),
 
-
-            // ===== 下部ガイド（半透明黒は前のまま）=====
             Positioned(
               left: 0,
               right: 0,
@@ -250,8 +246,6 @@ class _ScannerPageState extends State<ScannerPage> {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 12),
-
-                        // ★ 押せると分かるボタンに
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
@@ -283,15 +277,12 @@ class _ScannerPageState extends State<ScannerPage> {
               ),
             ),
 
-            // ===== 手入力ボトムシート（見た目改善版）=====
             if (_isManualInputMode) _manualBottomSheet(),
           ],
         ),
       ),
     );
   }
-
-  // ==========================================================
 
   Widget _manualBottomSheet() {
     return Align(
@@ -308,7 +299,6 @@ class _ScannerPageState extends State<ScannerPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ===== タイトル行 + ✕ =====
               Row(
                 children: [
                   Text(
@@ -327,9 +317,7 @@ class _ScannerPageState extends State<ScannerPage> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 12),
-
               TextField(
                 controller: ipController,
                 decoration: const InputDecoration(
@@ -339,7 +327,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 ),
               ),
               const SizedBox(height: 10),
-
               TextField(
                 controller: portController,
                 keyboardType: TextInputType.number,
@@ -350,7 +337,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 ),
               ),
               const SizedBox(height: 16),
-
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(

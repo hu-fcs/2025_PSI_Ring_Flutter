@@ -1,15 +1,17 @@
+// lib/db/database_helper.dart
+
 import 'dart:typed_data';
+
+import 'package:convert/convert.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:convert/convert.dart';
 
 class DatabaseHelper {
   static Database? _db;
 
-  // ----------------------------
-  // DB インスタンス取得
-  // ----------------------------
+  // ----- Database -----
+
   static Future<Database> getDatabase() async {
     if (_db != null) return _db!;
 
@@ -27,10 +29,10 @@ class DatabaseHelper {
     return _db!;
   }
 
-  // ----------------------------
-  // テーブル定義
-  // ----------------------------
+  // ----- Schema -----
+
   static Future<void> _createTables(Database db) async {
+    // 生成鍵（生成集合に相当）
     await db.execute('''
     CREATE TABLE generated_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +45,8 @@ class DatabaseHelper {
     )
   ''');
 
+    // 収集鍵（収集集合に相当）
+    // pubkey_ecd は重複を許さない
     await db.execute('''
     CREATE TABLE collected_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,20 +56,18 @@ class DatabaseHelper {
   ''');
   }
 
-  // ============================================================
-  // ★ ダミー鍵を assets から先頭 count 件投入（唯一の実装）
-  // ============================================================
+  // ----- Debug / Seed -----
+
+  /// assets の dummy_keys.txt から，先頭 count 件の公開鍵を収集鍵として投入する。
   static Future<int> insertCommonDummyKeys({
     Database? db,
     required int count,
   }) async {
     final Database database = db ?? await getDatabase();
-
     if (count <= 0) return 0;
 
     final text = await rootBundle.loadString('assets/dummy_keys.txt');
     final lines = text.split('\n');
-
     if (lines.isEmpty) return 0;
 
     final batch = database.batch();
@@ -79,7 +81,7 @@ class DatabaseHelper {
       final key = line.trim();
       if (key.isEmpty) continue;
 
-      // 圧縮公開鍵: 33 bytes = 66 hex chars
+      // 圧縮公開鍵(33B)は 66 hex 文字
       if (key.length != 66) continue;
 
       batch.insert(
@@ -98,23 +100,20 @@ class DatabaseHelper {
     return inserted;
   }
 
-  // ----------------------------
-  // 収集鍵が存在するかチェック
-  // ----------------------------
+  // ----- Collected keys -----
+
   static Future<bool> existsCollectedKey(Uint8List key33) async {
     final db = await getDatabase();
     final count = Sqflite.firstIntValue(
       await db.rawQuery(
-        "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
+        'SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?',
         [key33],
       ),
     );
     return (count ?? 0) > 0;
   }
 
-  // ----------------------------
-  // 新規収集鍵 INSERT（存在しない場合のみ）
-  // ----------------------------
+  /// 収集鍵が未登録の場合のみ INSERT する。
   static Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int tms,
@@ -123,7 +122,7 @@ class DatabaseHelper {
 
     final exists = Sqflite.firstIntValue(
       await db.rawQuery(
-        "SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?",
+        'SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?',
         [pubkey33],
       ),
     );
@@ -163,26 +162,26 @@ class DatabaseHelper {
     await batch.commit(noResult: true);
   }
 
-  // ----------------------------
-  // キー合計数
-  // ----------------------------
+  // ----- Stats -----
+
   Future<int> getTotalKeyCount() async {
     final db = await getDatabase();
 
     final generated = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM generated_keys'),
-    ) ?? 0;
+    ) ??
+        0;
 
     final collected = Sqflite.firstIntValue(
       await db.rawQuery('SELECT COUNT(*) FROM collected_keys'),
-    ) ?? 0;
+    ) ??
+        0;
 
     return generated + collected;
   }
 
-  // ----------------------------
-  // 削除
-  // ----------------------------
+  // ----- Delete -----
+
   static Future<void> deleteKey({
     required KeyTable table,
     required int id,

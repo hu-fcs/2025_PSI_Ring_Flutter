@@ -16,6 +16,8 @@ class BleScanner {
   Timer? _gcTimer;
 
   static const int _companyId = 0xFFFF;
+
+  /// 断片の保持期限（時刻スロット(10分)相当）
   static const Duration _halfTtl = Duration(minutes: 10);
 
   bool _isScanning = false;
@@ -23,30 +25,31 @@ class BleScanner {
 
   final KeyManagementService _kms = KeyManagementService();
 
+  /// keyId と seq2 をキーに断片を管理する
   final Map<String, _HalfState> _halves = {};
+
+  /// 期限切れ掃除のための到着順キュー
   final Queue<_QueueEntry> _queue = Queue<_QueueEntry>();
 
-  // 🔥 スロット内キャッシュ（重複防止）
+  /// 同一時刻スロット内の重複を抑止するキャッシュ
   static final Set<String> _globalCacheKeys = {};
   static int _currentSlot = -1;
 
-  // 外部（DebugPage 等）から呼べる
+  /// 収集済みキャッシュを初期化する（外部から呼び出し可）
   static void clearCollectedCache() {
     _globalCacheKeys.clear();
     if (kDebugMode) {
-      print('BLE_SCAN: 🧹 collected key cache cleared');
+      debugPrint('BLE_SCAN: collected key cache cleared');
     }
   }
 
-  // ===============================================================
-  // START / STOP
-  // ===============================================================
+  // ----- Start / Stop -----
 
   Future<void> start() async {
     if (_isScanning) return;
     _isScanning = true;
 
-    if (kDebugMode) print('BLE_SCAN: 🚀 startScan');
+    if (kDebugMode) debugPrint('BLE_SCAN: startScan');
 
     await FlutterBluePlus.stopScan();
     await FlutterBluePlus.startScan(
@@ -63,7 +66,7 @@ class BleScanner {
         }
       },
       onError: (e) {
-        if (kDebugMode) print('BLE_SCAN: scanResults error: $e');
+        if (kDebugMode) debugPrint('BLE_SCAN: scanResults error: $e');
       },
     );
 
@@ -89,12 +92,10 @@ class BleScanner {
 
     _isScanning = false;
 
-    if (kDebugMode) print('BLE_SCAN: 🛑 stopScan');
+    if (kDebugMode) debugPrint('BLE_SCAN: stopScan');
   }
 
-  // ===============================================================
-  // DISCOVERY
-  // ===============================================================
+  // ----- Discovery -----
 
   void _onDiscover(ScanResult r) async {
     final adv = r.advertisementData;
@@ -115,20 +116,18 @@ class BleScanner {
     final now = DateTime.now().millisecondsSinceEpoch;
     final slot = now ~/ _kms.slotMs;
 
-    // 🔄 スロット変更検出
+    // 時刻スロット(10分)が更新されたらキャッシュを初期化する
     if (slot != _currentSlot) {
       _globalCacheKeys.clear();
       _currentSlot = slot;
       if (kDebugMode) {
-        print('BLE_SCAN: 🔄 slot changed → cache reset');
+        debugPrint('BLE_SCAN: slot changed; cache reset');
       }
     }
 
     final cacheKey = '$seq2|${keyIdBytes.join()}';
 
-    // ------------------------------
-    // 片割れ管理
-    // ------------------------------
+    // 断片の受信状態を更新する
     var st = _halves[cacheKey];
     if (st == null) {
       st = _HalfState(
@@ -144,9 +143,7 @@ class BleScanner {
     if (part == 0) st.front16 = body16;
     if (part == 1) st.back16 = body16;
 
-    // ------------------------------
-    // 両パーツ揃った
-    // ------------------------------
+    // 2断片が揃ったら公開鍵(33B)を復元する
     if (st.front16 != null && st.back16 != null) {
       final merged = Uint8List.fromList([
         0x02 | (st.yParity & 0x01),
@@ -154,6 +151,7 @@ class BleScanner {
         ...st.back16!,
       ]);
 
+      // KeyID 検証（SHA-256(公開鍵33B)の先頭4B）
       final calculatedHash = _getKeyHashId(merged);
       if (!listEquals(st.keyId, calculatedHash)) {
         _halves.remove(cacheKey);
@@ -162,20 +160,20 @@ class BleScanner {
 
       final hex = _bytesToHex(merged);
 
-      // 1️⃣ スロット内キャッシュ
+      // 同一時刻スロット内の重複を除外する
       if (_globalCacheKeys.contains(hex)) {
         _halves.remove(cacheKey);
         return;
       }
 
-      // 2️⃣ KMS チェック
+      // 既収集鍵はスキップする
       if (await _kms.hasCollectedKey(merged)) {
         _globalCacheKeys.add(hex);
         _halves.remove(cacheKey);
         return;
       }
 
-      // 3️⃣ KMS 登録
+      // 収集鍵として登録する
       final inserted = await _kms.insertCollectedKeyIfAbsent(
         pubkey33: merged,
         receivedAtMs: now,
@@ -184,10 +182,8 @@ class BleScanner {
       if (inserted) {
         _globalCacheKeys.add(hex);
         if (kDebugMode) {
-          print('BLE_SCAN: 🔑 new collected key stored');
+          debugPrint('BLE_SCAN: new collected key stored');
         }
-        // ❌ notifyKeyUpdated() は呼ばない
-        // → KMS 内部でのみ notify される
       }
 
       _halves.remove(cacheKey);
@@ -196,9 +192,7 @@ class BleScanner {
     _gcSweep();
   }
 
-  // ===============================================================
-  // GC
-  // ===============================================================
+  // ----- GC -----
 
   void _gcSweep() {
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -212,9 +206,7 @@ class BleScanner {
     }
   }
 
-  // ===============================================================
-  // Utils
-  // ===============================================================
+  // ----- Utils -----
 
   Uint8List _getKeyHashId(Uint8List key33) {
     final digest = pc.SHA256Digest();
@@ -226,8 +218,6 @@ class BleScanner {
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 }
-
-// =====================================================================
 
 class _HalfState {
   _HalfState({

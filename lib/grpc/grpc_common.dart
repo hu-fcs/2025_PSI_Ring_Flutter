@@ -3,44 +3,31 @@
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
 
-/// ===============================================================
-/// gRPC 共通設定・モデル・ユーティリティ
-/// ===============================================================
+/// gRPC の共通設定・ユーティリティ。
 class GrpcCommon {
-  // ===============================
-  // Singleton
-  // ===============================
+  // ----- Singleton -----
+
   static final GrpcCommon _instance = GrpcCommon._internal();
   factory GrpcCommon() => _instance;
   GrpcCommon._internal();
 
-  // ===============================
-  // 計測用フラグ（UI から切替）
-  // ===============================
+  /// 圧縮（gzip）の有効化フラグ
   bool enableGzip = false;
 
-  // ===============================================================
-  // TLS は無効化（互換のため残す）
-  // ===============================================================
-  Future<void> ensureTlsAssetsLoaded() async {
-    // TLS を使わないため何もしない
-    return;
-  }
+  // ----- TLS -----
 
-  // ===============================
-  // CodecRegistry
-  // ===============================
+  /// TLS を使用しないため何もしない（互換のため残す）。
+  Future<void> ensureTlsAssetsLoaded() async {}
+
+  // ----- Codec / Options -----
+
   CodecRegistry get codecRegistry => CodecRegistry(
     codecs: enableGzip
         ? const [GzipCodec(), IdentityCodec()]
         : const [IdentityCodec()],
   );
 
-  // ===============================
-  // Client 用 ChannelOptions
-  // ===============================
   ChannelOptions buildClientOptions({Duration? idleTimeout}) {
-    // ✅ TLS は常に無効（insecure）
     return ChannelOptions(
       credentials: ChannelCredentials.insecure(),
       codecRegistry: codecRegistry,
@@ -48,23 +35,17 @@ class GrpcCommon {
     );
   }
 
-  // ===============================
-  // Server 用 TLS 設定
-  // ===============================
   ServerTlsCredentials? buildServerSecurity() {
-    // ✅ TLS は常に無効（null）
     return null;
   }
 
-  // ===============================================================
-  // ===== 共通ユーティリティ =====
-  // ===============================================================
+  // ----- Utils -----
 
-  /// Uint8List -> hex 文字列
+  /// Uint8List を hex 文字列へ変換する。
   static String bytesToHex(Uint8List b) =>
       b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
 
-  /// 33バイト公開鍵の辞書順比較（リング署名用の正規順序）
+  /// 公開鍵(33B)の辞書順比較（リング署名用の正規順序）。
   static int comparePubKey(Uint8List a, Uint8List b) {
     final n = a.length < b.length ? a.length : b.length;
     for (int i = 0; i < n; i++) {
@@ -75,32 +56,23 @@ class GrpcCommon {
   }
 }
 
-/// ===============================================================
-/// PSI の結果（client / server 共通）
-/// ===============================================================
+/// PSI の結果（client/server 共通）。
 class PsiResult {
   final bool isFamiliar;
 
-  /// |S_A|, |S_B|（論文の区分に合わせて保持）
+  /// 集合サイズ |S_A|, |S_B|
   final int saKeyCount;
   final int sbKeyCount;
 
-  /// 互換のため残す（= |S_A| + |S_B|）
+  /// 互換用（= |S_A| + |S_B|）
   int get psiKeyCount => saKeyCount + sbKeyCount;
 
   final List<String> commonKeys;
   final int ringSize;
 
-  /// SQLite からの鍵読み込み時間（ms）
   final int dbLoadTimeMs;
-
-  /// PSI 計算時間（ms）
   final int psiTimeMs;
-
-  /// リング署名生成・検証時間（ms）
   final int ringSigTimeMs;
-
-  /// 総時間（ms）
   final int totalTimeMs;
 
   PsiResult({

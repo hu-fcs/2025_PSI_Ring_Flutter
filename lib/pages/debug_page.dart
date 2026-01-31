@@ -1,19 +1,18 @@
 // lib/pages/debug_page.dart
 
+import 'dart:async';
 import 'dart:typed_data';
-import 'dart:async'; // ★ StreamSubscription 用に必要
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
+
 import '../ble/ble_scanner.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
 import '../grpc/grpc_common.dart';
 
-// ================================================================
-// DebugPage
-// ================================================================
 class DebugPage extends StatefulWidget {
   const DebugPage({super.key});
 
@@ -21,7 +20,8 @@ class DebugPage extends StatefulWidget {
   State<DebugPage> createState() => _DebugPageState();
 }
 
-class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMixin {
+class _DebugPageState extends State<DebugPage>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
   final KeyManagementService _keyManager = KeyManagementService();
@@ -30,7 +30,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
 
-  // ★ hot reload 対応：DB更新通知購読用
   StreamSubscription<void>? _keyUpdateSub;
 
   @override
@@ -38,26 +37,26 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
 
-    // ★ BLE由来の鍵が更新されたら DebugPage UI を自動更新
+    // 鍵更新を検知したら表示を更新する
     _keyUpdateSub = _keyManager.onKeyUpdated.listen((_) {
-      if (mounted) {
-        print('[DebugPage] 🔄 Key updated — refreshing UI');
-        setState(() {}); // UI を再描画
+      if (!mounted) return;
+      if (kDebugMode) {
+        debugPrint('[DebugPage] key updated; refresh');
       }
+      setState(() {});
     });
   }
 
   @override
   void dispose() {
-    _keyUpdateSub?.cancel(); // ★購読解除
+    _keyUpdateSub?.cancel();
     _tabController.dispose();
     _dummyCountController.dispose();
     super.dispose();
   }
 
-  // ================================================================
-  // データベース操作
-  // ================================================================
+  // ----- Database helpers -----
+
   Future<List<Map<String, dynamic>>> _fetchLimitedKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
     final order = tableName == 'generated_keys' ? 'id' : 'receive_time';
@@ -74,20 +73,19 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     final db = await DatabaseHelper.getDatabase();
     await db.delete(tableName);
 
-    // 🔥 収集した鍵を全削除したら BLE キャッシュをリセットする
+    // 収集鍵を全削除した場合はスキャン側の重複抑止キャッシュも初期化する
     if (tableName == 'collected_keys') {
       BleScanner.clearCollectedCache();
       if (kDebugMode) {
-        print('DebugPage: 🧹 cache cleared due to collected_keys deletion');
+        debugPrint('[DebugPage] collected cache cleared');
       }
     }
 
     setState(() {});
   }
 
-  // ================================================================
-  // ダミーデータ操作（変更なし）
-  // ================================================================
+  // ----- Dummy data -----
+
   Future<void> _generateAndInsertSingleDummyCollectedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
     if (keyPair == null) return;
@@ -115,7 +113,6 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
 
     final keys = <Uint8List>[];
-
     for (int i = 0; i < count; i++) {
       final keyPair = _keyManager.generateDummyKeyPair();
       if (keyPair != null) {
@@ -149,7 +146,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       SnackBar(content: Text('共通ダミー鍵を $inserted 件追加しました')),
     );
 
-    setState(() {}); // UI 更新
+    setState(() {});
   }
 
   Future<void> _insertDummyGeneratedKey() async {
@@ -193,21 +190,24 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     }
   }
 
-  // --- ヘルパー関数 (ダイアログ) ---
+  // ----- Dialog helpers -----
 
-  /// バイト配列を完全な16進数文字列に変換する
+  /// バイト配列を 16 進数文字列に変換する。
   String _fullHex(List<int>? bytes) {
     if (bytes == null || bytes.isEmpty) return 'N/A';
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
   }
 
-  /// 収集した鍵（1つ）を詳細表示するダイアログ
   void _showFullKeyDialog(
-      BuildContext context, String title, List<int>? keyBytes, int keyId) {
+      BuildContext context,
+      String title,
+      List<int>? keyBytes,
+      int keyId,
+      ) {
     if (keyBytes == null) return;
     final String fullHexKey = _fullHex(keyBytes);
     if (fullHexKey.isEmpty) {
-      _showErrorSnackbar("キーがありません。");
+      _showErrorSnackbar('キーがありません。');
       return;
     }
 
@@ -233,7 +233,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
               children: [
                 TextButton.icon(
                   icon: const Icon(Icons.delete, color: Colors.red),
-                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  label:
+                  const Text('削除', style: TextStyle(color: Colors.red)),
                   onPressed: () async {
                     await DatabaseHelper.deleteKey(
                       table: KeyTable.collected,
@@ -256,9 +257,12 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-  /// 生成した鍵ペア（2つ）を詳細表示するダイアログ
-  void _showGeneratedKeyDialog(BuildContext context, List<int>? pubKeyBytes,
-      List<int>? secKeyBytes, int keyId) {
+  void _showGeneratedKeyDialog(
+      BuildContext context,
+      List<int>? pubKeyBytes,
+      List<int>? secKeyBytes,
+      int keyId,
+      ) {
     final String fullHexPub = _fullHex(pubKeyBytes);
     final String fullHexSec = _fullHex(secKeyBytes);
 
@@ -272,15 +276,19 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('公開鍵 (Public Key):',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  '公開鍵 (Public Key):',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 SelectableText(
                   fullHexPub,
                   style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
                 ),
                 const SizedBox(height: 16),
-                const Text('秘密鍵 (Secret Key):',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  '秘密鍵 (Secret Key):',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 SelectableText(
                   fullHexSec,
                   style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
@@ -293,7 +301,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
               children: [
                 TextButton.icon(
                   icon: const Icon(Icons.delete, color: Colors.red),
-                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  label:
+                  const Text('削除', style: TextStyle(color: Colors.red)),
                   onPressed: () async {
                     await DatabaseHelper.deleteKey(
                       table: KeyTable.generated,
@@ -316,9 +325,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-  void _showFullStringDialog(BuildContext context, String title, String? content) {
+  void _showFullStringDialog(
+      BuildContext context,
+      String title,
+      String? content,
+      ) {
     if (content == null || content.isEmpty) {
-      _showErrorSnackbar("キーがありません。");
+      _showErrorSnackbar('キーがありません。');
       return;
     }
 
@@ -357,8 +370,11 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-  void _showResultDialog(
-      {required String title, required bool isSuccess, required Widget content}) {
+  void _showResultDialog({
+    required String title,
+    required bool isSuccess,
+    required Widget content,
+  }) {
     if (!mounted) return;
     showDialog<void>(
       context: context,
@@ -476,7 +492,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     );
   }
 
-  // --- UI構築ヘルパー (変更なし) ---
+  // ----- UI helpers -----
+
   String _shortHex(List<int>? bytes, {int length = 10}) {
     if (bytes == null || bytes.isEmpty) return 'N/A';
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
@@ -484,7 +501,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
   }
 
   String _formatTime(dynamic unixTimeMs) {
-    if (unixTimeMs == null) return "N/A";
+    if (unixTimeMs == null) return 'N/A';
     final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
     return '${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
@@ -499,7 +516,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
     final minDecimal = (absDeg - deg) * 60;
     final min = minDecimal.floor();
     final sec = ((minDecimal - min) * 60).toStringAsFixed(2);
-    return "$deg° $min′ $sec″ $direction";
+    return '$deg° $min′ $sec″ $direction';
   }
 
   Widget _buildMasterKeyCard() {
@@ -517,9 +534,13 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
             onTap: () {
               if (snapshot.connectionState == ConnectionState.done &&
                   masterKeyBase64 != null) {
-                _showFullStringDialog(context, '🔑 マスターキー (Base64)', masterKeyBase64);
+                _showFullStringDialog(
+                  context,
+                  'マスターキー (Base64)',
+                  masterKeyBase64,
+                );
               } else if (snapshot.connectionState == ConnectionState.done) {
-                _showErrorSnackbar("マスターキーはまだ保存されていません。");
+                _showErrorSnackbar('マスターキーはまだ保存されていません。');
               }
             },
             child: Stack(
@@ -533,16 +554,29 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                         crossAxisAlignment: CrossAxisAlignment.baseline,
                         textBaseline: TextBaseline.alphabetic,
                         children: [
-                          const Text('🔑 マスターキー',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const Text(
+                            'マスターキー',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(width: 8),
-                          Text('(Base64)',
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                          Text(
+                            '(Base64)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 4),
                       if (snapshot.connectionState == ConnectionState.waiting)
-                        const SizedBox(height: 20, child: LinearProgressIndicator())
+                        const SizedBox(
+                          height: 20,
+                          child: LinearProgressIndicator(),
+                        )
                       else if (masterKeyBase64 != null)
                         SelectionArea(
                           child: Text(
@@ -553,7 +587,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           ),
                         )
                       else
-                        const Text('保存されていません', style: TextStyle(color: Colors.grey)),
+                        const Text(
+                          '保存されていません',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                     ],
                   ),
                 ),
@@ -590,7 +627,7 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "現在のスロット時間: ${_keyManager.slotMs} ms",
+          '現在のスロット時間: ${_keyManager.slotMs} ms',
           style: const TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
@@ -721,7 +758,8 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
         }
 
         final totalCount = (snapshot.data?[0] as int?) ?? 0;
-        final records = (snapshot.data?[1] as List<Map<String, dynamic>>?) ?? [];
+        final records =
+            (snapshot.data?[1] as List<Map<String, dynamic>>?) ?? [];
 
         return Column(
           children: [
@@ -740,9 +778,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                     ),
                     ElevatedButton(
                       onPressed: () => _deleteAllKeys('generated_keys'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red.shade100,
+                      ),
                       child: const Text('全削除'),
-                      style:
-                      ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
                     ),
                   ],
                 ),
@@ -769,9 +808,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                     ),
                     ElevatedButton(
                       onPressed: () => _deleteAllKeys('collected_keys'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red.shade100,
+                      ),
                       child: const Text('全削除'),
-                      style:
-                      ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
                     ),
                   ],
                 ),
@@ -801,8 +841,10 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                 itemBuilder: (context, index) {
                   final row = records[index];
                   return Card(
-                    margin:
-                    const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+                    margin: const EdgeInsets.symmetric(
+                      vertical: 4,
+                      horizontal: 12,
+                    ),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12.0),
                       onTap: () {
@@ -826,32 +868,42 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                         padding: const EdgeInsets.all(12.0),
                         child: isGenerated
                             ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
                           children: [
-                            Row(children: [
-                              Expanded(
-                                child: Text(
-                                    'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}'),
-                              ),
-                              Expanded(
-                                child: Text(
-                                    'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}'),
-                              ),
-                            ]),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}',
+                                  ),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(
-                                child: Text(
-                                    '生成: ${_formatTime(row['generate_time'])}'),
-                              ),
-                              Expanded(
-                                child: Text(
-                                    '期限: ${_formatTime(row['expire_time'])}'),
-                              ),
-                            ]),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '生成: ${_formatTime(row['generate_time'])}',
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    '期限: ${_formatTime(row['expire_time'])}',
+                                  ),
+                                ),
+                              ],
+                            ),
                             const SizedBox(height: 6),
                             Text(
-                              (row['lat'] == null || row['lon'] == null)
+                              (row['lat'] == null ||
+                                  row['lon'] == null)
                                   ? '位置: 未取得'
                                   : '位置: '
                                   '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
@@ -866,17 +918,20 @@ class _DebugPageState extends State<DebugPage> with SingleTickerProviderStateMix
                           ],
                         )
                             : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
                                 Expanded(
                                   child: Text(
-                                      'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}'),
+                                    'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                  ),
                                 ),
                                 Expanded(
                                   child: Text(
-                                      '取得: ${_formatTime(row['receive_time'])}'),
+                                    '取得: ${_formatTime(row['receive_time'])}',
+                                  ),
                                 ),
                               ],
                             ),
