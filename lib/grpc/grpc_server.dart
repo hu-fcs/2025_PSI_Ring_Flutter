@@ -135,6 +135,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
         // サーバ側は UI 通知用のため計測値は保持しない
         dbLoadTimeMs: 0,
         psiTimeMs: 0,
+        ringSelectTimeMs: 0,
         ringSigTimeMs: 0,
         totalTimeMs: 0,
       ),
@@ -307,6 +308,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
           ringSize: ring.length,
           dbLoadTimeMs: 0,
           psiTimeMs: 0,
+          ringSelectTimeMs: 0,
           ringSigTimeMs: 0,
           totalTimeMs: 0,
         ),

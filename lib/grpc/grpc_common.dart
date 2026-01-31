@@ -72,6 +72,8 @@ class PsiResult {
 
   final int dbLoadTimeMs;
   final int psiTimeMs;
+
+  final int ringSelectTimeMs;
   final int ringSigTimeMs;
   final int totalTimeMs;
 
@@ -83,6 +85,7 @@ class PsiResult {
     required this.ringSize,
     required this.dbLoadTimeMs,
     required this.psiTimeMs,
+    required this.ringSelectTimeMs,
     required this.ringSigTimeMs,
     required this.totalTimeMs,
   });

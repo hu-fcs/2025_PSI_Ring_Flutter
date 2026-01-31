@@ -327,7 +327,9 @@ class _ExchangePageState extends State<ExchangePage> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                stats.first == null ? 'N/A' : _fmtTime(stats.first!),
+                                stats.first == null
+                                    ? 'N/A'
+                                    : _fmtTime(stats.first!),
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
@@ -339,8 +341,12 @@ class _ExchangePageState extends State<ExchangePage> {
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
-                          onPressed: (stats.firstLat != null && stats.firstLon != null)
-                              ? () => _openExternalMap(stats.firstLat!, stats.firstLon!)
+                          onPressed:
+                          (stats.firstLat != null && stats.firstLon != null)
+                              ? () => _openExternalMap(
+                            stats.firstLat!,
+                            stats.firstLon!,
+                          )
                               : null,
                         ),
                       ],
@@ -361,7 +367,9 @@ class _ExchangePageState extends State<ExchangePage> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                stats.last == null ? 'N/A' : _fmtTime(stats.last!),
+                                stats.last == null
+                                    ? 'N/A'
+                                    : _fmtTime(stats.last!),
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
@@ -373,8 +381,12 @@ class _ExchangePageState extends State<ExchangePage> {
                         TextButton.icon(
                           icon: const Icon(Icons.place, size: 18),
                           label: const Text('場所'),
-                          onPressed: (stats.lastLat != null && stats.lastLon != null)
-                              ? () => _openExternalMap(stats.lastLat!, stats.lastLon!)
+                          onPressed:
+                          (stats.lastLat != null && stats.lastLon != null)
+                              ? () => _openExternalMap(
+                            stats.lastLat!,
+                            stats.lastLon!,
+                          )
                               : null,
                         ),
                       ],
@@ -384,7 +396,8 @@ class _ExchangePageState extends State<ExchangePage> {
               ),
               Divider(color: Colors.grey.shade300),
               Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(context)
+                    .copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: EdgeInsets.zero,
@@ -427,6 +440,7 @@ class _ExchangePageState extends State<ExchangePage> {
                       const SizedBox(height: 6),
                       _debugRow('SQLite鍵読み込み時間', '${psi.dbLoadTimeMs} ms'),
                       _debugRow('PSI時間', '${psi.psiTimeMs} ms'),
+                      _debugRow('リング選択時間', '${psi.ringSelectTimeMs} ms'),
                       _debugRow('リング署名・検証時間', '${psi.ringSigTimeMs} ms'),
                       _debugRow('総時間', '${psi.totalTimeMs} ms'),
                     ],
@@ -505,7 +519,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Widget _debugRowWidget(Widget label, String value) {
-    final s = TextStyle(fontSize: 13, color: Colors.grey.shade600);
+    final s = TextStyle(fontSize: 11, color: Colors.grey.shade600);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -519,7 +533,7 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Widget _debugRow(String label, String value) {
-    final s = TextStyle(fontSize: 13, color: Colors.grey.shade600);
+    final s = TextStyle(fontSize: 11, color: Colors.grey.shade600);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -593,7 +607,8 @@ class _ExchangePageState extends State<ExchangePage> {
                   children: [
                     const Icon(Icons.bluetooth, size: 22),
                     const SizedBox(width: 8),
-                    Text('近くの人を記録', style: Theme.of(context).textTheme.titleMedium),
+                    Text('近くの人を記録',
+                        style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
                 const SizedBox(height: 8),

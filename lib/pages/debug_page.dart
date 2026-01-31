@@ -32,6 +32,8 @@ class _DebugPageState extends State<DebugPage>
 
   StreamSubscription<void>? _keyUpdateSub;
 
+  static const double _debugFontSize = 13;
+
   @override
   void initState() {
     super.initState();
@@ -233,8 +235,7 @@ class _DebugPageState extends State<DebugPage>
               children: [
                 TextButton.icon(
                   icon: const Icon(Icons.delete, color: Colors.red),
-                  label:
-                  const Text('削除', style: TextStyle(color: Colors.red)),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
                   onPressed: () async {
                     await DatabaseHelper.deleteKey(
                       table: KeyTable.collected,
@@ -301,8 +302,7 @@ class _DebugPageState extends State<DebugPage>
               children: [
                 TextButton.icon(
                   icon: const Icon(Icons.delete, color: Colors.red),
-                  label:
-                  const Text('削除', style: TextStyle(color: Colors.red)),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
                   onPressed: () async {
                     await DatabaseHelper.deleteKey(
                       table: KeyTable.generated,
@@ -369,7 +369,7 @@ class _DebugPageState extends State<DebugPage>
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
-  
+
   Future<void> _showAddMultipleDummiesDialog() async {
     return showDialog<void>(
       context: context,
@@ -495,51 +495,54 @@ class _DebugPageState extends State<DebugPage>
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 40, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          const Text(
-                            'マスターキー',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                  child: DefaultTextStyle.merge(
+                    style: const TextStyle(fontSize: _debugFontSize),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            const Text(
+                              'マスターキー',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '(Base64)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
+                            const SizedBox(width: 8),
+                            Text(
+                              '(Base64)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      if (snapshot.connectionState == ConnectionState.waiting)
-                        const SizedBox(
-                          height: 20,
-                          child: LinearProgressIndicator(),
-                        )
-                      else if (masterKeyBase64 != null)
-                        SelectionArea(
-                          child: Text(
-                            masterKeyBase64,
-                            style: const TextStyle(fontFamily: 'monospace'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        )
-                      else
-                        const Text(
-                          '保存されていません',
-                          style: TextStyle(color: Colors.grey),
+                          ],
                         ),
-                    ],
+                        const SizedBox(height: 4),
+                        if (snapshot.connectionState == ConnectionState.waiting)
+                          const SizedBox(
+                            height: 20,
+                            child: LinearProgressIndicator(),
+                          )
+                        else if (masterKeyBase64 != null)
+                          SelectionArea(
+                            child: Text(
+                              masterKeyBase64,
+                              style: const TextStyle(fontFamily: 'monospace'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          )
+                        else
+                          const Text(
+                            '保存されていません',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 Positioned(
@@ -577,7 +580,7 @@ class _DebugPageState extends State<DebugPage>
         Text(
           '現在のスロット時間: ${_keyManager.slotMs} ms',
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: _debugFontSize,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -624,7 +627,7 @@ class _DebugPageState extends State<DebugPage>
         const Text(
           'リング署名対象期間',
           style: TextStyle(
-            fontSize: 14,
+            fontSize: _debugFontSize,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -656,36 +659,39 @@ class _DebugPageState extends State<DebugPage>
   }
 
   Widget _buildGrpcOptionToggles() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'gRPC 通信設定',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+    return DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: _debugFontSize),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'gRPC 通信設定',
+            style: TextStyle(
+              fontSize: _debugFontSize,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('gzip 圧縮'),
-          subtitle: const Text('アプリケーションレベル圧縮'),
-          value: _grpcCommon.enableGzip,
-          onChanged: (v) {
-            setState(() {
-              _grpcCommon.enableGzip = v;
-            });
-          },
-        ),
-        const Padding(
-          padding: EdgeInsets.only(top: 4),
-          child: Text(
-            '※ 次回の gRPC 接続から有効になります',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('gzip 圧縮'),
+            subtitle: const Text('アプリケーションレベル圧縮'),
+            value: _grpcCommon.enableGzip,
+            onChanged: (v) {
+              setState(() {
+                _grpcCommon.enableGzip = v;
+              });
+            },
           ),
-        ),
-      ],
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              '※ 次回の gRPC 接続から有効になります',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -709,189 +715,192 @@ class _DebugPageState extends State<DebugPage>
         final records =
             (snapshot.data?[1] as List<Map<String, dynamic>>?) ?? [];
 
-        return Column(
-          children: [
-            if (isGenerated) ...[
-              _buildMasterKeyCard(),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    ElevatedButton(
-                      onPressed: _insertDummyGeneratedKey,
-                      child: const Text('ダミー追加'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => _deleteAllKeys('generated_keys'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade100,
+        return DefaultTextStyle.merge(
+          style: const TextStyle(fontSize: _debugFontSize),
+          child: Column(
+            children: [
+              if (isGenerated) ...[
+                _buildMasterKeyCard(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _insertDummyGeneratedKey,
+                        child: const Text('ダミー追加'),
                       ),
-                      child: const Text('全削除'),
+                      ElevatedButton(
+                        onPressed: () => _deleteAllKeys('generated_keys'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade100,
+                        ),
+                        child: const Text('全削除'),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 0,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _insertDummyCollectedKey,
+                        child: const Text('ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: _showAddMultipleDummiesDialog,
+                        child: const Text('複数ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: _showAddCommonDummyDialog,
+                        child: const Text('複数共通ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => _deleteAllKeys('collected_keys'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade100,
+                        ),
+                        child: const Text('全削除'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Column(
+                  children: [
+                    Text(
+                      '現在の総鍵数: $totalCount',
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
+                    if (totalCount > 100)
+                      Text(
+                        '(最新100件のみ表示)',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                   ],
                 ),
               ),
-            ] else ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 0,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    ElevatedButton(
-                      onPressed: _insertDummyCollectedKey,
-                      child: const Text('ダミー追加'),
-                    ),
-                    ElevatedButton(
-                      onPressed: _showAddMultipleDummiesDialog,
-                      child: const Text('複数ダミー追加'),
-                    ),
-                    ElevatedButton(
-                      onPressed: _showAddCommonDummyDialog,
-                      child: const Text('複数共通ダミー追加'),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => _deleteAllKeys('collected_keys'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade100,
+              Expanded(
+                child: records.isEmpty
+                    ? const Center(child: Text('データがありません'))
+                    : ListView.builder(
+                  itemCount: records.length,
+                  itemBuilder: (context, index) {
+                    final row = records[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        vertical: 4,
+                        horizontal: 12,
                       ),
-                      child: const Text('全削除'),
-                    ),
-                  ],
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12.0),
+                        onTap: () {
+                          if (isGenerated) {
+                            _showGeneratedKeyDialog(
+                              context,
+                              row['pubkey_ecd'] as List<int>?,
+                              row['seckey_ecd'] as List<int>?,
+                              row['id'] as int,
+                            );
+                          } else {
+                            _showFullKeyDialog(
+                              context,
+                              '収集した鍵',
+                              row['pubkey_ecd'] as List<int>?,
+                              row['id'] as int,
+                            );
+                          }
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: isGenerated
+                              ? Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '生成: ${_formatTime(row['generate_time'])}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      '期限: ${_formatTime(row['expire_time'])}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                (row['lat'] == null ||
+                                    row['lon'] == null)
+                                    ? '位置: 未取得'
+                                    : '位置: '
+                                    '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
+                                    '${_toDMS((row['lon'] as int) / 1e6, isLatitude: false)}',
+                                style: TextStyle(
+                                  color: (row['lat'] == null ||
+                                      row['lon'] == null)
+                                      ? Colors.grey
+                                      : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          )
+                              : Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      '取得: ${_formatTime(row['receive_time'])}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
-            Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 4),
-              child: Column(
-                children: [
-                  Text(
-                    '現在の総鍵数: $totalCount',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  if (totalCount > 100)
-                    Text(
-                      '(最新100件のみ表示)',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: records.isEmpty
-                  ? const Center(child: Text('データがありません'))
-                  : ListView.builder(
-                itemCount: records.length,
-                itemBuilder: (context, index) {
-                  final row = records[index];
-                  return Card(
-                    margin: const EdgeInsets.symmetric(
-                      vertical: 4,
-                      horizontal: 12,
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12.0),
-                      onTap: () {
-                        if (isGenerated) {
-                          _showGeneratedKeyDialog(
-                            context,
-                            row['pubkey_ecd'] as List<int>?,
-                            row['seckey_ecd'] as List<int>?,
-                            row['id'] as int,
-                          );
-                        } else {
-                          _showFullKeyDialog(
-                            context,
-                            '収集した鍵',
-                            row['pubkey_ecd'] as List<int>?,
-                            row['id'] as int,
-                          );
-                        }
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: isGenerated
-                            ? Column(
-                          crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}',
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '生成: ${_formatTime(row['generate_time'])}',
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    '期限: ${_formatTime(row['expire_time'])}',
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              (row['lat'] == null ||
-                                  row['lon'] == null)
-                                  ? '位置: 未取得'
-                                  : '位置: '
-                                  '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
-                                  '${_toDMS((row['lon'] as int) / 1e6, isLatitude: false)}',
-                              style: TextStyle(
-                                color: (row['lat'] == null ||
-                                    row['lon'] == null)
-                                    ? Colors.grey
-                                    : Colors.black87,
-                              ),
-                            ),
-                          ],
-                        )
-                            : Column(
-                          crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    '取得: ${_formatTime(row['receive_time'])}',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+          ),
         );
       },
     );
@@ -927,16 +936,19 @@ class _DebugPageState extends State<DebugPage>
   }
 
   Widget _buildVerificationTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSlotSelector(),
-          _buildRingRangeSelector(),
-          const SizedBox(height: 24),
-          _buildGrpcOptionToggles(),
-        ],
+    return DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: _debugFontSize),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSlotSelector(),
+            _buildRingRangeSelector(),
+            const SizedBox(height: 24),
+            _buildGrpcOptionToggles(),
+          ],
+        ),
       ),
     );
   }

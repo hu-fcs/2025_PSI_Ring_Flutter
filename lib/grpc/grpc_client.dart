@@ -107,6 +107,7 @@ class GrpcClient {
         ringSize: 0,
         dbLoadTimeMs: dbSw.elapsedMilliseconds,
         psiTimeMs: 0,
+        ringSelectTimeMs: 0,
         ringSigTimeMs: 0,
         totalTimeMs: totalSw.elapsedMilliseconds,
       );
@@ -153,20 +154,19 @@ class GrpcClient {
     // 4) リング署名（必要時のみ）
     bool ringOk = false;
     int ringSize = 0;
+    int ringSelectTimeMs = 0;
     int ringSigTimeMs = 0;
 
     if (familiarByPsi && clientCommon.length >= 2) {
-      final ringSw = Stopwatch()..start();
-
       final result = await _runRingSignaturePhase(
         stub: stub,
         intersection: clientCommon,
       );
 
-      ringSw.stop();
       ringOk = result.$1;
       ringSize = result.$2;
-      ringSigTimeMs = ringSw.elapsedMilliseconds;
+      ringSelectTimeMs = result.$3;
+      ringSigTimeMs = result.$4;
     }
 
     totalSw.stop();
@@ -179,6 +179,7 @@ class GrpcClient {
       ringSize: ringSize,
       dbLoadTimeMs: dbSw.elapsedMilliseconds,
       psiTimeMs: psiTimeMs,
+      ringSelectTimeMs: ringSelectTimeMs,
       ringSigTimeMs: ringSigTimeMs,
       totalTimeMs: totalSw.elapsedMilliseconds,
     );
@@ -186,23 +187,39 @@ class GrpcClient {
 
   // ----- Ring signature phase -----
 
-  Future<(bool, int)> _runRingSignaturePhase({
+  Future<(bool, int, int, int)> _runRingSignaturePhase({
     required GrpcServiceClient stub,
     required List<Uint8List> intersection,
   }) async {
+    final buildSw = Stopwatch()..start();
+
     final signerKey = await _kms.selectSignerKeyFromIntersection(intersection);
-    if (signerKey == null) return (false, 0);
+    if (signerKey == null) {
+      buildSw.stop();
+      return (false, 0, buildSw.elapsedMilliseconds, 0);
+    }
 
     final generateTimeMs = await _kms.getTimestampForKey(signerKey.publicKey);
-    if (generateTimeMs == null) return (false, 0);
+    if (generateTimeMs == null) {
+      buildSw.stop();
+      return (false, 0, buildSw.elapsedMilliseconds, 0);
+    }
 
     // 同一時刻スロット内の鍵に限定してリングを構成する
     final filteredRing =
     await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
 
-    if (filteredRing.length < 2) return (false, filteredRing.length);
+    if (filteredRing.length < 2) {
+      buildSw.stop();
+      return (false, filteredRing.length, buildSw.elapsedMilliseconds, 0);
+    }
 
     filteredRing.sort(GrpcCommon.comparePubKey);
+
+    buildSw.stop();
+    final ringSelectTimeMs = buildSw.elapsedMilliseconds;
+
+    final sigSw = Stopwatch()..start();
 
     final challengeC = _keyService.generateRandomSecret();
     final resp = await stub.exchangeChallenges(
@@ -216,7 +233,10 @@ class GrpcClient {
 
     final sigForServer =
     _createRingSignature(msgForServer, signerKey.privateKey, filteredRing);
-    if (sigForServer == null) return (false, filteredRing.length);
+    if (sigForServer == null) {
+      sigSw.stop();
+      return (false, filteredRing.length, ringSelectTimeMs, sigSw.elapsedMilliseconds);
+    }
 
     final sigResp = await stub.exchangeRingSignatures(
       RingSignatureReq()..signatureForServer = sigForServer,
@@ -225,7 +245,10 @@ class GrpcClient {
     final sigFromServer = Uint8List.fromList(sigResp.signatureForClient);
     final ok = _verifyRingSignature(msgForClient, sigFromServer, filteredRing);
 
-    return (ok, filteredRing.length);
+    sigSw.stop();
+    final ringSigTimeMs = sigSw.elapsedMilliseconds;
+
+    return (ok, filteredRing.length, ringSelectTimeMs, ringSigTimeMs);
   }
 
   // ----- Signature -----
