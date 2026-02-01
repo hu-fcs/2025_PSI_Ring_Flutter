@@ -507,8 +507,11 @@ class _ExchangePageState extends State<ExchangePage> {
             alignment: PlaceholderAlignment.baseline,
             baseline: TextBaseline.alphabetic,
             child: Transform.translate(
-              offset: const Offset(0, 2),
-              child: Text(subText, style: const TextStyle(fontSize: 10.5)),
+              offset: const Offset(0, 3),
+              child: Text(
+                subText,
+                style: const TextStyle(fontSize: 6),
+              ),
             ),
           ),
           const TextSpan(text: '| '),
