@@ -328,6 +328,96 @@ class KeyManagementService {
     return null;
   }
 
+  String _k(Uint8List b) => base64Encode(b);
+
+  Iterable<List<Uint8List>> _chunkPubkeys(List<Uint8List> pubkeys,
+      {int chunkSize = 450}) sync* {
+    if (pubkeys.isEmpty) return;
+    for (int i = 0; i < pubkeys.length; i += chunkSize) {
+      final end = (i + chunkSize < pubkeys.length) ? i + chunkSize : pubkeys.length;
+      yield pubkeys.sublist(i, end);
+    }
+  }
+
+  Future<Map<String, _GeneratedRow>> _loadGeneratedRowsForPubkeys(
+      Database db,
+      List<Uint8List> pubkeys,
+      ) async {
+    final result = <String, _GeneratedRow>{};
+
+    for (final chunk in _chunkPubkeys(pubkeys)) {
+      final where = 'pubkey_ecd IN (${List.filled(chunk.length, '?').join(',')})';
+      final rows = await db.query(
+        'generated_keys',
+        columns: ['seckey_ecd', 'pubkey_ecd', 'expire_time', 'generate_time'],
+        where: where,
+        whereArgs: chunk,
+      );
+
+      for (final row in rows) {
+        final pub = row['pubkey_ecd'] as Uint8List?;
+        if (pub == null) continue;
+
+        final sec = row['seckey_ecd'] as Uint8List?;
+        final expire = row['expire_time'] as int?;
+        final gen = row['generate_time'] as int?;
+        if (sec == null || expire == null || gen == null) continue;
+
+        result[_k(pub)] = _GeneratedRow(
+          sec: sec,
+          pub: pub,
+          expire: expire,
+          generate: gen,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  Future<Map<String, int>> _loadCollectedTimesForPubkeys(
+      Database db,
+      List<Uint8List> pubkeys,
+      ) async {
+    final result = <String, int>{};
+
+    for (final chunk in _chunkPubkeys(pubkeys)) {
+      final where = 'pubkey_ecd IN (${List.filled(chunk.length, '?').join(',')})';
+      final rows = await db.query(
+        'collected_keys',
+        columns: ['pubkey_ecd', 'receive_time'],
+        where: where,
+        whereArgs: chunk,
+      );
+
+      for (final row in rows) {
+        final pub = row['pubkey_ecd'] as Uint8List?;
+        final ts = row['receive_time'] as int?;
+        if (pub == null || ts == null) continue;
+        result[_k(pub)] = ts;
+      }
+    }
+
+    return result;
+  }
+
+  Future<Map<String, int>> _buildTimestampMap(
+      Database db,
+      List<Uint8List> intersection,
+      ) async {
+    final genRows = await _loadGeneratedRowsForPubkeys(db, intersection);
+    final collected = await _loadCollectedTimesForPubkeys(db, intersection);
+
+    final ts = <String, int>{};
+    for (final e in genRows.entries) {
+      ts[e.key] = e.value.generate;
+    }
+    for (final e in collected.entries) {
+      ts.putIfAbsent(e.key, () => e.value);
+    }
+    return ts;
+  }
+
   // ----- 署名者鍵選択（交差集合内で最も新しいもの） -----
 
   Future<KeyPair?> selectSignerKeyFromIntersection(
@@ -336,33 +426,17 @@ class KeyManagementService {
     if (intersection.isEmpty) return null;
 
     final db = await DatabaseHelper.getDatabase();
+    final genRows = await _loadGeneratedRowsForPubkeys(db, intersection);
 
     int? bestExpire;
     Uint8List? bestSec;
     Uint8List? bestPub;
 
-    for (final pub in intersection) {
-      final rows = await db.query(
-        'generated_keys',
-        columns: ['seckey_ecd', 'pubkey_ecd', 'expire_time'],
-        where: 'pubkey_ecd = ?',
-        whereArgs: [pub],
-        limit: 1,
-      );
-
-      if (rows.isEmpty) continue;
-
-      final row = rows.first;
-      final sec = row['seckey_ecd'] as Uint8List?;
-      final p = row['pubkey_ecd'] as Uint8List?;
-      final expire = row['expire_time'] as int?;
-
-      if (sec != null && p != null && expire != null) {
-        if (bestExpire == null || expire > bestExpire) {
-          bestExpire = expire;
-          bestSec = sec;
-          bestPub = p;
-        }
+    for (final row in genRows.values) {
+      if (bestExpire == null || row.expire > bestExpire) {
+        bestExpire = row.expire;
+        bestSec = row.sec;
+        bestPub = row.pub;
       }
     }
 
@@ -390,8 +464,13 @@ class KeyManagementService {
     ).millisecondsSinceEpoch;
     final dayEnd = dayStart + const Duration(days: 1).inMilliseconds;
 
+    if (intersection.isEmpty) return result;
+
+    final db = await DatabaseHelper.getDatabase();
+    final tsMap = await _buildTimestampMap(db, intersection);
+
     for (final pub in intersection) {
-      final ts = await getTimestampForKey(pub);
+      final ts = tsMap[_k(pub)];
       if (ts == null) continue;
 
       switch (range) {
@@ -441,6 +520,20 @@ class KeyManagementService {
     }
     return _secureStorage.delete(key: _masterKeyAlias);
   }
+}
+
+class _GeneratedRow {
+  final Uint8List sec;
+  final Uint8List pub;
+  final int expire;
+  final int generate;
+
+  const _GeneratedRow({
+    required this.sec,
+    required this.pub,
+    required this.expire,
+    required this.generate,
+  });
 }
 
 /// リング署名の対象期間

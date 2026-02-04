@@ -20,9 +20,15 @@ class DatabaseHelper {
 
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (Database db, int version) async {
         await _createTables(db);
+        await _createIndexes(db);
+      },
+      onUpgrade: (Database db, int oldVersion, int newVersion) async {
+        if (oldVersion < 2) {
+          await _createIndexes(db);
+        }
       },
     );
 
@@ -54,6 +60,20 @@ class DatabaseHelper {
       receive_time INTEGER NOT NULL
     )
   ''');
+  }
+
+  static Future<void> _createIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_pubkey ON generated_keys(pubkey_ecd)',
+    );
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_generate_expire ON generated_keys(generate_time, expire_time)',
+    );
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_expire_time ON generated_keys(expire_time)',
+    );
   }
 
   // ----- Debug / Seed -----

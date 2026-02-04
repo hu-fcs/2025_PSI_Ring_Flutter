@@ -1,6 +1,7 @@
 // lib/grpc/grpc_client.dart
 
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -127,8 +128,7 @@ class GrpcClient {
 
     final serverEncKeys =
     resp.serverEncKeys.map((e) => Uint8List.fromList(e)).toList();
-    final abQ =
-    resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
+    final abQ = resp.clientReencKeys.map((e) => Uint8List.fromList(e)).toList();
 
     // サーバ側集合サイズ（|S_B|）
     final sbKeyCount = serverEncKeys.length;
@@ -205,6 +205,11 @@ class GrpcClient {
       return (false, 0, buildSw.elapsedMilliseconds, 0);
     }
 
+    final challengeC = _keyService.generateRandomSecret();
+    final challengeFuture = stub.exchangeChallenges(
+      ClientChallenge()..challengeC = challengeC,
+    );
+
     // 同一時刻スロット内の鍵に限定してリングを構成する
     final filteredRing =
     await _kms.filterKeysBySameSlot(intersection, generateTimeMs);
@@ -221,11 +226,7 @@ class GrpcClient {
 
     final sigSw = Stopwatch()..start();
 
-    final challengeC = _keyService.generateRandomSecret();
-    final resp = await stub.exchangeChallenges(
-      ClientChallenge()..challengeC = challengeC,
-    );
-
+    final resp = await challengeFuture;
     final challengeS = Uint8List.fromList(resp.challengeS);
 
     final msgForServer = GrpcCommon.bytesToHex(challengeS);
@@ -235,7 +236,12 @@ class GrpcClient {
     _createRingSignature(msgForServer, signerKey.privateKey, filteredRing);
     if (sigForServer == null) {
       sigSw.stop();
-      return (false, filteredRing.length, ringSelectTimeMs, sigSw.elapsedMilliseconds);
+      return (
+      false,
+      filteredRing.length,
+      ringSelectTimeMs,
+      sigSw.elapsedMilliseconds
+      );
     }
 
     final sigResp = await stub.exchangeRingSignatures(
