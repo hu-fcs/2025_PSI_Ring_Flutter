@@ -38,6 +38,9 @@ class GrpcServiceImpl extends GrpcServiceBase {
   Uint8List? _lastChallengeS;
   Future<Uint8List>? _serverSignatureFuture;
 
+  Future<_RingSelection>? _ringSelectionFuture;
+  _RingSelection? _ringSelection;
+
   final _psiEventController = StreamController<PsiResult>.broadcast();
   Stream<PsiResult> get onPsiFinished => _psiEventController.stream;
 
@@ -113,8 +116,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ) async {
     await _ensureReady();
 
-    final clientAbP =
-    req.clientReencServerKeys.map(Uint8List.fromList).toList();
+    final clientAbP = req.clientReencServerKeys.map(Uint8List.fromList).toList();
 
     final intersection = _computeIntersection(clientAbP);
     _lastIntersection = intersection;
@@ -143,6 +145,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     _lastChallengeC = null;
     _lastChallengeS = null;
+    _serverSignatureFuture = null;
+
+    _ringSelection = null;
+    _ringSelectionFuture = null;
+    if (_lastIntersection.isNotEmpty) {
+      _ringSelectionFuture = _computeRingSelectionAsync(_lastIntersection);
+    }
 
     return PsiDone();
   }
@@ -163,20 +172,17 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _lastChallengeC = Uint8List.fromList(req.challengeC);
     _lastChallengeS = _keyService.generateRandomSecret();
 
-    _serverSignatureFuture = _computeServerSignatureAsync();
+    _ringSelectionFuture ??= _computeRingSelectionAsync(_lastIntersection);
 
     return ServerChallenge()..challengeS = _lastChallengeS!;
   }
 
-  // ----- Ring signature (server) -----
+  // ----- Ring selection (server) -----
 
-  Future<Uint8List> _computeServerSignatureAsync() async {
-    if (kDebugMode) {
-      debugPrint('[SERVER] create ring signature');
-    }
-
-    final signer =
-    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
+  Future<_RingSelection> _computeRingSelectionAsync(
+      List<Uint8List> intersection,
+      ) async {
+    final signer = await _kms.selectSignerKeyFromIntersection(intersection);
     if (signer == null) {
       throw GrpcError.failedPrecondition('No signer key');
     }
@@ -187,12 +193,31 @@ class GrpcServiceImpl extends GrpcServiceBase {
     }
 
     // 同一時刻スロット内の鍵に限定してリングを構成する
-    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
+    final ring = await _kms.filterKeysBySameSlot(intersection, signerTime);
     if (ring.length < 2) {
       throw GrpcError.failedPrecondition('Ring too small');
     }
 
     ring.sort(GrpcCommon.comparePubKey);
+
+    return _RingSelection(
+      signer: signer,
+      ring: ring,
+    );
+  }
+
+  // ----- Ring signature (server) -----
+
+  Future<Uint8List> _computeServerSignatureAsync() async {
+    if (kDebugMode) {
+      debugPrint('[SERVER] create ring signature');
+    }
+
+    final sel = _ringSelection ?? await _ringSelectionFuture!;
+    _ringSelection = sel;
+
+    final ring = sel.ring;
+    final signer = sel.signer;
 
     final msgHex = GrpcCommon.bytesToHex(_lastChallengeC!);
 
@@ -230,8 +255,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       throw GrpcError.internal('Server signature failed');
     }
 
-    final sig =
-    Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
+    final sig = Uint8List.fromList(sigPtr.asTypedList((1 + ring.length) * 32));
     calloc.free(sigPtr);
 
     return sig;
@@ -248,7 +272,9 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     final sigFromClient = Uint8List.fromList(request.signatureForServer);
 
+    _serverSignatureFuture ??= _computeServerSignatureAsync();
     final sigForClient = await _serverSignatureFuture!;
+
     unawaited(_verifyClientSignatureLater(sigFromClient));
 
     return RingSignatureResp()..signatureForClient = sigForClient;
@@ -257,17 +283,10 @@ class GrpcServiceImpl extends GrpcServiceBase {
   // ----- Ring signature (client verify) -----
 
   Future<void> _verifyClientSignatureLater(Uint8List clientSig) async {
-    final signer =
-    await _kms.selectSignerKeyFromIntersection(_lastIntersection);
-    if (signer == null) return;
+    final sel = _ringSelection ?? await _ringSelectionFuture!;
+    _ringSelection = sel;
 
-    final signerTime = await _kms.getTimestampForKey(signer.publicKey);
-    if (signerTime == null) return;
-
-    final ring = await _kms.filterKeysBySameSlot(_lastIntersection, signerTime);
-    if (ring.length < 2) return;
-
-    ring.sort(GrpcCommon.comparePubKey);
+    final ring = sel.ring;
 
     final msgHex = GrpcCommon.bytesToHex(_lastChallengeS!);
 
@@ -318,6 +337,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _lastChallengeC = null;
     _lastChallengeS = null;
     _serverSignatureFuture = null;
+    _ringSelectionFuture = null;
+    _ringSelection = null;
   }
 
   // ----- Intersection -----
@@ -336,6 +357,16 @@ class GrpcServiceImpl extends GrpcServiceBase {
     }
     return result;
   }
+}
+
+class _RingSelection {
+  final KeyPair signer;
+  final List<Uint8List> ring;
+
+  const _RingSelection({
+    required this.signer,
+    required this.ring,
+  });
 }
 
 /// gRPC サーバ管理。
