@@ -1,5 +1,6 @@
 // lib/ble/ble_advertiser.dart
 import 'dart:async';
+import 'dart:collection'; // ★追加（Queueを使う）
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
@@ -32,6 +33,19 @@ class BleAdvertiser {
   Uint8List? _payloadBack;
   int? _lastSeq2;
 
+  // ★優先送信フレーム（Challenge/Signatureを先に流す）
+  final Queue<Uint8List> _priorityFrames = Queue<Uint8List>();
+  static const int _priorityMaxFrames = 32;
+
+  void _pushPriority(Uint8List frame31) {
+    // キューが溜まりすぎると遅延が増えるので古いものから落とす
+    if (_priorityFrames.length >= _priorityMaxFrames) {
+      _priorityFrames.removeFirst();
+    }
+    _priorityFrames.addLast(frame31);
+  }
+
+
   bool _isStarted = false;
 
   static const Duration _rotateInterval = Duration(milliseconds: 500);
@@ -44,6 +58,75 @@ class BleAdvertiser {
   );
 
   bool get isAdvertising => _isAdvertising;
+
+  /// ver=7 Challenge を優先キューへ
+  void enqueueChallenge({
+    required Uint8List targetKeyId4,
+    required int challengeId,
+    required Uint8List nonce16,
+    required Uint8List verifierId4,
+  }) {
+    if (targetKeyId4.lengthInBytes != 4) return;
+    if (nonce16.lengthInBytes != 16) return;
+    if (verifierId4.lengthInBytes != 4) return;
+
+    final hdr = BleHdr.make(
+      seq2: currentTenMinSeq2(),
+      part: 0,
+      yParity: 0,
+      ver: BleHdr.verChallenge,
+    );
+
+    final paddingLen = 31 - (1 + 4 + 1 + 16 + 4);
+    final payload = Uint8List.fromList([
+      hdr,
+      ...targetKeyId4,
+      challengeId & 0xFF,
+      ...nonce16,
+      ...verifierId4,
+      ...Uint8List(paddingLen),
+    ]);
+
+    _pushPriority(payload);
+  }
+
+  /// ver=8 Signature(64B) を 16B×4 に分割して優先キューへ
+  void enqueueSignature({
+    required Uint8List targetKeyId4,
+    required int challengeId,
+    required Uint8List signature64,
+    required Uint8List verifierId4,
+  }) {
+    if (targetKeyId4.lengthInBytes != 4) return;
+    if (signature64.lengthInBytes != 64) return;
+    if (verifierId4.lengthInBytes != 4) return;
+
+    for (int partIndex = 0; partIndex < 4; partIndex++) {
+      final hdr = BleHdr.make(
+        seq2: currentTenMinSeq2(),
+        part: 0,
+        yParity: 0,
+        ver: BleHdr.verSignature,
+      );
+
+      final start = partIndex * 16;
+      final sigPart16 = signature64.sublist(start, start + 16);
+
+      final paddingLen = 31 - (1 + 4 + 1 + 1 + 16 + 4);
+      final payload = Uint8List.fromList([
+        hdr,
+        ...targetKeyId4,
+        challengeId & 0xFF,
+        partIndex & 0xFF,
+        ...sigPart16,
+        ...verifierId4,
+        ...Uint8List(paddingLen),
+      ]);
+
+      _pushPriority(payload);
+    }
+  }
+
 
   Future<void> _rotateAndSend() async {
     if (!_isAdvertising) return;
@@ -69,17 +152,22 @@ class BleAdvertiser {
         }
       }
 
-      final Uint8List? payload;
-      final int partSent = _sendFrontNext ? 0 : 1;
+      Uint8List? payload;
+      int partSent;
 
-      if (_sendFrontNext) {
-        payload = _payloadFront;
+      // ★優先フレームがあれば先に送る（Challenge/Signature）
+      if (_priorityFrames.isNotEmpty) {
+        payload = _priorityFrames.removeFirst();
+        // 優先フレームは part の意味が薄いので、表示用に headerから取る
+        partSent = BleHdr.parsePart(payload[0]);
       } else {
-        payload = _payloadBack;
+        partSent = _sendFrontNext ? 0 : 1;
+        payload = _sendFrontNext ? _payloadFront : _payloadBack;
+        _sendFrontNext = !_sendFrontNext; // 次回のために反転
       }
-      _sendFrontNext = !_sendFrontNext; // 次回のために反転
 
       if (payload == null) throw StateError('payload not prepared');
+
 
       final data = AdvertiseData(
         includeDeviceName: false,

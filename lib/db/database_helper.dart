@@ -49,6 +49,29 @@ class DatabaseHelper {
         ts INTEGER NOT NULL
       )
     ''');
+
+    // 友達テーブル
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS friends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,         -- ユーザーが付ける名前（例：山田さん）
+        note TEXT,                   -- 任意のメモ
+        created_at INTEGER NOT NULL  -- 作成時刻 (Unix time, sec)
+      )
+    ''');
+
+    // 友達ごとの将来ニックネームテーブル
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS friend_nicknames (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        friend_id INTEGER NOT NULL,
+        pubkey_ecd BLOB NOT NULL,    -- 33バイト圧縮公開鍵
+        slot_start INTEGER NOT NULL, -- スロット開始時刻 (sec)
+        slot_end INTEGER NOT NULL,   -- スロット終了時刻 (sec)
+        UNIQUE(friend_id, pubkey_ecd),
+        FOREIGN KEY(friend_id) REFERENCES friends(id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<int> getTotalKeyCount() async {

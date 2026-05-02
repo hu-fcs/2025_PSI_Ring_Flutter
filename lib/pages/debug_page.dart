@@ -12,6 +12,7 @@ import '../boringssl_service.dart';
 import '../db/database_helper.dart';
 import '../key_management_service.dart';
 import '../native_key_service.dart';
+import '../db/friends_dao.dart';
 
 // Isolateで実行するためのトップレベル関数 (変更なし)
 Future<Map<String, dynamic>> _runRingSignatureInIsolate(Map<String, dynamic> args) async {
@@ -76,7 +77,7 @@ class _DebugPageState extends State<DebugPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -810,6 +811,142 @@ class _DebugPageState extends State<DebugPage>
     );
   }
 
+  Widget _buildFriendsTab() {
+    // 画面を下に引っ張って更新できるようにする
+    return RefreshIndicator(
+      onRefresh: () async {
+        setState(() {});
+      },
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('共有の保存状況（friends / friend_nicknames）',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+
+                  FutureBuilder<int>(
+                    future: FriendsDao.instance.getTotalFriendNicknames(),
+                    builder: (context, snap) {
+                      final total = snap.data ?? 0;
+                      return Text('保存された friend_nicknames 総数: $total');
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final deleted = await FriendsDao.instance.deleteExpiredFriendNicknames();
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('期限切れニックネームを $deleted 件削除しました')),
+                      );
+                      setState(() {}); // 表示更新
+                    },
+                    icon: const Icon(Icons.cleaning_services),
+                    label: const Text('期限切れを掃除'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          FutureBuilder<List<Map<String, Object?>>>(
+            future: FriendsDao.instance.listFriendsWithNicknameCounts(),
+            builder: (context, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Center(child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ));
+              }
+              if (snap.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text('エラー: ${snap.error}'),
+                );
+              }
+
+              final rows = snap.data ?? [];
+              if (rows.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('友達データがありません（まだ受信していない可能性）'),
+                );
+              }
+
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  children: rows.map((r) {
+                    final id = r['id'];
+                    final label = r['label'] ?? '(no label)';
+                    final note = r['note'];
+                    final cnt = r['nickname_count'] ?? 0;
+                    final createdAt = r['created_at'];
+
+                    return ListTile(
+                      title: Text('$label'),
+                      subtitle: Text('id=$id  note=${note ?? "-"}  created_at=$createdAt'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('${cnt}件'),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'この友達と共有リストを削除',
+                            onPressed: () async {
+                              final friendId = (r['id'] as int);
+
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  title: const Text('削除確認'),
+                                  content: Text('$label の共有ニックネームリストを削除しますか？\n（復元できません）'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context, false),
+                                      child: const Text('キャンセル'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(context, true),
+                                      child: const Text('削除'),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (ok == true) {
+                                await FriendsDao.instance.deleteFriend(friendId);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('$label を削除しました')),
+                                );
+                                setState(() {}); // 再描画して一覧更新
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -822,6 +959,7 @@ class _DebugPageState extends State<DebugPage>
               Tab(text: '収集した鍵'),
               Tab(text: '生成した鍵'),
               Tab(text: '機能検証'),
+              Tab(text: '友達'),
             ],
           ),
           Expanded(
@@ -831,6 +969,7 @@ class _DebugPageState extends State<DebugPage>
                 _buildKeyListTab('ecd_keys', false),
                 _buildKeyListTab('generated_keys', true),
                 _buildVerificationTab(),
+                _buildFriendsTab(),
               ],
             ),
           ),

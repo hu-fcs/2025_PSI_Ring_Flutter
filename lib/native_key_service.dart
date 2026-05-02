@@ -103,4 +103,86 @@ class NativeKeyService {
     );
   }
 // --- ★ここまで新しいメソッド★ ---
+// --- ★ここから ECDSA メソッド★ ---
+  /// ECDSA チャレンジ署名 (secp256r1, 署名は r||s 形式の64バイト)
+  ///
+  /// [privKey32]  : 32バイトの秘密鍵
+  /// [challenge]  : 任意長のチャレンジデータ（そのまま C 側で SHA-256 される想定）
+  /// 戻り値      : 成功時は 64バイトの署名 (r||s)、失敗時は null
+  Uint8List? signChallenge(Uint8List privKey32, Uint8List challenge) {
+    if (privKey32.length != 32) {
+      throw ArgumentError('privKey32 must be 32 bytes');
+    }
+
+    final privPtr = calloc<Uint8>(32);
+    final msgPtr = calloc<Uint8>(challenge.length);
+    final sigPtr = calloc<Uint8>(64);
+
+    try {
+      // Dart → C用バッファにコピー
+      privPtr.asTypedList(32).setAll(0, privKey32);
+      msgPtr.asTypedList(challenge.length).setAll(0, challenge);
+
+      final ret = _bindings.ecdsa_sign_challenge(
+        privPtr,
+        msgPtr,
+        challenge.length,
+        sigPtr,
+      );
+
+      if (ret != 1) {
+        // 署名失敗
+        return null;
+      }
+
+      // 64バイトの署名 (r||s) を Dart に戻す
+      return Uint8List.fromList(sigPtr.asTypedList(64));
+    } finally {
+      calloc.free(privPtr);
+      calloc.free(msgPtr);
+      calloc.free(sigPtr);
+    }
+  }
+  /// ECDSA チャレンジ検証 (secp256r1, 署名は r||s 形式の64バイト)
+  ///
+  /// [pubKey33]     : 33バイト圧縮公開鍵
+  /// [challenge]    : 署名時と同じチャレンジデータ
+  /// [signature64]  : 64バイトの署名 (r||s)
+  /// 戻り値        : 検証成功なら true, 失敗なら false
+  bool verifyChallenge(
+      Uint8List pubKey33,
+      Uint8List challenge,
+      Uint8List signature64,
+      ) {
+    if (pubKey33.length != 33) {
+      throw ArgumentError('pubKey33 must be 33 bytes');
+    }
+    if (signature64.length != 64) {
+      throw ArgumentError('signature64 must be 64 bytes (r||s)');
+    }
+
+    final pubPtr = calloc<Uint8>(33);
+    final msgPtr = calloc<Uint8>(challenge.length);
+    final sigPtr = calloc<Uint8>(64);
+
+    try {
+      pubPtr.asTypedList(33).setAll(0, pubKey33);
+      msgPtr.asTypedList(challenge.length).setAll(0, challenge);
+      sigPtr.asTypedList(64).setAll(0, signature64);
+
+      final ret = _bindings.ecdsa_verify_challenge(
+        pubPtr,
+        msgPtr,
+        challenge.length,
+        sigPtr,
+      );
+
+      return ret == 1;
+    } finally {
+      calloc.free(pubPtr);
+      calloc.free(msgPtr);
+      calloc.free(sigPtr);
+    }
+  }
+// --- ★ここまで ECDSA メソッド★ ---
 }

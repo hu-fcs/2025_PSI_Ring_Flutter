@@ -52,4 +52,20 @@ EXPORT int verify_ring_signature(
         int ring_size
 );
 
+// ECDSA チャレンジ署名 (secp256r1)
+// out_sig64 は 64 bytes (r||s)
+EXPORT int ecdsa_sign_challenge(
+        const uint8_t* priv_key_32b,
+        const uint8_t* msg,
+        uint32_t msg_len,
+        uint8_t* out_sig64);
+
+// ECDSA チャレンジ検証 (secp256r1)
+// sig64 は 64 bytes (r||s)
+EXPORT int ecdsa_verify_challenge(
+        const uint8_t* pub_key_33b,
+        const uint8_t* msg,
+        uint32_t msg_len,
+        const uint8_t* sig64);
+
 #endif // RING_SIGNATURE_H

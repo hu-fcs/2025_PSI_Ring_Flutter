@@ -9,7 +9,36 @@ class BleExchangeController {
   final _advertiser = BleAdvertiser();
   final _scanner = BleScanner();
 
+  BleExchangeController() {
+    // Scannerが「Challengeを広告で送って」と言ったら Advertiserへ渡す
+    _scanner.onNeedAdvertiseChallenge =
+        (targetKeyId4, challengeId, nonce16, verifierId4) {
+      _advertiser.enqueueChallenge(
+        targetKeyId4: targetKeyId4,
+        challengeId: challengeId,
+        nonce16: nonce16,
+        verifierId4: verifierId4,
+      );
+    };
+
+    // Scannerが「Signatureを広告で送って」と言ったら Advertiserへ渡す
+    _scanner.onNeedAdvertiseSignature =
+        (targetKeyId4, challengeId, signature64, verifierId4) {
+      _advertiser.enqueueSignature(
+        targetKeyId4: targetKeyId4,
+        challengeId: challengeId,
+        signature64: signature64,
+        verifierId4: verifierId4,
+      );
+    };
+  }
+
   bool get isRunning => _advertiser.isAdvertising && _scanner.isScanning;
+
+  /// ExchangePage 側から「友達検出時の動作」を設定できるようにする
+  set onFriendDetected(void Function(String friendLabel, bool authenticated)? cb) {
+    _scanner.onFriendDetected = cb;
+  }
 
   Future<void> toggleExchange() async {
     if (isRunning) {

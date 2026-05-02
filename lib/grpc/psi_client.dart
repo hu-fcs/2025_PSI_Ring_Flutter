@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../key_management_service.dart'; // SlotNickname を使う
 import 'package:grpc/grpc.dart';
 
 import '../proto/generated/psi.pbgrpc.dart';
@@ -99,4 +100,63 @@ class PsiGrpcClient {
     _channel = null;
     _stub = null;
   }
+
+  /// 将来ニックネームスケジュールをサーバに送信する
+  ///
+  /// [ownerName]  : 相手に表示させたい自分の名前（ニックネーム）
+  /// [period]     : どこまで先のニックネームか
+  /// [slot]       : 1スロットの長さ（10分）
+  /// [schedule]   : KeyManagementService.generateFutureNicknameList() の結果
+  Future<void> sendNicknameSchedule({
+    required String ownerName,
+    required Duration period,
+    required Duration slot,
+    required List<SlotNickname> schedule,
+  }) async {
+    if (_stub == null) {
+      throw StateError('Client not connected');
+    }
+    if (schedule.isEmpty) {
+      return;
+    }
+
+    final slotMs = slot.inMilliseconds;
+    final startMs = schedule.first.slotStart.millisecondsSinceEpoch;
+
+    final keysHex = schedule
+        .map((s) => _bytesToHex(s.pubkey33))
+        .toList(growable: false);
+
+    final payload = jsonEncode({
+      'type': 'nickname_schedule',
+      'owner_name': ownerName,
+      'period': period.inDays == 1
+          ? '1d'
+          : (period.inDays == 7 ? '7d' : '${period.inDays}d'),
+      'slot_ms': slotMs,
+      'start_ms': startMs,
+      'keys': keysHex,
+    });
+
+    print(
+        '[CLIENT] sendNicknameSchedule(): ${keysHex.length} slots, period=$period slot=$slot');
+
+    final resp = await ping(payload);
+
+    try {
+      final json = jsonDecode(resp);
+      if (json is Map && json['type'] == 'nickname_schedule_ack') {
+        print(
+            '[CLIENT] nickname_schedule ACK: friend_id=${json['friend_id']}, received=${json['received']}');
+      } else {
+        print('[CLIENT] nickname_schedule unexpected resp: $resp');
+      }
+    } catch (_) {
+      print('[CLIENT] nickname_schedule resp not JSON: $resp');
+    }
+  }
+
+  String _bytesToHex(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
 }

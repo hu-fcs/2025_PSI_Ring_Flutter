@@ -10,6 +10,25 @@ import '../grpc/psi_server.dart';
 import '../key_management_service.dart';
 import '../db/database_helper.dart';
 import 'debug_page.dart';
+import '../grpc/psi_client.dart'; // ★追加
+import 'dart:async';
+
+
+enum NicknameSchedulePeriod { oneDay, oneWeek, oneMonth }
+
+extension NicknameSchedulePeriodExt on NicknameSchedulePeriod {
+  String get label => switch (this) {
+    NicknameSchedulePeriod.oneDay => '1日',
+    NicknameSchedulePeriod.oneWeek => '1週間',
+    NicknameSchedulePeriod.oneMonth => '1か月',
+  };
+
+  Duration get duration => switch (this) {
+    NicknameSchedulePeriod.oneDay => const Duration(days: 1),
+    NicknameSchedulePeriod.oneWeek => const Duration(days: 7),
+    NicknameSchedulePeriod.oneMonth => const Duration(days: 30),
+  };
+}
 
 class ExchangePage extends StatefulWidget {
   const ExchangePage({super.key});
@@ -32,6 +51,25 @@ class _ExchangePageState extends State<ExchangePage> {
   // ===== DB / 鍵 =====
   final _keyService = KeyManagementService();
   final _db = DatabaseHelper();
+
+  final _ownerNameController = TextEditingController(text: '自分の端末');
+  final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
+  final _portController = TextEditingController(text: '50051');
+
+  NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
+
+  final _grpcClient = PsiGrpcClient();
+  // 近くにいる友達一覧（最後に見えた時刻も保持）
+  final Map<String, int> _nearbyLastSeenMs = {};
+  final Map<String, bool> _nearbyAuth = {};
+  Timer? _nearbyGcTimer;
+
+  static const Duration _nearbyTtl = Duration(seconds: 30); // 30秒見えなければ消す
+  // 認証OKを保持する時間
+  static const Duration _authHold = Duration(seconds: 30);
+  // friendLabelごとに「最後にOKになった時刻」を保存
+  final Map<String, int> _authOkLastMs = {};
+
 
   // ==========================================================
   // ★ 常に DB から最新の鍵数を取得する
@@ -240,6 +278,30 @@ class _ExchangePageState extends State<ExchangePage> {
                   ),
                   const SizedBox(height: 8),
                   const Text('近くの端末と鍵を交換します。'),
+                  const SizedBox(height: 8),
+                  Text(
+                    _nearbyLastSeenMs.isEmpty
+                        ? '近くの友達: なし'
+                        : '近くの友達: ${_nearbyLastSeenMs.length}人',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  if (_nearbyLastSeenMs.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    ..._nearbyLastSeenMs.keys.map((name) {
+                      final ok = _nearbyAuth[name] ?? false;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Icon(ok ? Icons.verified : Icons.person, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(name)),
+                            Text(ok ? 'OK' : '未認証', style: const TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
                 ],
               ),
             ),
@@ -304,8 +366,184 @@ class _ExchangePageState extends State<ExchangePage> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('将来ニックネームの共有（送信側）',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    controller: _ownerNameController,
+                    decoration: const InputDecoration(labelText: '相手に表示される自分の名前'),
+                  ),
+                  const SizedBox(height: 8),
+
+                  TextField(
+                    controller: _hostController,
+                    decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
+                  ),
+                  const SizedBox(height: 8),
+
+                  TextField(
+                    controller: _portController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'ポート'),
+                  ),
+                  const SizedBox(height: 12),
+
+                  InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '共有期間',
+                      helper: Text(
+                        'この期間分の将来ニックネームを生成し、相手端末へ共有します。',
+                        softWrap: true,
+                      ),
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<NicknameSchedulePeriod>(
+                        value: _selectedPeriod,
+                        isExpanded: true,
+                        items: NicknameSchedulePeriod.values
+                            .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
+                            .toList(),
+                        onChanged: (p) => setState(() => _selectedPeriod = p!),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+
+                  ElevatedButton(
+                    onPressed: _generateAndShare,
+                    child: const Text('生成して共有'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
+  }
+  @override
+  void initState() {
+    super.initState();
+    _ble.onFriendDetected = _onFriendDetected;
+
+    _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final expired = _nearbyLastSeenMs.entries
+          .where((e) => now - e.value > _nearbyTtl.inMilliseconds)
+          .map((e) => e.key)
+          .toList();
+
+      if (expired.isEmpty) return;
+      setState(() {
+        for (final k in expired) {
+          _nearbyLastSeenMs.remove(k);
+          _nearbyAuth.remove(k);
+        }
+      });
+    });
+  }
+  @override
+  void dispose() {
+    _nearbyGcTimer?.cancel();
+    _ownerNameController.dispose();
+    _hostController.dispose();
+    _portController.dispose();
+    super.dispose();
+  }
+
+
+  void _onFriendDetected(String friendLabel, bool authenticated) {
+    if (!mounted) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // 初回だけSnackBar（連発防止）
+    final isNew = !_nearbyLastSeenMs.containsKey(friendLabel);
+
+    // 以前の認証状態
+    final prevAuth = _nearbyAuth[friendLabel] ?? false;
+
+    // 署名検証が通った“本当のOK”が来たら、OK時刻を更新
+    if (authenticated) {
+      _authOkLastMs[friendLabel] = now;
+    }
+
+    // OK保持中かどうか（保持中は false が来てもOK扱いにする）
+    final lastOk = _authOkLastMs[friendLabel] ?? 0;
+    final keepOk = (now - lastOk) < _authHold.inMilliseconds;
+
+    // 表示上の認証状態
+    final effectiveAuth = authenticated || keepOk;
+
+    // ★昇格判定（未認証→認証OKになった瞬間）
+    // これは “authenticated=true” が来た瞬間だけを昇格としたいので、そのまま
+    final isUpgrade = !prevAuth && authenticated;
+
+    setState(() {
+      _nearbyLastSeenMs[friendLabel] = now;
+
+      // 降格は「保持時間が切れた時」だけ許可
+      _nearbyAuth[friendLabel] = effectiveAuth;
+    });
+
+    // 昇格のときに出す
+    if (isNew || isUpgrade) {
+      final msg = authenticated
+          ? '近くで $friendLabel さんを検出しました ✅'
+          : '近くで $friendLabel さん候補を検出しました';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Future<void> _generateAndShare() async {
+    final owner = _ownerNameController.text.trim();
+    final host = _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim());
+
+    if (owner.isEmpty || host.isEmpty || port == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('名前 / ホスト / ポートを正しく入力してください')),
+      );
+      return;
+    }
+
+    const slot = Duration(minutes: 10);
+    final period = _selectedPeriod.duration;
+
+    try {
+      // 1) 期間分の将来ニックネームを生成
+      final schedule = await _keyService.generateFutureNicknameList(
+        period: period,
+        slot: slot,
+      );
+
+      // 2) gRPC 送信（nickname_schedule JSON）
+      await _grpcClient.connect(host,port); // 既存実装に合わせて
+      await _grpcClient.sendNicknameSchedule(
+        ownerName: owner,
+        period: period,
+        slot: slot,
+        schedule: schedule,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${schedule.length}件）')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('共有に失敗: $e')),
+      );
+    }
   }
 }

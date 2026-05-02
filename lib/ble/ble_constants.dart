@@ -11,16 +11,27 @@ import 'dart:typed_data';
 /// bit0   : yParity (0x02→0, 0x03→1)
 class BleHdr {
   // ★ バージョンを 6 に更新 (Manufacturer ID + 2-part + 31B payload)
-  static const int currentVer = 6;
+  // --- ver 定義 ---
+  static const int verPubkey    = 6; // 既存互換（公開鍵断片）
+  static const int verChallenge = 7; // Challenge
+  static const int verSignature = 8; // Signature(分割)
+
+  // 既存コード互換のため、従来の currentVer は「公開鍵断片」を指す
+  static const int currentVer = verPubkey;
+
+  static bool isSupportedVer(int ver) =>
+      ver == verPubkey || ver == verChallenge || ver == verSignature;
+
 
   static int make({
     required int seq2,   // 0..3
     required int part,   // 0=front,1=back
     required int yParity,// 0/1
+    int ver = currentVer, // ★追加：指定がなければ従来通りver=6
   }) {
     final s = (seq2   & 0x03) << 6;      // bit7-6
     final p = (part   & 0x01) << 5;      // bit5
-    final v = (currentVer & 0x0F) << 1;  // bit4-1
+    final v = (ver  & 0x0F) << 1;  // bit4-1
     final y = (yParity & 0x01);          // bit0
     return s | p | v | y;
   }
