@@ -105,3 +105,4 @@ sequenceDiagram
 ```agsl
 protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
 ```
+nicknamelistの追加
