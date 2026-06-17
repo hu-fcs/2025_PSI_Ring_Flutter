@@ -3,6 +3,7 @@ import 'dart:io'; // Platform
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
+import 'package:fluttersample_2025/ble/mutual_authentication.dart';
 // import 'package:permission_handler/permission_handler.dart';
 import 'nickname.dart';
 
@@ -36,28 +37,21 @@ class BleCentralManager extends ChangeNotifier {
   StreamSubscription? _discoveredSubscription;
   StreamSubscription? _connectionStateSubscription;
 
-  // Uint8List _centralNickname = Uint8List(33); // BleNickname().localNickname に置き換え
-
   /// アプリ起動時にBLEのCentralを初期化
   void initialize() async {
-    // ニックネーム関する初期化
-    // _centralNickname = Uint8List.fromList(BleNickname().lastNickname);
-    /*_localNicknameStreamSubscription = BleNickname().localNicknameStream.listen((nickname) async { // ニックネームの更新
-      _discoveredPeripherals.clear(); // 自身のニックネームが変わったので，これまでに接続てニックネームをつたえた相手を忘れて，再接続する．（これでは広告というよりプッシュ）
-      _centralNickname = nickname;
-      if (kDebugMode) print('central stream nickname ${BleNickname.nickname2string(_centralNickname)}');
-    });
-
+    /* ExchangePageと重複しているのでなし．
     // await _requestPermissions(); // exchange_page.dart: ExchangePageクラスで実施済み
+    */
 
     // BLEが利用可能かチェック・監視
     _stateSubscription = CentralManager().stateChanged.listen((arg) {
-      _isAvailable = arg.state == BluetoothLowEnergyState.poweredOn;
+      if (kDebugMode) print("BleCentralManager CentralManager().stateChanged.listen: ${arg.state}");
+      _isAvailable = (arg.state == BluetoothLowEnergyState.poweredOn);
       notifyListeners(); // UIに通知
-    });*/
+    });
   }
 
-  /// OSやユーザにBLEを使う許可をもらう
+  /// OSやユーザにBLEを使う許可をもらう．同等のものがExchangePageクラスに実装されている．
   /* Future<void> _requestPermissions() async {
     if (Platform.isAndroid) {
       // Android 12 (API 31) 以降とそれ未満で必要な権限をまとめてリクエスト
@@ -86,10 +80,7 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> startScan() async {
     if (_isScanning) return;
 
-    _discoveredPeripherals.clear();
-    _isScanning = true;
-    notifyListeners();
-
+    _discoveredPeripherals.clear(); // clearするタイミングはここだけでいいのか．
     _discoveredSubscription = CentralManager().discovered.listen(_onDeviceDiscovered);
     _connectionStateSubscription = CentralManager().connectionStateChanged.listen((eventArgs) async {
       if (eventArgs.state == ConnectionState.connected) {
@@ -99,6 +90,8 @@ class BleCentralManager extends ChangeNotifier {
       }
     });
     await CentralManager().startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
+    _isScanning = true;
+    notifyListeners();
   }
 
   /// ペリフェラル発見時のコールバック．
@@ -144,7 +137,7 @@ class BleCentralManager extends ChangeNotifier {
     _connectedPeripherals.remove(peripheral.uuid);
     if (kDebugMode) {
       await _printConnectedPeripherals('_onDeviceDisconnected:');
-      print('_onDeviceDisconnected: ${peripheral.uuid} $f');
+      print('_onDeviceDisconnected: _connectedPeripherals.contains(${peripheral.uuid}) -> $f, waited: ${_waitingPeripherals.length}');
     }
     // 接続を待たせているPeripheralがあれば接続する
     if (f && _waitingPeripherals.length > 0) {
@@ -161,16 +154,16 @@ class BleCentralManager extends ChangeNotifier {
       return;
     _connectedPeripherals.add(peripheral.uuid);
 
-    GATTCharacteristic? nicknameReadCharacteristic;
-    GATTCharacteristic? nicknameWriteCharacteristic;
+    GATTCharacteristic? nicknameCharacteristic;
+    GATTCharacteristic? authenticationCharacteristic;
     try {
       // MTUの確認（Androidでは20バイトを33バイトに増やす．iOSでは自動的に増やすらしいので不要）
       final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
       if (Platform.isAndroid && len1 < 33) {
         final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
-        if (kDebugMode) print('MTU write: $len1 -> $len2 (Perpheral ${peripheral.uuid})');
+        if (kDebugMode) print('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
       } else {
-        if (kDebugMode) print('MTU write: $len1 (Perpheral ${peripheral.uuid})');
+        if (kDebugMode) print('MTU write: $len1 (Peripheral ${peripheral.uuid})');
       }
 
       // 特性（Characteristic）を探す
@@ -178,10 +171,10 @@ class BleCentralManager extends ChangeNotifier {
       for (var service in services) {
         if (service.uuid == BleNickname.serviceUuid) {
           for (var characteristic in service.characteristics) {
-            if (characteristic.uuid == BleNickname.nicknameReadCharacteristicUuid) {
-              nicknameReadCharacteristic = characteristic;
-            } else if (characteristic.uuid == BleNickname.nicknameWriteCharacteristicUuid) {
-              nicknameWriteCharacteristic = characteristic;
+            if (characteristic.uuid == BleNickname.nicknameCharacteristicUuid) {
+              nicknameCharacteristic = characteristic;
+            } else if (characteristic.uuid == BleMutualAuthentication.authenticationCharacteristicUuid) {
+              authenticationCharacteristic = characteristic;
             }
           }
           break;
@@ -189,15 +182,15 @@ class BleCentralManager extends ChangeNotifier {
       }
 
       // 特定が見つからないので，読み書きせずに切断する
-      if (nicknameReadCharacteristic == null || nicknameWriteCharacteristic == null) {
-        if (kDebugMode) print('BLE Error: _onDeviceConnected no characteristics r: $nicknameReadCharacteristic w: $nicknameWriteCharacteristic');
+      if (nicknameCharacteristic == null || authenticationCharacteristic == null) {
+        if (kDebugMode) print('BLE Error: _onDeviceConnected no characteristics n: $nicknameCharacteristic a: $authenticationCharacteristic');
         await CentralManager().disconnect(peripheral);
         return; // finallyは実行される
       }
 
       // Peripheraのニックネームを読み込み
       final now = DateTime.now();
-      final remoteNickname = await CentralManager().readCharacteristic(peripheral, nicknameReadCharacteristic);
+      final remoteNickname = await CentralManager().readCharacteristic(peripheral, nicknameCharacteristic);
       if (kDebugMode) print('_onDeviceConnected read. length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${peripheral.uuid}, $now');
       BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
       // CentralのニックネームをPeripheralに書き込み
@@ -205,20 +198,24 @@ class BleCentralManager extends ChangeNotifier {
       if (kDebugMode) print('getMaximumWriteLength $len');
 
       // CentralのニックネームをPeripheralに書き込み
-      // nickname.dartなしで試す場合 var localNickname = Uint8List.fromList('0abcdefghabcdefghabcdefghabcdefgh'.codeUnits); data = data.sublist(0, 18);
-      var localNickname = BleNickname().localNickname;
+      final Uint8List localNickname = BleNickname().localNickname;
       await CentralManager().writeCharacteristic(
         peripheral,
-        nicknameWriteCharacteristic,
+        nicknameCharacteristic,
         value: localNickname,
         type: GATTCharacteristicWriteType.withoutResponse,
       );
       if (kDebugMode) print('_onDeviceConnected write. Length: ${localNickname.length}), nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${peripheral.uuid}');
 
-      // UIに通知．ChangeNotifierクラス
-      notifyListeners();
+      // 認証の書き込みの練習（無意味な値の書き込み）
+      await CentralManager().writeCharacteristic(
+        peripheral,
+        authenticationCharacteristic,
+        value: Uint8List(41),
+        type: GATTCharacteristicWriteType.withResponse,
+      );
     } catch (e) {
-      if (kDebugMode) print('BLE Error: _onDeviceConnected  $e');
+      if (kDebugMode) print('BLE Error: _onDeviceConnected $e');
     } finally {
       try {
         await CentralManager().disconnect(peripheral);
@@ -235,8 +232,9 @@ class BleCentralManager extends ChangeNotifier {
     if (kDebugMode) print('stopScan');
     await CentralManager().stopDiscovery();
     await _discoveredSubscription?.cancel();
-    _isScanning = false;
     _discoveredPeripherals.clear();
+
+    _isScanning = false;
     notifyListeners();
   }
 
@@ -251,7 +249,6 @@ class BleCentralManager extends ChangeNotifier {
     }
   }
 
-
   /// このオブジェクトを破棄．
   ///
   /// 購読をやめる．
@@ -263,6 +260,6 @@ class BleCentralManager extends ChangeNotifier {
     _stateSubscription?.cancel();
     _discoveredSubscription?.cancel();
     _connectionStateSubscription?.cancel();
-    super.dispose();
+    super.dispose(); // ChangeNotifierクラス
   }
 }

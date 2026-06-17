@@ -29,15 +29,40 @@ import 'package:convert/convert.dart' show hex; // hex.decode(Uint8List)のた�
 import '../key_management.dart';
 import 'peripheral.dart';
 import 'central.dart';
+import 'mutual_authentication.dart';
 
 /// BLEで広告するニックネームや受信したニックネームを処理するクラス
 class BleNickname extends ChangeNotifier {
   /// サービス識別子（UUID）
   static final UUID serviceUuid = UUID.fromString('D353434A-C5F4-4A63-A21A-974C68459ED2');
-  /// Peripheral自身のニックネームの特性識別子（Read UUID）
-  static final UUID nicknameReadCharacteristicUuid = UUID.fromString('D3534340-C5F4-4A63-A21A-974C68459ED2');
-  /// Centralのニックネームの特性識別子（Write UUID）
-  static final UUID nicknameWriteCharacteristicUuid = UUID.fromString('D3534341-C5F4-4A63-A21A-974C68459ED2');
+  /// Peripheral自身のニックネームをCentralが読み取り（read）
+  /// CoetralのニックネームをPeripheralに書き込む（write）ための特性識別子（UUID）
+  static final UUID nicknameCharacteristicUuid = UUID.fromString('D3534340-C5F4-4A63-A21A-974C68459ED2');
+
+  /// Peripheralのニックネーム・サービス（Service）
+  static final GATTService nicknameService = GATTService(
+    uuid: BleNickname.serviceUuid,
+    isPrimary: true,
+    includedServices: [], // [BleMutualAuthentication.authenticationService], // secondary serviceを追加しようとしたがうまくいかない
+    characteristics: [
+      nicknameCharacteristic,
+      BleMutualAuthentication.authenticationCharacteristic,
+    ],
+  );
+  /// Peripheralのニックネームを読み出す特性（Characteristic）
+  static final GATTCharacteristic nicknameCharacteristic = GATTCharacteristic.mutable(
+    uuid: BleNickname.nicknameCharacteristicUuid,
+    properties: [
+      GATTCharacteristicProperty.read,
+      GATTCharacteristicProperty.writeWithoutResponse,
+    ],
+    permissions: [
+      GATTCharacteristicPermission.read,
+      GATTCharacteristicPermission.write,
+    ],
+    descriptors: [],
+  );
+
   /// 単一ニックネームの使用期間．杉浦修論では10分．デバッグ画面で10分，1分，10秒で切り替えられる．
   static var validDuration = const Duration(seconds: 30); // 標準ば10分．minutes: 10); // KeyManagementService 内の validity の値
   /// ニックネームの更新タイマー
@@ -60,35 +85,6 @@ class BleNickname extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Peripheralのニックネームを読み出す特性（Characteristic）
-  static final GATTCharacteristic nicknameReadCharacteristic = GATTCharacteristic.mutable(
-    uuid: BleNickname.nicknameReadCharacteristicUuid,
-    properties: [
-      GATTCharacteristicProperty.notify,
-      GATTCharacteristicProperty.read,
-    ],
-    permissions: [
-      GATTCharacteristicPermission.read,
-      // GATTCharacteristicPermission.readEncrypted,
-    ],
-    descriptors: [],
-  );
-  /// Peripheralにcentralのニックネームを書き込む特性（Characteristic）
-  static final GATTCharacteristic nicknameWriteCharacteristic = GATTCharacteristic.mutable(
-    uuid: BleNickname.nicknameWriteCharacteristicUuid,
-    properties: [
-      GATTCharacteristicProperty.writeWithoutResponse,
-      // GATTCharacteristicProperty.write,
-    ],
-    permissions: [
-      GATTCharacteristicPermission.write,
-      // GATTCharacteristicPermission.writeEncrypted,
-    ],
-    descriptors: [],
-  );
-  /// Peripheralのニックネーム・サービス（Service）
-  static late final GATTService nicknameService;
-
   // シングルトン
   static final BleNickname _instance = BleNickname._internal();
   /// シングルトン：このクラスのオブジェクトは一つだけ．
@@ -100,16 +96,6 @@ class BleNickname extends ChangeNotifier {
     _advertiser.addListener(_onStateChanged);
     _scanner.addListener(_onStateChanged);
     // _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname); // 広告・スキャンONのタイミングに変更
-
-    nicknameService = GATTService(
-      uuid: BleNickname.serviceUuid,
-      isPrimary: true,
-      includedServices: [],
-      characteristics: [
-        nicknameReadCharacteristic,
-        nicknameWriteCharacteristic,
-      ],
-    );
   }
 
   /// 広告とスキャンのON/OFF

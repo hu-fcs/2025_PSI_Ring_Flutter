@@ -6,7 +6,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+// import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -74,28 +75,31 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Future<bool> _ensureBluetoothEnabled() async {
     try {
-      if (await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on) {
+      // if (await FlutterBluePlus.adapterState.first ==] BluetoothAdapterState.on) {
+      if (await CentralManager().state == BluetoothLowEnergyState.unknown) {
+        await CentralManager().stateChanged.firstWhere(
+                (args) => args.state != BluetoothLowEnergyState.unknown);
+      }
+      if (await CentralManager().state == BluetoothLowEnergyState.poweredOn) {
         return true;
       }
-      await FlutterBluePlus.turnOn();
-      await FlutterBluePlus.adapterState
-          .firstWhere((s) => s == BluetoothAdapterState.on);
-      return true;
+      // await FlutterBluePlus.turnOn(); BTをオンにするメソッドが bluetooth_low_energyパッケージにはないので，
+      // ToDo: Bluetoothが使用できないとメッセージを出すべきだ
+      // CentralManager().showAppSettings();
+      return false;
     } catch (_) {
       return false;
     }
   }
 
   Future<void> _toggleBleExchange() async {
-    if (!_bleRunning) {
-      if (!await _ensureBlePermissions() || !await _ensureBluetoothEnabled()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bluetooth を使用できません')),
-          );
-        }
-        return;
+    if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bluetooth を使用できません')),
+        );
       }
+      return;
     }
     await _ble.toggleExchange();
     if (mounted) setState(() {});

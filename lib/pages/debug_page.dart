@@ -6,9 +6,10 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fluttersample_2025/ble/central.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../ble/ble_scanner.dart';
+// import '../ble/ble_scanner.dart';
 import '../db/database_helper.dart';
 import '../key_management.dart';
 import '../grpc/grpc_common.dart';
@@ -77,7 +78,8 @@ class _DebugPageState extends State<DebugPage>
 
     // 収集鍵を全削除した場合はスキャン側の重複抑止キャッシュも初期化する
     if (tableName == 'collected_keys') {
-      BleScanner.clearCollectedCache();
+      // BleScanner.clearCollectedCache();
+      BleCentralManager().discoveredPeripherals.clear();
       if (kDebugMode) {
         debugPrint('[DebugPage] collected cache cleared');
       }
