@@ -25,8 +25,13 @@ class BlePeripheral extends ChangeNotifier {
   StreamSubscription? _characteristicReadRequestedSubscription;
   StreamSubscription? _characteristicWriteRequestedSubscription;
 
-  // Uint8List _peripheralNickname = Uint8List(33); // BleNickname().localNickname
-  // StreamSubscription? _localNicknameStreamSubscription;
+  /// このオブジェクトを破棄．
+  @override
+  void dispose() async {
+    // await _localNicknameStreamSubscription?.cancel();
+    await PeripheralManager().removeAllServices();
+    super.dispose();
+  }
 
   /// ペリフェラルの初期化とアドバタイズの開始
   Future<void> start() async {
@@ -53,27 +58,6 @@ class BlePeripheral extends ChangeNotifier {
     }
     await startAdvertising();
   }
-
-  /*
-  /// OSやユーザにBLEを使う許可をもらう
-  Future<void> requestPeripheralPermissions() async {
-    if (Platform.isAndroid) {
-      // スキャン、接続に加えて「アドバタイズ」の権限もまとめてリクエストする
-      Map<Permission, PermissionStatus> statuses = await [
-        // Permission.bluetoothScan,
-        // Permission.bluetoothConnect,
-        Permission.bluetoothAdvertise, // ★これを追加
-        // Permission.location,
-      ].request();
-
-      if (kDebugMode) print("Bluetooth Peripheral の許可: ${statuses[Permission.bluetoothAdvertise]}");
-    } else if (Platform.isIOS) {
-      // iOS用のBluetooth権限リクエスト
-      PermissionStatus status = await Permission.bluetooth.request();
-      if (kDebugMode) print("Bluetooth 許可 (iOS Peripheral): ${status}");
-    }
-  }
-  */
 
   /// 広告の開始
   Future<void> startAdvertising() async {
@@ -107,7 +91,7 @@ class BlePeripheral extends ChangeNotifier {
   }
 
   /// CentralがPeripheraのニックネームを読み取り（Read）たいと要求している．特性（Characteristic）
-  void _onReadRequest(GATTCharacteristicReadRequestedEventArgs event) async {
+  Future<void> _onReadRequest(GATTCharacteristicReadRequestedEventArgs event) async {
     // 対象の特性（Nicknameの読み取り特性など）であるかチェック
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       try {
@@ -122,15 +106,12 @@ class BlePeripheral extends ChangeNotifier {
         if (kDebugMode) print("Failed to respond read request: $e");
       }
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
-      await PeripheralManager().respondReadRequestWithValue(
-        event.request, // eventからGATTReadRequestを取り出して渡す
-        value: await BleMutualAuthentication().onReadRequest(event),
-      );
+      BleMutualAuthentication().onReadRequest(event);
     }
   }
 
   /// CentralがCentralのニックネームを書き込み（Write）たいと要求している．特性（Characteristic）
-  void _onWriteRequest(GATTCharacteristicWriteRequestedEventArgs event) async {
+  Future<void> _onWriteRequest(GATTCharacteristicWriteRequestedEventArgs event) async {
     // 対象の特性（Nicknameの書き込み特性など）であるかチェック
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       // セントラルから書き込まれたデータ (Uint8List) を取得
@@ -152,7 +133,53 @@ class BlePeripheral extends ChangeNotifier {
       // _send32ByteNotify(event.central);
     }
   }
-  /*
+
+  /// ニックネームが変わった時に呼ばれ，広告を一時停止して再開
+  Future<void> restart() async {
+    await PeripheralManager().stopAdvertising();
+    final advertisement = Advertisement(
+      // name: 'BLE32',
+      serviceUUIDs: [BleNickname.serviceUuid],
+      // manufacturerSpecificData: [data, data2],
+    );
+    await PeripheralManager().startAdvertising(advertisement);
+    if (kDebugMode) print("Advertising restarted...");
+  }
+
+  /// ペリフェラルの停止．リソースの解放
+  Future<void> stop() async {
+    await _characteristicNotifyStateChangedSubscription?.cancel();
+    await _characteristicReadRequestedSubscription?.cancel();
+    await _characteristicWriteRequestedSubscription?.cancel();
+    // await _localNicknameStreamSubscription?.cancel();
+
+    await PeripheralManager().stopAdvertising();
+
+    _isAdvertising = false;
+    notifyListeners(); // UIに通知
+  }
+
+/*
+  /// OSやユーザにBLEを使う許可をもらう
+  Future<void> requestPeripheralPermissions() async {
+    if (Platform.isAndroid) {
+      // スキャン、接続に加えて「アドバタイズ」の権限もまとめてリクエストする
+      Map<Permission, PermissionStatus> statuses = await [
+        // Permission.bluetoothScan,
+        // Permission.bluetoothConnect,
+        Permission.bluetoothAdvertise, // ★これを追加
+        // Permission.location,
+      ].request();
+
+      if (kDebugMode) print("Bluetooth Peripheral の許可: ${statuses[Permission.bluetoothAdvertise]}");
+    } else if (Platform.isIOS) {
+      // iOS用のBluetooth権限リクエスト
+      PermissionStatus status = await Permission.bluetooth.request();
+      if (kDebugMode) print("Bluetooth 許可 (iOS Peripheral): ${status}");
+    }
+  }
+  */
+/*
   // ニックネームのつもりの32バイトのデータを生成してセントラルに通知する
   Future<void> _send32ByteNotify(Central central) async {
     try {
@@ -175,38 +202,4 @@ class BlePeripheral extends ChangeNotifier {
     }
   }
   */
-
-  /// ニックネームが変わった時に呼ばれ，広告を一時停止して再開
-  Future<void> restart() async {
-    await PeripheralManager().stopAdvertising();
-    final advertisement = Advertisement(
-      // name: 'BLE32',
-      serviceUUIDs: [BleNickname.serviceUuid],
-      // manufacturerSpecificData: [data, data2],
-    );
-    await PeripheralManager().startAdvertising(advertisement);
-    if (kDebugMode) print("Advertising restarted...");
-  }
-  /// 
-  /// リソースの解放
-  Future<void> stop() async {
-    await _characteristicNotifyStateChangedSubscription?.cancel();
-    await _characteristicReadRequestedSubscription?.cancel();
-    await _characteristicWriteRequestedSubscription?.cancel();
-    // await _localNicknameStreamSubscription?.cancel();
-
-    await PeripheralManager().stopAdvertising();
-
-    _isAdvertising = false;
-    notifyListeners(); // UIに通知
-  }
-
-  /// このオブジェクトを破棄．
-  @override
-  void dispose() async {
-    // await _localNicknameStreamSubscription?.cancel();
-    await PeripheralManager().removeAllServices();
-    super.dispose();
-  }
-
 }

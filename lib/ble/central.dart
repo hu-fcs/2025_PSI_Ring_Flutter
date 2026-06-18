@@ -4,11 +4,13 @@ import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:fluttersample_2025/ble/mutual_authentication.dart';
-// import 'package:permission_handler/permission_handler.dart';
 import 'nickname.dart';
 
 /// BLEのCentral機能．
-/// 自身のニックネーム
+/// このアプリのサービスをスキャンし，
+/// 見つけた端末に接続してニックネームを交換する．
+/// 将来ニックネーム中に相手のニックネームを見つけたら，
+/// 相互認証して，UIに通知する．UIは友人として画面に表示する．
 ///
 /// bluetooth_low_energy パッケージを使う．
 class BleCentralManager extends ChangeNotifier {
@@ -38,10 +40,8 @@ class BleCentralManager extends ChangeNotifier {
   StreamSubscription? _connectionStateSubscription;
 
   /// アプリ起動時にBLEのCentralを初期化
-  void initialize() async {
-    /* ExchangePageと重複しているのでなし．
+  void initialize() {
     // await _requestPermissions(); // exchange_page.dart: ExchangePageクラスで実施済み
-    */
 
     // BLEが利用可能かチェック・監視
     _stateSubscription = CentralManager().stateChanged.listen((arg) {
@@ -51,30 +51,19 @@ class BleCentralManager extends ChangeNotifier {
     });
   }
 
-  /// OSやユーザにBLEを使う許可をもらう．同等のものがExchangePageクラスに実装されている．
-  /* Future<void> _requestPermissions() async {
-    if (Platform.isAndroid) {
-      // Android 12 (API 31) 以降とそれ未満で必要な権限をまとめてリクエスト
-      Map<Permission, PermissionStatus> statuses = await [
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.location, // Android 11以前の端末や念のための位置情報
-      ].request();
+  /// このオブジェクトを破棄．
+  ///
+  /// 購読をやめる．
+  @override
+  void dispose() async {
+    await stopScan();
+    // await _localNicknameStreamSubscription?.cancel();
 
-      // デバッグ確認用（すべての権限が許可されたか）
-      final isGranted = statuses.values.every((status) => status.isGranted);
-      if (kDebugMode) print("Bluetooth 許可 (Android): $isGranted");
-
-    } else if (Platform.isIOS) {
-      // iOS用のBluetooth権限リクエスト
-      PermissionStatus status = await Permission.bluetooth.request();
-      if (status.isPermanentlyDenied) {
-        // 設定画面を開いてユーザーに許可を促す
-        openAppSettings();
-      }
-      if (kDebugMode) print("Bluetooth 許可 (iOS Central): ${status}");
-    }
-  }*/
+    _stateSubscription?.cancel();
+    _discoveredSubscription?.cancel();
+    _connectionStateSubscription?.cancel();
+    super.dispose(); // ChangeNotifierクラス
+  }
 
   /// スキャン開始
   Future<void> startScan() async {
@@ -91,6 +80,19 @@ class BleCentralManager extends ChangeNotifier {
     });
     await CentralManager().startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
     _isScanning = true;
+    notifyListeners();
+  }
+
+  /// スキャン停止
+  Future<void> stopScan() async {
+    if (!_isScanning) return;
+
+    if (kDebugMode) print('stopScan');
+    await CentralManager().stopDiscovery();
+    await _discoveredSubscription?.cancel();
+    _discoveredPeripherals.clear();
+
+    _isScanning = false;
     notifyListeners();
   }
 
@@ -120,6 +122,7 @@ class BleCentralManager extends ChangeNotifier {
     }
   }
 
+  /// ペリフェラルに接続する．_onDeviceDiscoveredと_onDeviceDisconnectedから呼ばれる．
   Future<void> _connect(Peripheral peripheral) async {
     _connectingPeripherals.add(peripheral.uuid);
     try {
@@ -190,7 +193,8 @@ class BleCentralManager extends ChangeNotifier {
 
       // Peripheraのニックネームを読み込み
       final now = DateTime.now();
-      final remoteNickname = await CentralManager().readCharacteristic(peripheral, nicknameCharacteristic);
+      final remoteNickname = await CentralManager().readCharacteristic(
+          peripheral, nicknameCharacteristic);
       if (kDebugMode) print('_onDeviceConnected read. length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${peripheral.uuid}, $now');
       BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
       // CentralのニックネームをPeripheralに書き込み
@@ -200,20 +204,17 @@ class BleCentralManager extends ChangeNotifier {
       // CentralのニックネームをPeripheralに書き込み
       final Uint8List localNickname = BleNickname().localNickname;
       await CentralManager().writeCharacteristic(
-        peripheral,
-        nicknameCharacteristic,
+        peripheral, nicknameCharacteristic,
         value: localNickname,
         type: GATTCharacteristicWriteType.withoutResponse,
       );
       if (kDebugMode) print('_onDeviceConnected write. Length: ${localNickname.length}), nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${peripheral.uuid}');
 
-      // 認証の書き込みの練習（無意味な値の書き込み）
-      await CentralManager().writeCharacteristic(
-        peripheral,
-        authenticationCharacteristic,
-        value: Uint8List(41),
-        type: GATTCharacteristicWriteType.withResponse,
-      );
+      // ToDo: 将来ニックネームリストにremoteNicknameが含まれているときだけ認証に進む（山口 賢紘, 2026年2月，卒業論文）
+      if (true) { // 相互認証
+        final centralPriKey = Uint8List(32); // ToDo: centralのlocalNicknameに対応する秘密鍵を取得する
+        final success = await BleMutualAuthentication().startAuthentication(peripheral, authenticationCharacteristic, centralPriKey: centralPriKey, peripheralPubKey: remoteNickname);
+      }
     } catch (e) {
       if (kDebugMode) print('BLE Error: _onDeviceConnected $e');
     } finally {
@@ -223,19 +224,6 @@ class BleCentralManager extends ChangeNotifier {
         if (kDebugMode) print('BLE Error: _onDeviceConnected disconnect $e');
       }
     }
-  }
-
-  /// スキャン停止
-  Future<void> stopScan() async {
-    if (!_isScanning) return;
-
-    if (kDebugMode) print('stopScan');
-    await CentralManager().stopDiscovery();
-    await _discoveredSubscription?.cancel();
-    _discoveredPeripherals.clear();
-
-    _isScanning = false;
-    notifyListeners();
   }
 
   /// 動作確認用に
@@ -249,17 +237,28 @@ class BleCentralManager extends ChangeNotifier {
     }
   }
 
-  /// このオブジェクトを破棄．
-  ///
-  /// 購読をやめる．
-  @override
-  void dispose() async {
-    await stopScan();
-    // await _localNicknameStreamSubscription?.cancel();
+/// OSやユーザにBLEを使う許可をもらう．同等のものがExchangePageクラスに実装されている．
+/* Future<void> _requestPermissions() async {
+    if (Platform.isAndroid) {
+      // Android 12 (API 31) 以降とそれ未満で必要な権限をまとめてリクエスト
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.location, // Android 11以前の端末や念のための位置情報
+      ].request();
 
-    _stateSubscription?.cancel();
-    _discoveredSubscription?.cancel();
-    _connectionStateSubscription?.cancel();
-    super.dispose(); // ChangeNotifierクラス
-  }
+      // デバッグ確認用（すべての権限が許可されたか）
+      final isGranted = statuses.values.every((status) => status.isGranted);
+      if (kDebugMode) print("Bluetooth 許可 (Android): $isGranted");
+
+    } else if (Platform.isIOS) {
+      // iOS用のBluetooth権限リクエスト
+      PermissionStatus status = await Permission.bluetooth.request();
+      if (status.isPermanentlyDenied) {
+        // 設定画面を開いてユーザーに許可を促す
+        openAppSettings();
+      }
+      if (kDebugMode) print("Bluetooth 許可 (iOS Central): ${status}");
+    }
+  }*/
 }

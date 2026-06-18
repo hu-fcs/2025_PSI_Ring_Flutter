@@ -36,7 +36,7 @@ class BleNickname extends ChangeNotifier {
   /// サービス識別子（UUID）
   static final UUID serviceUuid = UUID.fromString('D353434A-C5F4-4A63-A21A-974C68459ED2');
   /// Peripheral自身のニックネームをCentralが読み取り（read）
-  /// CoetralのニックネームをPeripheralに書き込む（write）ための特性識別子（UUID）
+  /// CentralのニックネームをPeripheralに書き込む（write）ための特性識別子（UUID）
   static final UUID nicknameCharacteristicUuid = UUID.fromString('D3534340-C5F4-4A63-A21A-974C68459ED2');
 
   /// Peripheralのニックネーム・サービス（Service）
@@ -98,7 +98,15 @@ class BleNickname extends ChangeNotifier {
     // _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname); // 広告・スキャンONのタイミングに変更
   }
 
-  /// 広告とスキャンのON/OFF
+  /// クラスが破棄される時にストリーム・コントローラーを閉じる
+  void dispose() {
+    // _localNicknameStreamController.close();
+    _timer?.cancel();
+    _keyUpdateSub?.cancel();
+    super.dispose();
+  }
+
+  /// BLE広告（アドバタイズ）とスキャンのON/OFF切り替え
   Future<void> toggleExchange() async {
     if (isRunning) {
       _keyUpdateSub?.cancel();
@@ -113,28 +121,6 @@ class BleNickname extends ChangeNotifier {
     }
   }
 
-  /// ニックネーム・ストリーム・コントローラ：時間が経過して新しくなったニックネームをペリフェラルとセントラルに通知する
-  ///
-  /// 通知するこのクラスは
-  /// _localNicknameStreamController.add(Uint8list);
-  /// クラスが破棄される時にストリーム・コントローラーを閉じる
-  /// _localNicknameStreamController.close();
-  // 削除 // static final StreamController<Uint8List> _localNicknameStreamController = StreamController<Uint8List>.broadcast();
-  /// ストリーム：時間が経過して新しくなったニックネームをペリフェラルとセントラルに通知する
-  ///
-  /// 受け取る側は
-  /// ```
-  /// final bleNickname = BleNickname();
-  /// bleNickname.localNicknameStream.listen((nickname) {
-  ///   print('ニックネームを受信: $nickname');
-  /// });
-  /// ```
-  // Stream<Uint8List> get localNicknameStream => _localNicknameStreamController.stream;
-
-  /// ダミーニックネームの生成器
-  // DummyNicknameGenerator generator = DummyNicknameGenerator();
-  /// ニックネームの更新タイマー（key_management.dartに任せて _timer は不要に）
-  // Timer? _timer;
   /// ニックネームの前回のスロット
   int _lastSlotStartTime = 0;
   /// ニックネームの前回のニックネーム
@@ -143,7 +129,9 @@ class BleNickname extends ChangeNotifier {
   Uint8List get localNickname => _lastNickname;
   ///
   final _random = Random();
+
   /// ニックネームの更新（タイマーで呼び出す）
+  /// validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
   void _updateNickname(void _) async {
     final currentValidDuration = Duration(milliseconds: _kms.slotMs);
     if (validDuration != currentValidDuration) {
@@ -154,7 +142,6 @@ class BleNickname extends ChangeNotifier {
     if (_lastNickname[0] != 0x00) {
       // [0] == 0x00の場合，アプリ実行後の最初のニックネームでは，待ち時間なし．
       // ニックネームの更新
-      // validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
       final jitter = _random.nextInt(validDuration.inMilliseconds ~/ 2);
       await Future.delayed(Duration(milliseconds: jitter));
     }
@@ -207,21 +194,19 @@ class BleNickname extends ChangeNotifier {
     }
   }
 
-  /// クラスが破棄される時にストリーム・コントローラーを閉じる
-  void dispose() {
-    // _localNicknameStreamController.close();
-    _timer?.cancel();
-    _keyUpdateSub?.cancel();
-    super.dispose();
-  }
-
   /// 33バイトのニックネームを16進表現の文字列にして，4バイトごとに_アンダースコアで区切る．クラスメソッド．主にデバッグ用
-  static String nickname2string(Uint8List bytes, {int len = 33}) {
-    final hexString = hex.encode(bytes.sublist(0, min(len, bytes.length)));
-    return RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
+  static String nickname2string(Uint8List bytes, {int len = 0}) {
+    if (len == 0) len = bytes.length;
+    final hexString = hex.encode(bytes.sublist(0, len));
+    final joined = RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
+    if (len < bytes.length) {
+      return joined + '...';
+    } else {
+      return joined;
+    }
   }
 }
-
+/*
 /// BLEで受信したニックネームを格納するオブジェクト
 class BleRemote {
   Uint8List remoteNickname;   // Uint8List, 33バイト．相手のニックネーム
@@ -241,3 +226,4 @@ class BleRemote {
   void dispose() {
   }
 }
+*/
