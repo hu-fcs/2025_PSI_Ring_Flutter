@@ -7,6 +7,7 @@ import 'dart:collection';                 // LinkedHashMap
 import 'package:flutter/foundation.dart'; // kDebugMode
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
 import 'nickname.dart';
+import '../key_management.dart';
 
 /// BLEでニックネームを公開鍵として相互認証するBLEサービス
 /// 特性がread, writeされたときに署名生成・検証を行う
@@ -227,6 +228,16 @@ class BleMutualAuthentication {
       GATTCharacteristicReadRequestedEventArgs event,
       _PeripheralState authPeripheral) async {
     final challenge1 = authPeripheral.challenge1;
+    final keyPair = await KeyManagementService().getLatestKeyPair();
+    if (keyPair == null) {
+      return; // ToDo: エラー処理
+    }
+    // final publicKey = Uint8List.fromList(keyPair.publicKey);
+    // final privateKey = Uint8List.fromList(keyPair.privateKey);
+    BleNickname().localNickname;
+    assert(listEquals(keyPair.publicKey, BleNickname().localNickname));
+    // final response1 = signChallenge(privateKey, challenge1);
+
     var response1 = Uint8List(responseBytes); // ToDo: response1 を計算する
     response1.first = 0x10; // ダミー
     response1.last = 0x11; // ダミー

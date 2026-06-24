@@ -32,6 +32,17 @@ import 'central.dart';
 import 'mutual_authentication.dart';
 
 /// BLEで広告するニックネームや受信したニックネームを処理するクラス
+///
+/// 関係するファイル：
+/// - central.dart, peripheral.dart: BLEペリフェラルとセントラルの実装
+/// - mutual_authentication.dart: BLEで相互認証する部分
+/// - exchange_page.dart, debug_page.dart: ユーザインタフェース
+///
+/// KeyManagementServiceとの関係
+/// - 広告するニックネームを問い合わせる．_kms.getPublicKeyForBleAdvertise()
+/// - 収集したニックネームを登録する．_kms.insertCollectedKeyIfAbsent()
+/// - キーの更新をlisten．_kms.onKeyUpdated.listen(_updateNickname);
+/// - キーの更新間隔を時々問い合わせる．_kms.slotMs
 class BleNickname extends ChangeNotifier {
   /// サービス識別子（UUID）
   static final UUID serviceUuid = UUID.fromString('D353434A-C5F4-4A63-A21A-974C68459ED2');

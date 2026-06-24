@@ -42,7 +42,7 @@ class KeyManagementService {
 
   Stream<void> get onKeyUpdated => _keyUpdatedController.stream;
 
-  void notifyKeyUpdated() {
+  void _notifyKeyUpdated() {
     if (kDebugMode) {
       debugPrint('KMS: notifyKeyUpdated()');
     }
@@ -93,7 +93,7 @@ class KeyManagementService {
           whereArgs: [pubkey33],
         );
 
-        notifyKeyUpdated();
+        _notifyKeyUpdated();
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('KMS: attach location failed: $e');
@@ -139,7 +139,7 @@ class KeyManagementService {
 
   // ----- Advertise（仮名公開鍵の取得） -----
 
-  Future<Uint8List?> getPublicKeyForAdvertise() async {
+  Future<Uint8List?> _getPublicKeyForAdvertise() async {
     final masterKey = await _ensureMasterKey();
     if (masterKey == null) return null;
 
@@ -192,7 +192,7 @@ class KeyManagementService {
   // ----- BLE 用（圧縮公開鍵の検証つき） -----
 
   Future<Uint8List> getPublicKeyForBleAdvertise() async {
-    final Uint8List? pubKey33 = await getPublicKeyForAdvertise();
+    final Uint8List? pubKey33 = await _getPublicKeyForAdvertise();
     if (pubKey33 == null) {
       throw StateError('Failed to obtain public key from KeyManagementService.');
     }
@@ -246,7 +246,7 @@ class KeyManagementService {
 
       final inserted = rowId > 0;
       if (inserted) {
-        notifyKeyUpdated();
+        _notifyKeyUpdated();
       }
       return inserted;
     } catch (e, st) {
@@ -258,6 +258,7 @@ class KeyManagementService {
     }
   }
 
+  /*
   /// 互換のために残す。内部は insertCollectedKeyIfAbsent を呼ぶ。
   Future<void> insertCollectedBlePublicKey({
     required Uint8List pubkey33,
@@ -268,6 +269,7 @@ class KeyManagementService {
       receivedAtMs: receivedAtMs,
     );
   }
+  */
 
   // ----- 鍵取得 -----
 
@@ -285,7 +287,7 @@ class KeyManagementService {
       if (sec != null && pub != null) return KeyPair(sec, pub);
     }
 
-    final pub = await getPublicKeyForAdvertise();
+    final pub = await _getPublicKeyForAdvertise();
     if (pub != null) return getLatestKeyPair();
     return null;
   }
