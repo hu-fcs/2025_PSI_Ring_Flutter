@@ -30,7 +30,7 @@ void main() async {
   await keyService.init();
 
   // Android フォアグラウンド サービスを使う（flutter_foreground_task パッケージ）
-  // FlutterForegroundTask.initCommunicationPort();
+  FlutterForegroundTask.initCommunicationPort();
 
   runApp(const MyApp());
 }

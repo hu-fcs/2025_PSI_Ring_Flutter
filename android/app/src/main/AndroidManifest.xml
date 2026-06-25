@@ -18,6 +18,14 @@
     <!-- BLEデバイス要件 -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
 
+    <!-- required for flutter_foreground_task -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- foregroundServiceType: dataSync -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- foregroundServiceType: remoteMessaging -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <!-- Warning: Do not change service name. -->
+
     <application
         android:label="PSI Ring Match"
         android:name="${applicationName}"

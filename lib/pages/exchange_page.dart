@@ -10,12 +10,14 @@ import 'package:flutter/services.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import '../ble/nickname.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
 import 'debug_page.dart';
+import '../key_foreground_task.dart';
 
 /// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
 ///
@@ -30,14 +32,47 @@ class ExchangePage extends StatefulWidget {
 
 class _ExchangePageState extends State<ExchangePage> {
   final _ble = BleNickname();
+
   bool get _bleRunning => _ble.isRunning;
 
   PsiGrpcServer? _grpcServer;
+
   bool get _grpcRunning => _grpcServer?.isRunning == true;
   String? _serverIp;
   int _serverPort = 50051;
 
   final _db = DatabaseHelper();
+
+  void _onReceiveTaskData(Object data) {
+    if (data is Map<String, dynamic>) {
+      final dynamic timestampMillis = data["timestampMillis"];
+      if (timestampMillis != null) {
+        final DateTime timestamp =
+        DateTime.fromMillisecondsSinceEpoch(timestampMillis, isUtc: true);
+        print('timestamp: ${timestamp.toString()}');
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Add a callback to receive data sent from the TaskHandler.
+    FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Request permissions and initialize the service.
+      MyTaskHandler.requestPermissions();
+      MyTaskHandler.initService();
+    });
+  }
+
+  @override
+  void dispose() {
+    // Remove a callback to receive data sent from the TaskHandler.
+    FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
+    super.dispose();
+  }
 
   Future<bool> _hasAnyKey() async => (await _db.getTotalKeyCount()) > 0;
 
