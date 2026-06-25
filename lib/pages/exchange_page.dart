@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -49,7 +50,7 @@ class _ExchangePageState extends State<ExchangePage> {
       if (timestampMillis != null) {
         final DateTime timestamp =
         DateTime.fromMillisecondsSinceEpoch(timestampMillis, isUtc: true);
-        print('timestamp: ${timestamp.toString()}');
+        if (kDebugMode) debugPrint('timestamp: ${timestamp.toString()}');
       }
     }
   }
@@ -62,8 +63,8 @@ class _ExchangePageState extends State<ExchangePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Request permissions and initialize the service.
-      MyTaskHandler.requestPermissions();
-      MyTaskHandler.initService();
+      KeyManagementTaskHandler.requestPermissions();
+      KeyManagementTaskHandler.initService();
     });
   }
 
@@ -616,6 +617,8 @@ class _ExchangePageState extends State<ExchangePage> {
           _bleCard(),
           const SizedBox(height: 20),
           _familiarCheckCard(),
+          const SizedBox(height: 20),
+          _buildServiceControlButtons(),
         ],
       ),
     );
@@ -833,6 +836,27 @@ class _ExchangePageState extends State<ExchangePage> {
               color: color,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceControlButtons() {
+    buttonBuilder(String text, {VoidCallback? onPressed}) {
+      return ElevatedButton(
+        onPressed: onPressed,
+        child: Text(text),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          buttonBuilder('start service', onPressed: KeyManagementTaskHandler.startService),
+          buttonBuilder('stop service', onPressed: KeyManagementTaskHandler.stopService),
+          // buttonBuilder('increment count', onPressed: MyTaskHandler.incrementCount),
         ],
       ),
     );

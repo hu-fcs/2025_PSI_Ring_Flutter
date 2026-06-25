@@ -18,7 +18,7 @@ class BlePeripheral extends ChangeNotifier {
   bool _isAdvertising = false;
   /// 広告中．ChangeNotifierでUIに変化を通知
   bool get isAdvertising => _isAdvertising;
-  /// サービス追加を最初の1回だけにする
+  /// サービス追加を最初の1回だけにする．ToDo: アプリがバックグラウンドから戻った時はtrueに戻るので，2回以上呼ばれることがある．Android
   bool _addService = true;
 
   StreamSubscription? _characteristicNotifyStateChangedSubscription;
@@ -49,22 +49,22 @@ class BlePeripheral extends ChangeNotifier {
     // requestPeripheralPermissions(); // exchange_page.dart: ExchangePageクラスで実施済み
 
     var currentState = PeripheralManager().state; // BluetoothLowEnergyState
-    if (kDebugMode) print("BlePeripheral start: state $currentState");
+    if (kDebugMode) debugPrint("BlePeripheral start: state $currentState");
     if (currentState != BluetoothLowEnergyState.poweredOn) {
       await PeripheralManager().stateChanged.firstWhere(
               (args) => args.state == BluetoothLowEnergyState.poweredOn);
       currentState = PeripheralManager().state; // BluetoothLowEnergyState
-      if (kDebugMode) print("BlePeripheral start: state (2) $currentState");
+      if (kDebugMode) debugPrint("BlePeripheral start: state (2) $currentState");
     }
     await startAdvertising();
   }
 
   /// 広告の開始
   Future<void> startAdvertising() async {
-    if (kDebugMode) print("BlePeripheral startAdvertising: BLE state ${PeripheralManager().state}");
+    if (kDebugMode) debugPrint("BlePeripheral startAdvertising: BLE state ${PeripheralManager().state}");
     // サービスををペリフェラルマネージャーに登録
     if (_addService) {
-      if (kDebugMode) print("startAdvertising addService");
+      if (kDebugMode) debugPrint("startAdvertising addService");
       await PeripheralManager().addService(BleNickname.nicknameService);
       _addService = false; // サービス登録済み
     }
@@ -84,7 +84,7 @@ class BlePeripheral extends ChangeNotifier {
       // manufacturerSpecificData: [data, data2],
     );
     await PeripheralManager().startAdvertising(advertisement);
-    if (kDebugMode) print("Advertising started...");
+    if (kDebugMode) debugPrint("Advertising started...");
 
     _isAdvertising = true;
     notifyListeners(); // UIに通知
@@ -97,13 +97,13 @@ class BlePeripheral extends ChangeNotifier {
       try {
         // セントラルにデータを応答．33バイトのニックネーム
         final localNickname = BleNickname().localNickname;
-        if (kDebugMode) print("_onReadRequest. length: ${localNickname.length}, nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${event.central.uuid}");
+        if (kDebugMode) debugPrint("_onReadRequest. length: ${localNickname.length}, nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${event.central.uuid}");
         await PeripheralManager().respondReadRequestWithValue(
           event.request,
           value: localNickname,
         );
       } catch (e) {
-        if (kDebugMode) print("Failed to respond read request: $e");
+        if (kDebugMode) debugPrint("Failed to respond read request: $e");
       }
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       BleMutualAuthentication().onReadRequest(event);
@@ -116,7 +116,7 @@ class BlePeripheral extends ChangeNotifier {
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       // セントラルから書き込まれたデータ (Uint8List) を取得
       final Uint8List remoteNickname = event.request.value;
-      if (kDebugMode) print("_onWriteRequest length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${event.central.uuid}");
+      if (kDebugMode) debugPrint("_onWriteRequest length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${event.central.uuid}");
       BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       BleMutualAuthentication().onWriteRequest(event);
@@ -127,7 +127,7 @@ class BlePeripheral extends ChangeNotifier {
   void _onNotifyStateChanged(GATTCharacteristicNotifyStateChangedEventArgs event) {
     // 対象の特性かつ、セントラルがSubscribe（通知有効化）した場合
     if (event.characteristic == BleNickname.nicknameCharacteristic && event.state) {
-      if (kDebugMode) print("Central subscribed. Sending 32-byte data immediately.");
+      if (kDebugMode) debugPrint("Central subscribed. Sending 32-byte data immediately.");
 
       // 即座に32バイトのデータを送信
       // _send32ByteNotify(event.central);
@@ -143,7 +143,7 @@ class BlePeripheral extends ChangeNotifier {
       // manufacturerSpecificData: [data, data2],
     );
     await PeripheralManager().startAdvertising(advertisement);
-    if (kDebugMode) print("Advertising restarted...");
+    if (kDebugMode) debugPrint("Advertising restarted...");
   }
 
   /// ペリフェラルの停止．リソースの解放
@@ -171,11 +171,11 @@ class BlePeripheral extends ChangeNotifier {
         // Permission.location,
       ].request();
 
-      if (kDebugMode) print("Bluetooth Peripheral の許可: ${statuses[Permission.bluetoothAdvertise]}");
+      if (kDebugMode) debugPrint("Bluetooth Peripheral の許可: ${statuses[Permission.bluetoothAdvertise]}");
     } else if (Platform.isIOS) {
       // iOS用のBluetooth権限リクエスト
       PermissionStatus status = await Permission.bluetooth.request();
-      if (kDebugMode) print("Bluetooth 許可 (iOS Peripheral): ${status}");
+      if (kDebugMode) debugPrint("Bluetooth 許可 (iOS Peripheral): ${status}");
     }
   }
   */
@@ -196,9 +196,9 @@ class BlePeripheral extends ChangeNotifier {
         characteristic: _notifyCharacteristic,
         value: data,*/
       );
-      if (kDebugMode) print("Successfully notified 32 bytes.");
+      if (kDebugMode) debugPrint("Successfully notified 32 bytes.");
     } catch (e) {
-      if (kDebugMode) print("Failed to notify: $e");
+      if (kDebugMode) debugPrint("Failed to notify: $e");
     }
   }
   */

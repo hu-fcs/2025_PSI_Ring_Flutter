@@ -1,17 +1,18 @@
-import 'dart:io';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 // The callback function should always be a top-level or static function.
 @pragma('vm:entry-point')
 void startCallback() {
-  FlutterForegroundTask.setTaskHandler(MyTaskHandler());
+  FlutterForegroundTask.setTaskHandler(KeyManagementTaskHandler());
 }
 
-class MyTaskHandler extends TaskHandler {
+class KeyManagementTaskHandler extends TaskHandler {
   // Called when the task is started.
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    print('onStart(starter: ${starter.name})');
+    if (kDebugMode) debugPrint('KMTaskHandler onStart(starter: ${starter.name})');
   }
 
   // Called based on the eventAction set in ForegroundTaskOptions.
@@ -27,31 +28,31 @@ class MyTaskHandler extends TaskHandler {
   // Called when the task is destroyed.
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
-    print('onDestroy(isTimeout: $isTimeout)');
+    if (kDebugMode) debugPrint('KMTaskHandler onDestroy(isTimeout: $isTimeout)');
   }
 
   // Called when data is sent using `FlutterForegroundTask.sendDataToTask`.
   @override
   void onReceiveData(Object data) {
-    print('onReceiveData: $data');
+    if (kDebugMode) debugPrint('KMTaskHandler onReceiveData: $data');
   }
 
   // Called when the notification button is pressed.
   @override
   void onNotificationButtonPressed(String id) {
-    print('onNotificationButtonPressed: $id');
+    if (kDebugMode) debugPrint('KMTaskHandler onNotificationButtonPressed: $id');
   }
 
   // Called when the notification itself is pressed.
   @override
   void onNotificationPressed() {
-    print('onNotificationPressed');
+    if (kDebugMode) debugPrint('KMTaskHandler onNotificationPressed');
   }
 
   // Called when the notification itself is dismissed.
   @override
   void onNotificationDismissed() {
-    print('onNotificationDismissed');
+    if (kDebugMode) debugPrint('KMTaskHandler onNotificationDismissed');
   }
 
   static Future<void> requestPermissions() async {
@@ -87,6 +88,7 @@ class MyTaskHandler extends TaskHandler {
   }
 
   static void initService() {
+    if (kDebugMode) debugPrint('KMTaskHandler initService');
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'foreground_service',
@@ -100,19 +102,21 @@ class MyTaskHandler extends TaskHandler {
         playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(5000),
-        autoRunOnBoot: true,
+        eventAction: ForegroundTaskEventAction.nothing(), // repeat(5000), // ミリ秒
+        // autoRunOnBoot: true,
         autoRunOnMyPackageReplaced: true,
-        allowWakeLock: true,
-        allowWifiLock: true,
+        // allowWakeLock: true,
+        // allowWifiLock: true,
       ),
     );
   }
 
   static Future<ServiceRequestResult> startService() async {
     if (await FlutterForegroundTask.isRunningService) {
+      if (kDebugMode) debugPrint('KMTaskHandler startService restart');
       return FlutterForegroundTask.restartService();
     } else {
+      if (kDebugMode) debugPrint('KMTaskHandler startService start');
       return FlutterForegroundTask.startService(
         // You can manually specify the foregroundServiceType for the service
         // to be started, as shown in the comment below.
@@ -134,6 +138,7 @@ class MyTaskHandler extends TaskHandler {
   }
 
   static Future<ServiceRequestResult> stopService() {
+    if (kDebugMode) debugPrint('KeyManagementTaskHandler stopService');
     return FlutterForegroundTask.stopService();
   }
 }

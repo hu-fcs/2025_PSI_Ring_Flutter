@@ -91,7 +91,7 @@ class BleNickname extends ChangeNotifier {
   bool get isRunning => _isRunning;
 
   void _onStateChanged() {
-    if (kDebugMode) print('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
+    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
     _isRunning = _advertiser.isAdvertising && _scanner.isScanning;
     notifyListeners();
   }
@@ -172,7 +172,7 @@ class BleNickname extends ChangeNotifier {
       if (_advertiser.isAdvertising) {
         await _advertiser.restart();
       }
-      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
+      if (kDebugMode) debugPrint('_updateNickname: ${nickname2string(_lastNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
     }
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
     // BleRemoteMap().addRemote(_lastNickname!, DateTime.now(), local: true);
@@ -185,7 +185,7 @@ class BleNickname extends ChangeNotifier {
       }
       throw e;
     });
-    if (kDebugMode) print('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
+    if (kDebugMode) debugPrint('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
   }
 

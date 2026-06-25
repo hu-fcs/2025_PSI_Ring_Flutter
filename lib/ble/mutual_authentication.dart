@@ -84,7 +84,7 @@ class BleMutualAuthentication {
       // C -> P: 1. Peripheralの認証のためにCentralが課題（チャレンジ）を書き込み（write 16バイト or 32バイト）
       final challenge1 = await _firstCentral(peripheral, authenticationCharacteristic);
       if (kDebugMode) {
-        print('BLE startAuthentication _FirstCentral: '
+        debugPrint('BLE startAuthentication _FirstCentral: '
             'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1)}, '
             'peripheral ${peripheral.uuid}');
       }
@@ -94,7 +94,7 @@ class BleMutualAuthentication {
       final (success1, challenge2) = await _secondCentral(peripheral, authenticationCharacteristic, challenge1, peripheralPubKey);
       // success1はperipheralの認証に成功したときtrue
       if (kDebugMode) {
-        print('BLE startAuthentication _SecondCentral: '
+        debugPrint('BLE startAuthentication _SecondCentral: '
             'success1 $success1, '
             'challenge2 (${challenge2.length}) ${BleNickname.nickname2string(challenge2)}, '
             'peripheral ${peripheral.uuid}');
@@ -103,7 +103,7 @@ class BleMutualAuthentication {
       // C -> P: 4. Centralが応答（レスポンス）を書き込む（write）．Peripheralは応答を検証する
       final response2 = await _thirdCentral(peripheral, authenticationCharacteristic, centralPriKey, challenge2);
       if (kDebugMode) {
-        print('BLE startAuthentication _ThirdCentral: '
+        debugPrint('BLE startAuthentication _ThirdCentral: '
             'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
             'peripheral ${peripheral.uuid}');
       }
@@ -111,7 +111,7 @@ class BleMutualAuthentication {
       return success1; // Peripheralの認証に成功．Centralの認証結果は不明
     } catch (e) { // Peripheralへの読み書きに失敗した．
       if (kDebugMode) {
-        print('ERROR BLE startAuthentication: $e, '
+        debugPrint('ERROR BLE startAuthentication: $e, '
             'peripheral: ${peripheral.uuid}');
       }
     }
@@ -145,7 +145,7 @@ class BleMutualAuthentication {
 
     // 不正なWrite
     if (kDebugMode) {
-      print('ERROR BleMutualAuthentication onWriteRequest: state $state, '
+      debugPrint('ERROR BleMutualAuthentication onWriteRequest: state $state, '
           'payload: (${payload.length}) ${BleNickname.nickname2string(payload)}, '
           'central: ${central.uuid}, '
       );
@@ -192,7 +192,7 @@ class BleMutualAuthentication {
       GATTCharacteristicWriteRequestedEventArgs event,
       Uint8List challenge1) async {
     if (kDebugMode) {
-      print('BleMutualAuthentication _onFirstPeripheral: '
+      debugPrint('BleMutualAuthentication _onFirstPeripheral: '
           'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1)}, '
           'central: ${event.central.uuid}');
     }
@@ -245,7 +245,7 @@ class BleMutualAuthentication {
     challenge2.first = 0x20; // ダミー
     challenge2.last = 0x21; // ダミー
     if (kDebugMode) {
-      print('BleMutualAuthentication _onSecondPeripheral: '
+      debugPrint('BleMutualAuthentication _onSecondPeripheral: '
           'response1: (${response1.length}) ${BleNickname.nickname2string(response1)}, '
           'challenge2: (${challenge2.length}) ${BleNickname.nickname2string(challenge2)}, '
           'central: ${event.central.uuid}');
@@ -289,7 +289,7 @@ class BleMutualAuthentication {
     final challenge2 = authPeripheral.challenge2;
     // ToDo: challenge2とcentralのニックネームを使って，response2を検証する
     if (kDebugMode) {
-      print('BleMutualAuthentication _onThirdPeripheral: '
+      debugPrint('BleMutualAuthentication _onThirdPeripheral: '
           'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
           'central: ${event.central.uuid}');
     }
