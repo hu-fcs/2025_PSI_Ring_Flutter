@@ -59,9 +59,9 @@ class BleCentralManager extends ChangeNotifier {
     await stopScan();
     // await _localNicknameStreamSubscription?.cancel();
 
-    _stateSubscription?.cancel();
-    _discoveredSubscription?.cancel();
-    _connectionStateSubscription?.cancel();
+    await _stateSubscription?.cancel();
+    await _discoveredSubscription?.cancel();
+    await _connectionStateSubscription?.cancel();
     super.dispose(); // ChangeNotifierクラス
   }
 
@@ -85,13 +85,13 @@ class BleCentralManager extends ChangeNotifier {
 
   /// スキャン停止
   Future<void> stopScan() async {
-    if (!_isScanning) return;
+    // if (!_isScanning) return; // ToDo: これがW/FlutterJNI( 9610): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: dev.flutter.pigeon.bluetooth_low_energy_android.CentralManagerFlutterApi.onDiscovered.の原因か？
 
     if (kDebugMode) debugPrint('stopScan');
     await CentralManager().stopDiscovery();
-    await _discoveredSubscription?.cancel();
-    _discoveredPeripherals.clear();
-
+    await _connectionStateSubscription?.cancel();
+    await _connectionStateSubscription?.cancel();
+    _discoveredPeripherals?.clear();
     _isScanning = false;
     notifyListeners();
   }

@@ -13,12 +13,12 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
-import '../ble/nickname.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
 import 'debug_page.dart';
 import '../key_foreground_task.dart';
+import '../key_management.dart';
 
 /// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
 ///
@@ -32,9 +32,9 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
-  final _ble = BleNickname();
+  // final _ble = BleNickname();
 
-  bool get _bleRunning => _ble.isRunning;
+  // bool get _bleRunning => _ble.isRunning;
 
   PsiGrpcServer? _grpcServer;
 
@@ -61,9 +61,20 @@ class _ExchangePageState extends State<ExchangePage> {
     // Add a callback to receive data sent from the TaskHandler.
     FlutterForegroundTask.addTaskDataCallback(_onReceiveTaskData);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Request permissions and initialize the service.
-      KeyManagementTaskHandler.requestPermissions();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Widget表示の後の処理
+      await KeyManagementService.geoLocatorPermission();
+
+      if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Bluetooth を使用できません')),
+          );
+        }
+        return;
+      }
+
+      await KeyManagementTaskHandler.requestPermissions();
       KeyManagementTaskHandler.initService();
     });
   }
@@ -106,6 +117,7 @@ class _ExchangePageState extends State<ExchangePage> {
       Permission.bluetoothConnect,
     ];
     final statuses = await perms.request();
+    if (kDebugMode) print('_ensureBlePermissions $statuses');
     return perms.every((p) => statuses[p]?.isGranted ?? false);
   }
 
@@ -116,18 +128,22 @@ class _ExchangePageState extends State<ExchangePage> {
         await CentralManager().stateChanged.firstWhere(
                 (args) => args.state != BluetoothLowEnergyState.unknown);
       }
-      if (await CentralManager().state == BluetoothLowEnergyState.poweredOn) {
+      final state = await CentralManager().state;
+      if (kDebugMode) print('_ensureBluetoothEnabled $state');
+      if (state == BluetoothLowEnergyState.poweredOn) {
         return true;
       }
       // await FlutterBluePlus.turnOn(); BTをオンにするメソッドが bluetooth_low_energyパッケージにはないので，
       // ToDo: Bluetoothが使用できないとメッセージを出すべきだ
       // CentralManager().showAppSettings();
       return false;
-    } catch (_) {
+    } catch (e) {
+      if (kDebugMode) print('_ensureBluetoothEnabled failed $e');
       return false;
     }
   }
 
+  /*
   Future<void> _toggleBleExchange() async {
     if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
       if (mounted) {
@@ -140,6 +156,7 @@ class _ExchangePageState extends State<ExchangePage> {
     await _ble.toggleExchange();
     if (mounted) setState(() {});
   }
+  */
 
   Future<String?> _getLocalWifiIp() async {
     try {
@@ -617,8 +634,8 @@ class _ExchangePageState extends State<ExchangePage> {
           _bleCard(),
           const SizedBox(height: 20),
           _familiarCheckCard(),
-          const SizedBox(height: 20),
-          _buildServiceControlButtons(),
+          // const SizedBox(height: 20),
+          // _buildServiceControlButtons(),
         ],
       ),
     );
@@ -627,7 +644,7 @@ class _ExchangePageState extends State<ExchangePage> {
   Widget _statusRow() {
     return Row(
       children: [
-        _statusBadge(Icons.bluetooth, '近接記録(BLE)', _bleRunning),
+        _statusBadge(Icons.bluetooth, '近接記録(BLE)', false), // todo: fix. _bleRunning),
         const SizedBox(width: 8),
         _statusBadge(Icons.cloud_sharp, '顔見知り確認(gRPC)', _grpcRunning),
       ],
@@ -665,6 +682,16 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
           ),
           const SizedBox(width: 12),
+          Column(
+            // crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ElevatedButton(onPressed: KeyManagementTaskHandler.startService,
+                  child: Text('記録開始')),
+              ElevatedButton(onPressed: KeyManagementTaskHandler.stopService,
+                  child: Text('記録停止')),
+            ],
+          ),
+          /* todo: ボタン削除
           ListenableBuilder(
             listenable: _ble,
             builder: (context, child) {
@@ -673,7 +700,7 @@ class _ExchangePageState extends State<ExchangePage> {
                 onChanged: (_) => _toggleBleExchange(),
               );
             },
-          ),
+          ), */
         ],
       ),
     );
@@ -841,6 +868,7 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
 
+  /*
   Widget _buildServiceControlButtons() {
     buttonBuilder(String text, {VoidCallback? onPressed}) {
       return ElevatedButton(
@@ -861,4 +889,5 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
     );
   }
+  */
 }

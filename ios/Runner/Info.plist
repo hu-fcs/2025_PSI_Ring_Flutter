@@ -41,6 +41,7 @@
 	     <string>bluetooth-central</string>
          <string>bluetooth-peripheral</string>
          <string>fetch</string> <!-- flutter_foreground_task -->
+         <string>location</string> <!-- geolocator -->
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

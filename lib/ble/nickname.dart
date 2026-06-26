@@ -120,16 +120,27 @@ class BleNickname extends ChangeNotifier {
   /// BLE広告（アドバタイズ）とスキャンのON/OFF切り替え
   Future<void> toggleExchange() async {
     if (isRunning) {
-      _keyUpdateSub?.cancel();
-      _timer?.cancel();
-      await _scanner.stopScan();
-      await _advertiser.stop();
+      await stopExchange();
     } else {
-      _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname);
-      _start();
-      if (! _advertiser.isAdvertising) await _advertiser.start();
-      if (! _scanner.isScanning) await _scanner.startScan();
+      await startExchange();
     }
+  }
+
+  /// BLE広告（アドバタイズ）とスキャンのON
+  Future<void> startExchange() async {
+    _kms.init(); // main() から移動
+    _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname);
+    _start();
+    if (!_advertiser.isAdvertising) await _advertiser.start();
+    if (!_scanner.isScanning) await _scanner.startScan();
+  }
+
+  /// BLE広告（アドバタイズ）とスキャンのOFF
+  Future<void> stopExchange() async {
+    _keyUpdateSub?.cancel();
+    _timer?.cancel();
+    await _scanner.stopScan();
+    await _advertiser.stop();
   }
 
   /// ニックネームの前回のスロット

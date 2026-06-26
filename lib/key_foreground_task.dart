@@ -1,6 +1,9 @@
 import 'dart:io' show Platform;
+import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+
+import '../ble/nickname.dart';
 
 // The callback function should always be a top-level or static function.
 @pragma('vm:entry-point')
@@ -9,10 +12,14 @@ void startCallback() {
 }
 
 class KeyManagementTaskHandler extends TaskHandler {
+  final _ble = BleNickname();
+
   // Called when the task is started.
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     if (kDebugMode) debugPrint('KMTaskHandler onStart(starter: ${starter.name})');
+    DartPluginRegistrant.ensureInitialized(); // BLEのJNIを繋ぐ（Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++）
+    await _ble.startExchange();
   }
 
   // Called based on the eventAction set in ForegroundTaskOptions.
@@ -29,6 +36,7 @@ class KeyManagementTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     if (kDebugMode) debugPrint('KMTaskHandler onDestroy(isTimeout: $isTimeout)');
+    await _ble.stopExchange();
   }
 
   // Called when data is sent using `FlutterForegroundTask.sendDataToTask`.
@@ -73,7 +81,7 @@ class KeyManagementTaskHandler extends TaskHandler {
         // This function requires `android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission.
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       }
-
+      /*
       // Use this utility only if you provide services that require long-term survival,
       // such as exact alarm service, healthcare service, or Bluetooth communication.
       //
@@ -84,6 +92,7 @@ class KeyManagementTaskHandler extends TaskHandler {
         // So you need to explain to the user why set it.
         await FlutterForegroundTask.openAlarmsAndRemindersSettings();
       }
+       */
     }
   }
 
@@ -104,7 +113,7 @@ class KeyManagementTaskHandler extends TaskHandler {
       foregroundTaskOptions: ForegroundTaskOptions(
         eventAction: ForegroundTaskEventAction.nothing(), // repeat(5000), // ミリ秒
         // autoRunOnBoot: true,
-        autoRunOnMyPackageReplaced: true,
+        // autoRunOnMyPackageReplaced: true,
         // allowWakeLock: true,
         // allowWifiLock: true,
       ),

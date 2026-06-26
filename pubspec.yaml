@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_secure_storage: ^9.0.0
+  flutter_secure_storage: ^10.3.1 # ^9.0.0
   pointycastle: ^3.7.4
   cupertino_icons: ^1.0.8
   sqflite: ^2.4.2
@@ -36,8 +36,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
-  ffigen: ^11.0.0
+  flutter_lints: ^6.0.0
+  ffigen: ^20.1.1 # ^11.0.0 # 使っているのだろうか
 
 flutter:
   uses-material-design: true

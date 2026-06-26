@@ -25,9 +25,11 @@ void main() async {
   // DB を初期化する
   await DatabaseHelper.getDatabase();
 
-  // マスターキーを初期化する
+  /*
+  // マスターキーを初期化する．
   final keyService = KeyManagementService();
   await keyService.init();
+   */
 
   // Android フォアグラウンド サービスを使う（flutter_foreground_task パッケージ）
   FlutterForegroundTask.initCommunicationPort();

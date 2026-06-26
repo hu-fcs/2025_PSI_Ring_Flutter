@@ -33,8 +33,8 @@ class KeyManagementService {
 
   /// 時刻スロット幅（ミリ秒）
   ///
-  /// 既定は 10 分。DebugPage 等から変更できる。
-  int slotMs = 10 * 60 * 1000;
+  /// 既定は 10 分。DebugPage 等から変更できる。ミリ秒単位。
+  int slotMs = 600000; // todo: テスト中． 10 * 60 * 1000;
 
   /// 鍵の追加・更新を通知するストリーム（BLE / UI / gRPC で利用）
   final StreamController<void> _keyUpdatedController =
@@ -65,7 +65,7 @@ class KeyManagementService {
       try {
         final serviceEnabled = await Geolocator.isLocationServiceEnabled();
         if (!serviceEnabled) return;
-
+        /*
         LocationPermission permission = await Geolocator.checkPermission();
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
@@ -74,7 +74,7 @@ class KeyManagementService {
             permission == LocationPermission.deniedForever) {
           return;
         }
-
+        */
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
@@ -92,8 +92,6 @@ class KeyManagementService {
           where: 'pubkey_ecd = ?',
           whereArgs: [pubkey33],
         );
-
-        _notifyKeyUpdated();
       } catch (e, st) {
         if (kDebugMode) {
           debugPrint('KMS: attach location failed: $e');
@@ -168,10 +166,12 @@ class KeyManagementService {
       if (lat == null || lon == null) {
         _attachLocationAsync(pubkey33: pub);
       }
+      _notifyKeyUpdated();
       return pub;
     }
 
     // スロットに対応する鍵対を導出する
+    debugPrint('_nativeKeyService; $_nativeKeyService');
     final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
     if (keyPair == null) return null;
 
@@ -521,6 +521,52 @@ class KeyManagementService {
       debugPrint('KMS: delete master key');
     }
     return _secureStorage.delete(key: _masterKeyAlias);
+  }
+
+  static bool _locationServicePermitted = false;
+
+  static Future<bool> geoLocatorPermission() async {
+    bool locationServiceEnabled;
+    LocationPermission permission;
+
+    try {
+      // Test if location services are enabled.
+      locationServiceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (kDebugMode) debugPrint(
+          'static KMS: geoLocatorPermission: enabled: $locationServiceEnabled');
+      if (!locationServiceEnabled) {
+        // Location services are not enabled don't continue
+        // accessing the position and request users of the
+        // App to enable the location services.
+        return false; // Future.error('Location services are disabled.');
+      }
+
+      permission = await Geolocator.checkPermission();
+      if (kDebugMode) debugPrint(
+          'static KMS: geoLocatorPermission: permission $permission');
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (kDebugMode) debugPrint(
+            'static KMS: geoLocatorPermission: permission $permission');
+        if (permission == LocationPermission.denied) {
+          // Permissions are denied, next time you could try
+          // requesting permissions again (this is also where
+          // Android's shouldShowRequestPermissionRationale
+          // returned true. According to Android guidelines
+          // your App should show an explanatory UI now.
+          return false; // Future.error('Location permissions are denied');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        // Permissions are denied forever, handle appropriately.
+        return false; // Future.error('Location permissions are permanently denied, we cannot request permissions.');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('static KMS: geoLocatorPermission: $e');
+    }
+    _locationServicePermitted = true;
+    return true;
   }
 }
 
