@@ -52,6 +52,9 @@ class KeyManagementTaskHandler extends TaskHandler {
   @override
   void onNotificationButtonPressed(String id) {
     if (kDebugMode) debugPrint('KMTaskHandler onNotificationButtonPressed: $id');
+    if (id == 'btn_stop') {
+      stopService();
+    }
   }
 
   // Called when the notification itself is pressed.
@@ -118,6 +121,7 @@ class KeyManagementTaskHandler extends TaskHandler {
         channelDescription:
         'This notification appears when the foreground service is running.',
         onlyAlertOnce: true,
+        playSound: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
         showNotification: false,
@@ -193,6 +197,12 @@ class KeyManagementTaskHandler extends TaskHandler {
       final str = BleNickname.nickname2string(remoteNickname, len: 5);
       notificationRemote = '受信: $nowStr, $str';
     }
-    FlutterForegroundTask.updateService(notificationText: notificationLocal + notificationRemote);
+    if (BleNickname().isRunning) {
+      FlutterForegroundTask.updateService(
+          notificationText: notificationLocal + notificationRemote);
+    } else {
+      FlutterForegroundTask.updateService(
+          notificationText: 'Bluetoothをうまく使えていないようです．\n$notificationLocal$notificationRemote');
+    }
   }
 }
