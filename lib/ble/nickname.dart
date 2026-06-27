@@ -19,13 +19,13 @@
 library; // 上のドキュメントコメントをファイルに対するコメントにするためにlibraryと書いている．
 
 import 'dart:async';      // Timer
-// import 'dart:js_interop';
-import 'dart:typed_data'; // Uint8List
-import 'dart:math' show min, Random;       // min
-// import 'dart:collection';
-import 'package:flutter/foundation.dart'; // kDebugMode
+import 'dart:math' show Random;       // min
+import 'dart:typed_data' show Uint8List;
+import 'package:flutter/foundation.dart'show kDebugMode, debugPrint, ChangeNotifier;
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
 import 'package:convert/convert.dart' show hex; // hex.decode(Uint8List)のため
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:fluttersample_2025/key_foreground_task.dart';
 import '../key_management.dart';
 import 'peripheral.dart';
 import 'central.dart';
@@ -168,9 +168,9 @@ class BleNickname extends ChangeNotifier {
       await Future.delayed(Duration(milliseconds: jitter));
     }
     // 杉浦プロジェクトと同様（3行）
-    final int now = DateTime.now().millisecondsSinceEpoch;
+    final now = DateTime.now();
     final int slotMillis = validDuration.inMilliseconds;
-    final slotStartTime = (now ~/ slotMillis) * slotMillis; // (now ~/ slotMillis) は (int)(now / slotMillis) と同じ
+    final slotStartTime = (now.millisecondsSinceEpoch ~/ slotMillis) * slotMillis; // (now ~/ slotMillis) は (int)(now / slotMillis) と同じ
 
     if (_lastSlotStartTime != slotStartTime) { // 時間が経っていなら更新しない．
       _lastSlotStartTime = slotStartTime;
@@ -183,7 +183,15 @@ class BleNickname extends ChangeNotifier {
       if (_advertiser.isAdvertising) {
         await _advertiser.restart();
       }
-      if (kDebugMode) debugPrint('_updateNickname: ${nickname2string(_lastNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
+
+      // notification．awaitしない
+      KeyManagementTaskHandler.UpdateNotificationText(localNickname: _lastNickname, now: DateTime.now());
+
+      if (kDebugMode) {
+        debugPrint('_updateNickname: $now, '
+            'duration $validDuration, '
+            '${nickname2string(_lastNickname, len: 9)}');
+      }
     }
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
     // BleRemoteMap().addRemote(_lastNickname!, DateTime.now(), local: true);
@@ -196,6 +204,10 @@ class BleNickname extends ChangeNotifier {
       }
       throw e;
     });
+
+    // notification．awaitしない
+    KeyManagementTaskHandler.UpdateNotificationText(localNickname: _lastNickname, now: DateTime.now());
+
     if (kDebugMode) debugPrint('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
   }
@@ -209,6 +221,8 @@ class BleNickname extends ChangeNotifier {
         receivedAtMs: now.millisecondsSinceEpoch,
       );
       if (inserted) {
+        // notification．awaitしない
+        KeyManagementTaskHandler.UpdateNotificationText(remoteNickname: nickname, now: DateTime.now());
         if (kDebugMode) {
           debugPrint('BLE_SCAN: new collected key stored');
         }

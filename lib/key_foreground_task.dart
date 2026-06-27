@@ -1,8 +1,10 @@
 import 'dart:io' show Platform;
+import 'dart:typed_data' show Uint8List;
 import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-
+import 'package:flutter/widgets.dart' show WidgetsFlutterBinding;
+import 'package:intl/intl.dart' show DateFormat;
 import '../ble/nickname.dart';
 
 // The callback function should always be a top-level or static function.
@@ -18,6 +20,7 @@ class KeyManagementTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     if (kDebugMode) debugPrint('KMTaskHandler onStart(starter: ${starter.name})');
+    // WidgetsFlutterBinding.ensureInitialized(); // (J9110) BLEのJNIを繋ぐ（Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++）
     DartPluginRegistrant.ensureInitialized(); // BLEのJNIを繋ぐ（Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++）
     await _ble.startExchange();
   }
@@ -96,8 +99,18 @@ class KeyManagementTaskHandler extends TaskHandler {
     }
   }
 
-  static void initService() {
-    if (kDebugMode) debugPrint('KMTaskHandler initService');
+  static Future<void> initService() async {
+    if (kDebugMode) {
+      debugPrint('KMTaskHandler initService: '
+        'isInitialized ${FlutterForegroundTask.isInitialized}, '
+        'isRunningService ${await FlutterForegroundTask.isRunningService}');
+    }
+
+    // @visibleForTestingなFlutterForegroundTask.isInitializedを使って判断
+    // すでに実行中なら FlutterForegroundTask.initは不要．
+    if (FlutterForegroundTask.isInitialized
+        && await FlutterForegroundTask.isRunningService) return;
+
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'foreground_service',
@@ -122,23 +135,33 @@ class KeyManagementTaskHandler extends TaskHandler {
 
   static Future<ServiceRequestResult> startService() async {
     if (await FlutterForegroundTask.isRunningService) {
-      if (kDebugMode) debugPrint('KMTaskHandler startService restart');
+      if (kDebugMode) debugPrint('KMTaskHandler startService すでに実行中');
+      // ToDo: パッケージのサンプル通りにrestartService()を呼び出すと，画面がフリーズすることがあるのでやめてみたがあまり変わらない．
+      // return ServiceRequestSuccess();
       return FlutterForegroundTask.restartService();
     } else {
-      if (kDebugMode) debugPrint('KMTaskHandler startService start');
+      // KeyManagementTaskHandler.initService();
+      if (kDebugMode) {
+        debugPrint('KMTaskHandler startService start: '
+            'isInitialized ${FlutterForegroundTask.isInitialized}, '
+            'isRunningService ${await FlutterForegroundTask.isRunningService}');
+      }
+      // ToDo: isInitialized (@visibleForTesting) が知らないうちにfalseになるので，無理やり初期化している．
+      if (! FlutterForegroundTask.isInitialized) initService();
+
       return FlutterForegroundTask.startService(
         // You can manually specify the foregroundServiceType for the service
         // to be started, as shown in the comment below.
-        // serviceTypes: [
-        //   ForegroundServiceTypes.dataSync,
-        //   ForegroundServiceTypes.remoteMessaging,
-        // ],
+        serviceTypes: [
+          ForegroundServiceTypes.connectedDevice,
+          ForegroundServiceTypes.location,
+        ],
         serviceId: 256,
-        notificationTitle: 'Foreground Service is running',
+        notificationTitle: 'Bluetoothと現在位置を使って、近くの人を記録しています',
         notificationText: 'Tap to return to the app',
         notificationIcon: null,
         notificationButtons: [
-          const NotificationButton(id: 'btn_hello', text: 'hello'),
+          const NotificationButton(id: 'btn_stop', text: '記録停止'),
         ],
         notificationInitialRoute: '/',
         callback: startCallback,
@@ -147,7 +170,29 @@ class KeyManagementTaskHandler extends TaskHandler {
   }
 
   static Future<ServiceRequestResult> stopService() {
-    if (kDebugMode) debugPrint('KeyManagementTaskHandler stopService');
+    if (kDebugMode) {
+      debugPrint('KeyManagementTaskHandler stopService: '
+        'isInitialized ${FlutterForegroundTask.isInitialized}');
+    }
     return FlutterForegroundTask.stopService();
+  }
+
+  static String notificationLocal = '', notificationRemote = '受信なし';
+
+  static Future<void> UpdateNotificationText(
+      {Uint8List? localNickname, Uint8List? remoteNickname,
+      DateTime? now}) async {
+    if (kDebugMode) debugPrint('UpdateNotificationText');
+    now ??= DateTime.now();
+    final nowStr = DateFormat('MM/dd HH:mm:ss').format(now);
+    if (localNickname != null) {
+      final str = BleNickname.nickname2string(localNickname, len: 5);
+      notificationLocal = '広告: $nowStr, $str\n';
+    }
+    if (remoteNickname != null) {
+      final str = BleNickname.nickname2string(remoteNickname, len: 5);
+      notificationRemote = '受信: $nowStr, $str';
+    }
+    FlutterForegroundTask.updateService(notificationText: notificationLocal + notificationRemote);
   }
 }

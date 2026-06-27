@@ -34,7 +34,7 @@ class KeyManagementService {
   /// 時刻スロット幅（ミリ秒）
   ///
   /// 既定は 10 分。DebugPage 等から変更できる。ミリ秒単位。
-  int slotMs = 600000; // todo: テスト中． 10 * 60 * 1000;
+  int slotMs = 60000; // todo: テスト中． 10 * 60 * 1000;
 
   /// 鍵の追加・更新を通知するストリーム（BLE / UI / gRPC で利用）
   final StreamController<void> _keyUpdatedController =
@@ -65,7 +65,8 @@ class KeyManagementService {
       try {
         final serviceEnabled = await Geolocator.isLocationServiceEnabled();
         if (!serviceEnabled) return;
-        /*
+
+        /* exchange_page.dart に移動
         LocationPermission permission = await Geolocator.checkPermission();
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();

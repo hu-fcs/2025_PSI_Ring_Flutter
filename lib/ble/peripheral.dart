@@ -21,9 +21,14 @@ class BlePeripheral extends ChangeNotifier {
   /// サービス追加を最初の1回だけにする．ToDo: アプリがバックグラウンドから戻った時はtrueに戻るので，2回以上呼ばれることがある．Android
   bool _addService = true;
 
-  StreamSubscription? _characteristicNotifyStateChangedSubscription;
   StreamSubscription? _characteristicReadRequestedSubscription;
   StreamSubscription? _characteristicWriteRequestedSubscription;
+  StreamSubscription? _characteristicNotifyStateChangedSubscription;
+  StreamSubscription? _mtuChangedSubscription;
+  StreamSubscription? _connectionStateChangedSubscription;
+  StreamSubscription? _stateChangedSubscription;
+  // StreamSubscription? _descriptorReadRequestedSubscription;
+  // StreamSubscription? _descriptorWriteRequestedSubscription;
 
   /// このオブジェクトを破棄．
   @override
@@ -70,24 +75,48 @@ class BlePeripheral extends ChangeNotifier {
     }
 
     // セントラル（相手側）からの状態変更の監視メソッドを登録
-    _characteristicNotifyStateChangedSubscription =
-        PeripheralManager().characteristicNotifyStateChanged.listen(_onNotifyStateChanged);
-    _characteristicReadRequestedSubscription =
-        PeripheralManager().characteristicReadRequested.listen(_onReadRequest);
-    _characteristicWriteRequestedSubscription =
-        PeripheralManager().characteristicWriteRequested.listen(_onWriteRequest);
+    _characteristicReadRequestedSubscription = PeripheralManager().characteristicReadRequested.listen(_onReadRequest);
+    _characteristicWriteRequestedSubscription = PeripheralManager().characteristicWriteRequested.listen(_onWriteRequest);
+    _characteristicNotifyStateChangedSubscription = PeripheralManager().characteristicNotifyStateChanged.listen(_onNotifyStateChanged);
+    _mtuChangedSubscription = PeripheralManager().mtuChanged.listen(_onMtuChanged);
+    _connectionStateChangedSubscription = PeripheralManager().connectionStateChanged.listen(_onConnectionStateChanged);
+    _stateChangedSubscription = PeripheralManager().stateChanged.listen(_stateChanged);
+    // _descriptorReadRequestedSubscription = PeripheralManager().descriptorReadRequested.listen(_onDescriptorReadRequested);
+    // _descriptorWriteRequestedSubscription = PeripheralManager().descriptorWriteRequested.listen(_onDescriptorWriteRequested);
+
 
     // アドバタイズ（広告）の開始
     final advertisement = Advertisement(
-      // name: 'BLE32',
-      serviceUUIDs: [BleNickname.serviceUuid],
-      // manufacturerSpecificData: [data, data2],
-    );
+        serviceUUIDs: [BleNickname.serviceUuid]);
     await PeripheralManager().startAdvertising(advertisement);
     if (kDebugMode) debugPrint("Advertising started...");
 
     _isAdvertising = true;
     notifyListeners(); // UIに通知
+  }
+
+  /// ペリフェラルの停止．リソースの解放
+  Future<void> stop() async {
+    await PeripheralManager().stopAdvertising();
+    await PeripheralManager().removeAllServices();
+    await _characteristicReadRequestedSubscription?.cancel();
+    await _characteristicWriteRequestedSubscription?.cancel();
+    await _characteristicNotifyStateChangedSubscription?.cancel();
+    await _mtuChangedSubscription?.cancel();
+    await _connectionStateChangedSubscription?.cancel();
+    await _stateChangedSubscription?.cancel();
+    // await _localNicknameStreamSubscription?.cancel();
+    _isAdvertising = false;
+    notifyListeners(); // UIに通知
+  }
+
+  /// ニックネームが変わった時に呼ばれ，広告を一時停止して再開
+  Future<void> restart() async {
+    await PeripheralManager().stopAdvertising();
+    final advertisement = Advertisement(
+        serviceUUIDs: [BleNickname.serviceUuid]);
+    await PeripheralManager().startAdvertising(advertisement);
+    if (kDebugMode) debugPrint("Advertising restarted...");
   }
 
   /// CentralがPeripheraのニックネームを読み取り（Read）たいと要求している．特性（Characteristic）
@@ -97,7 +126,11 @@ class BlePeripheral extends ChangeNotifier {
       try {
         // セントラルにデータを応答．33バイトのニックネーム
         final localNickname = BleNickname().localNickname;
-        if (kDebugMode) debugPrint("_onReadRequest. length: ${localNickname.length}, nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${event.central.uuid}");
+        if (kDebugMode) {
+          debugPrint('_onReadRequest. length: ${localNickname.length}, '
+              'nickname: ${BleNickname.nickname2string(localNickname)}, '
+              'peripheral: ${event.central.uuid}');
+        }
         await PeripheralManager().respondReadRequestWithValue(
           event.request,
           value: localNickname,
@@ -116,7 +149,11 @@ class BlePeripheral extends ChangeNotifier {
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       // セントラルから書き込まれたデータ (Uint8List) を取得
       final Uint8List remoteNickname = event.request.value;
-      if (kDebugMode) debugPrint("_onWriteRequest length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${event.central.uuid}");
+      if (kDebugMode) {
+        debugPrint('_onWriteRequest length: ${remoteNickname.length}, '
+            'nickname: ${BleNickname.nickname2string(remoteNickname)}, '
+            'central: ${event.central.uuid}');
+      }
       BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       BleMutualAuthentication().onWriteRequest(event);
@@ -124,37 +161,40 @@ class BlePeripheral extends ChangeNotifier {
   }
 
   /// Subscribe状態が変化した時のハンドラ
-  void _onNotifyStateChanged(GATTCharacteristicNotifyStateChangedEventArgs event) {
-    // 対象の特性かつ、セントラルがSubscribe（通知有効化）した場合
-    if (event.characteristic == BleNickname.nicknameCharacteristic && event.state) {
-      if (kDebugMode) debugPrint("Central subscribed. Sending 32-byte data immediately.");
-
+  void _onNotifyStateChanged(GATTCharacteristicNotifyStateChangedEventArgs eventArgs) {
+    if (eventArgs.characteristic == BleNickname.nicknameCharacteristic) {
+      if (kDebugMode) {
+        final central = eventArgs.central;
+        final state = eventArgs.state; // bool
+        debugPrint('_onNotifyStateChanged: state $state, '
+            'central.uuid ${central.uuid}');
+      }
       // 即座に32バイトのデータを送信
-      // _send32ByteNotify(event.central);
     }
   }
 
-  /// ニックネームが変わった時に呼ばれ，広告を一時停止して再開
-  Future<void> restart() async {
-    await PeripheralManager().stopAdvertising();
-    final advertisement = Advertisement(
-      // name: 'BLE32',
-      serviceUUIDs: [BleNickname.serviceUuid],
-      // manufacturerSpecificData: [data, data2],
-    );
-    await PeripheralManager().startAdvertising(advertisement);
-    if (kDebugMode) debugPrint("Advertising restarted...");
+  void _onMtuChanged(CentralMTUChangedEventArgs eventArgs) {
+    if (kDebugMode) {
+      final central = eventArgs.central;
+      final mtu = eventArgs.mtu;
+      debugPrint('_onMtuChanged: mtu $mtu, central.uuid ${central.uuid}');
+    }
   }
 
-  /// ペリフェラルの停止．リソースの解放
-  Future<void> stop() async {
-    await PeripheralManager().stopAdvertising();
-    await _characteristicNotifyStateChangedSubscription?.cancel();
-    await _characteristicReadRequestedSubscription?.cancel();
-    await _characteristicWriteRequestedSubscription?.cancel();
-    // await _localNicknameStreamSubscription?.cancel();
-    _isAdvertising = false;
-    notifyListeners(); // UIに通知
+  void _onConnectionStateChanged(CentralConnectionStateChangedEventArgs eventArgs) {
+    if (kDebugMode) {
+      final central = eventArgs.central;
+      final state = eventArgs.state;
+      debugPrint('_onConnectionStateChanged: state $state, '
+          'central.uuid ${central.uuid}');
+    }
+  }
+
+  void _stateChanged(BluetoothLowEnergyStateChangedEventArgs eventArgs) {
+    if (kDebugMode) {
+      final state = eventArgs.state;
+      debugPrint('_stateChanged: state $state (peripheralManager)');
+    }
   }
 
 /*

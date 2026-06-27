@@ -44,17 +44,6 @@ class _ExchangePageState extends State<ExchangePage> {
 
   final _db = DatabaseHelper();
 
-  void _onReceiveTaskData(Object data) {
-    if (data is Map<String, dynamic>) {
-      final dynamic timestampMillis = data["timestampMillis"];
-      if (timestampMillis != null) {
-        final DateTime timestamp =
-        DateTime.fromMillisecondsSinceEpoch(timestampMillis, isUtc: true);
-        if (kDebugMode) debugPrint('timestamp: ${timestamp.toString()}');
-      }
-    }
-  }
-
   @override
   void initState() {
     super.initState();
@@ -63,18 +52,16 @@ class _ExchangePageState extends State<ExchangePage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // Widget表示の後の処理
-      await KeyManagementService.geoLocatorPermission();
+      await _requestPermissions();
 
-      if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
+      if (!await _ensureBluetoothEnabled()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Bluetooth を使用できません')),
           );
         }
-        return;
       }
 
-      await KeyManagementTaskHandler.requestPermissions();
       KeyManagementTaskHandler.initService();
     });
   }
@@ -84,6 +71,17 @@ class _ExchangePageState extends State<ExchangePage> {
     // Remove a callback to receive data sent from the TaskHandler.
     FlutterForegroundTask.removeTaskDataCallback(_onReceiveTaskData);
     super.dispose();
+  }
+
+  void _onReceiveTaskData(Object data) {
+    if (data is Map<String, dynamic>) {
+      final dynamic timestampMillis = data["timestampMillis"];
+      if (timestampMillis != null) {
+        final DateTime timestamp =
+        DateTime.fromMillisecondsSinceEpoch(timestampMillis, isUtc: true);
+        if (kDebugMode) debugPrint('timestamp: ${timestamp.toString()}');
+      }
+    }
   }
 
   Future<bool> _hasAnyKey() async => (await _db.getTotalKeyCount()) > 0;
@@ -110,15 +108,63 @@ class _ExchangePageState extends State<ExchangePage> {
     return false;
   }
 
-  Future<bool> _ensureBlePermissions() async {
+  Future<bool> _requestPermissions() async {
+    bool isGranted = true;
+    var status;
+
+    // await KeyManagementService.geoLocatorPermission();
+    await _requestPermissionsSnakBar([Permission.locationWhenInUse],
+        'location when in Use を許可してください');
+    status = await Permission.locationWhenInUse.request();
+    isGranted &= (status == PermissionStatus.granted);
+
+    await _requestPermissionsSnakBar([Permission.locationAlways],
+        'location always を許可してください');
+    status = await Permission.locationAlways.request();
+    isGranted &= (status == PermissionStatus.granted);
+
+    await _requestPermissionsSnakBar(
+        [Permission.bluetoothAdvertise,
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect],
+        'bluetooth の使用を許可してください'); // todo: advertiseとscan
     final perms = [
       Permission.bluetoothAdvertise,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
     ];
     final statuses = await perms.request();
-    if (kDebugMode) print('_ensureBlePermissions $statuses');
-    return perms.every((p) => statuses[p]?.isGranted ?? false);
+    if (kDebugMode) print('_requestPermissions $statuses');
+    status = (perms.every((p) => statuses[p]?.isGranted ?? false));
+    // todo:
+    isGranted &= status;
+
+    // await KeyManagementTaskHandler.requestPermissions();
+    await _requestPermissionsSnakBar([Permission.notification],
+        'notification を許可してください');
+    status = await Permission.notification.request();
+    // todo:
+    isGranted &= (status == PermissionStatus.granted);
+
+    return isGranted;
+  }
+
+  Future<void> _requestPermissionsSnakBar(List<Permission> perms,
+      String text) async {
+    // final status = await perms[0].isGranted;
+    bool status = true;
+    for (final perm in perms) {
+      status &= await perm.isGranted;
+    }
+    print('Permisson: $text, $status');
+    if (!status && mounted) {
+      await Future.delayed(Duration(seconds: 1));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(text)),
+      );
+      await Future.delayed(Duration(seconds: 5));
+    }
+
   }
 
   Future<bool> _ensureBluetoothEnabled() async {
