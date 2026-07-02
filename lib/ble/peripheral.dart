@@ -80,7 +80,7 @@ class BlePeripheral extends ChangeNotifier {
     _characteristicNotifyStateChangedSubscription = PeripheralManager().characteristicNotifyStateChanged.listen(_onNotifyStateChanged);
     _mtuChangedSubscription = PeripheralManager().mtuChanged.listen(_onMtuChanged);
     _connectionStateChangedSubscription = PeripheralManager().connectionStateChanged.listen(_onConnectionStateChanged);
-    _stateChangedSubscription = PeripheralManager().stateChanged.listen(_stateChanged);
+    _stateChangedSubscription = PeripheralManager().stateChanged.listen(_onStateChanged);
     // _descriptorReadRequestedSubscription = PeripheralManager().descriptorReadRequested.listen(_onDescriptorReadRequested);
     // _descriptorWriteRequestedSubscription = PeripheralManager().descriptorWriteRequested.listen(_onDescriptorWriteRequested);
 
@@ -96,9 +96,11 @@ class BlePeripheral extends ChangeNotifier {
   }
 
   /// ペリフェラルの停止．リソースの解放
-  Future<void> stop() async {
-    await PeripheralManager().stopAdvertising();
-    await PeripheralManager().removeAllServices();
+  Future<void> stop([bool fPoweredOn = true]) async {
+    if (fPoweredOn) {
+      await PeripheralManager().stopAdvertising();
+      await PeripheralManager().removeAllServices();
+    }
     await _characteristicReadRequestedSubscription?.cancel();
     await _characteristicWriteRequestedSubscription?.cancel();
     await _characteristicNotifyStateChangedSubscription?.cancel();
@@ -190,11 +192,13 @@ class BlePeripheral extends ChangeNotifier {
     }
   }
 
-  void _stateChanged(BluetoothLowEnergyStateChangedEventArgs eventArgs) {
+  void _onStateChanged(BluetoothLowEnergyStateChangedEventArgs eventArgs) async {
     if (kDebugMode) {
       final state = eventArgs.state;
       debugPrint('_stateChanged: state $state (peripheralManager)');
     }
+    // PoweredOff なら main isolateに伝えて，KeyManagementTaskHandler を停止
+    await BleNickname().onBleStateChanged(eventArgs);
   }
 
 /*

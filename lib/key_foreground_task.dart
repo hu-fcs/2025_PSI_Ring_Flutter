@@ -46,6 +46,10 @@ class KeyManagementTaskHandler extends TaskHandler {
   @override
   void onReceiveData(Object data) {
     if (kDebugMode) debugPrint('KMTaskHandler onReceiveData: $data');
+    if (data == 'isRunning') { //
+      _ble.onPeripheralStateChanged();
+      _ble.onCentralStateChanged();
+    }
   }
 
   // Called when the notification button is pressed.
@@ -67,6 +71,11 @@ class KeyManagementTaskHandler extends TaskHandler {
   @override
   void onNotificationDismissed() {
     if (kDebugMode) debugPrint('KMTaskHandler onNotificationDismissed');
+  }
+
+  /// この TaskHandler から　main (UI) isolate へのデータ送信
+  void sendDataToMain(Object data) {
+    FlutterForegroundTask.sendDataToMain(data);
   }
 
   static Future<void> requestPermissions() async {

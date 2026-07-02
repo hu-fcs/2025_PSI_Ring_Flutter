@@ -16,9 +16,9 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
-import 'debug_page.dart';
+import '../ble/nickname.dart';
 import '../key_foreground_task.dart';
-import '../key_management.dart';
+import 'debug_page.dart';
 
 /// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
 ///
@@ -35,6 +35,8 @@ class _ExchangePageState extends State<ExchangePage> {
   // final _ble = BleNickname();
 
   // bool get _bleRunning => _ble.isRunning;
+  bool _bleAdvertiserRunning = false; // _onReceiveTaskData で更新
+  bool _bleScannerRunning = false;    // _onReceiveTaskData で更新
 
   PsiGrpcServer? _grpcServer;
 
@@ -57,12 +59,17 @@ class _ExchangePageState extends State<ExchangePage> {
       if (!await _ensureBluetoothEnabled()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bluetooth を使用できません')),
+            const SnackBar(content: Text('\n\nBluetooth を使用できません\n\n')),
           );
         }
       }
 
-      KeyManagementTaskHandler.initService();
+      final isRunningService = await FlutterForegroundTask.isRunningService;
+      if (isRunningService) {
+        FlutterForegroundTask.sendDataToTask('isRunning');
+      } else {
+        KeyManagementTaskHandler.initService();
+      }
     });
   }
 
@@ -73,13 +80,41 @@ class _ExchangePageState extends State<ExchangePage> {
     super.dispose();
   }
 
+  /// KeyManagementTaskHandlerからの通知．sendDataToMain(<String, Object>{})
   void _onReceiveTaskData(Object data) {
     if (data is Map<String, dynamic>) {
-      final dynamic timestampMillis = data["timestampMillis"];
-      if (timestampMillis != null) {
-        final DateTime timestamp =
-        DateTime.fromMillisecondsSinceEpoch(timestampMillis, isUtc: true);
-        if (kDebugMode) debugPrint('timestamp: ${timestamp.toString()}');
+      final event = data['event'];
+      final now = DateTime.fromMillisecondsSinceEpoch(data['now']);
+      switch (event) {
+        case 'advertiser':
+          final isRunning = data['isRunning'];
+          if (kDebugMode) debugPrint('_onReceiveTaskData: $event, $isRunning, $now');
+          setState(() {
+            _bleAdvertiserRunning = isRunning;
+          });
+        case 'scanner':
+          final isRunning = data['isRunning'];
+          if (kDebugMode) debugPrint('_onReceiveTaskData: $event, $isRunning, $now');
+          setState(() {
+            _bleScannerRunning = isRunning;
+          });
+        case 'blePoweredOff':
+          if (kDebugMode) debugPrint('_onReceiveTaskData: $event, $now');
+          FlutterForegroundTask.stopService();
+          /*
+          setState(() {
+            _bleAdvertiserRunning = false;
+            _bleScannerRunning = false;
+          });
+           */
+        case 'localNickname':
+          final nickname = data['nickname'];
+          if (kDebugMode) debugPrint('_onReceiveTaskData: $event, ${BleNickname.nickname2string(nickname, len: 9)}, $now');
+        case 'remoteNickname':
+          final nickname = data['nickname'];
+          if (kDebugMode) debugPrint('_onReceiveTaskData: $event, ${BleNickname.nickname2string(nickname, len: 9)}, $now');
+        default:
+          if (kDebugMode) debugPrint('_onReceiveTaskData: unsupported $event, $now');
       }
     }
   }
@@ -160,7 +195,7 @@ class _ExchangePageState extends State<ExchangePage> {
     if (!status && mounted) {
       await Future.delayed(Duration(seconds: 1));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(text)),
+        SnackBar(content: Text('\n\n$text\n\n')),
       );
       await Future.delayed(Duration(seconds: 5));
     }
@@ -189,20 +224,21 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
-  /*
   Future<void> _toggleBleExchange() async {
-    if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
+    if (! await _requestPermissions() || ! await _ensureBluetoothEnabled()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bluetooth を使用できません')),
+          const SnackBar(content: Text('\n\nBluetooth を使用できません\n\n')),
         );
       }
       return;
     }
-    await _ble.toggleExchange();
-    if (mounted) setState(() {});
+    if (_bleAdvertiserRunning || _bleScannerRunning) {
+      await KeyManagementTaskHandler.stopService();
+    } else {
+      await KeyManagementTaskHandler.startService();
+    }
   }
-  */
 
   Future<String?> _getLocalWifiIp() async {
     try {
@@ -689,8 +725,15 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Widget _statusRow() {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _statusBadge(Icons.bluetooth, '近接記録(BLE)', false), // todo: fix. _bleRunning),
+        Column(
+          children: [
+            _statusBadge(Icons.bluetooth, '近接広告(BLE)', _bleAdvertiserRunning), // todo: fix. _bleRunning),
+            const SizedBox(height: 8),
+            _statusBadge(Icons.bluetooth, '近接受信(BLE)', _bleScannerRunning), // todo: fix. _bleRunning),
+          ],
+        ),
         const SizedBox(width: 8),
         _statusBadge(Icons.cloud_sharp, '顔見知り確認(gRPC)', _grpcRunning),
       ],
@@ -728,6 +771,11 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
           ),
           const SizedBox(width: 12),
+          Switch(
+            value: _bleAdvertiserRunning || _bleScannerRunning,
+            onChanged: (_) => _toggleBleExchange(),
+          ),
+          /*
           Column(
             // crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -737,6 +785,7 @@ class _ExchangePageState extends State<ExchangePage> {
                   child: Text('記録停止')),
             ],
           ),
+          */
           /* todo: ボタン削除
           ListenableBuilder(
             listenable: _ble,

@@ -84,11 +84,12 @@ class BleCentralManager extends ChangeNotifier {
   }
 
   /// スキャン停止
-  Future<void> stopScan() async {
-    // if (!_isScanning) return; // ToDo: これがW/FlutterJNI( 9610): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: dev.flutter.pigeon.bluetooth_low_energy_android.CentralManagerFlutterApi.onDiscovered.の原因か？
+  Future<void> stopScan([bool fPoweredOn = true]) async {
 
     if (kDebugMode) debugPrint('stopScan');
-    await CentralManager().stopDiscovery();
+    if (fPoweredOn) {
+      await CentralManager().stopDiscovery();
+    }
     await _connectionStateSubscription?.cancel();
     await _connectionStateSubscription?.cancel();
     _discoveredPeripherals?.clear();
@@ -237,8 +238,9 @@ class BleCentralManager extends ChangeNotifier {
     }
   }
 
+  /*
 /// OSやユーザにBLEを使う許可をもらう．同等のものがExchangePageクラスに実装されている．
-/* Future<void> _requestPermissions() async {
+   Future<void> _requestPermissions() async {
     if (Platform.isAndroid) {
       // Android 12 (API 31) 以降とそれ未満で必要な権限をまとめてリクエスト
       Map<Permission, PermissionStatus> statuses = await [

@@ -90,10 +90,33 @@ class BleNickname extends ChangeNotifier {
   bool _isRunning = false;
   bool get isRunning => _isRunning;
 
-  void _onStateChanged() {
+  /// BLEがONになったら，StartExchangeするためのフラグ
+  bool _waitForPoweredOn = false;
+
+  void onPeripheralStateChanged() {
+    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising}');
+    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
+    if (_isRunning != isRunning) {
+      _isRunning = isRunning;
+      notifyListeners();
+    }
+    // main isolate への通知 (_onReceiveTaskDataへ)
+    final now = DateTime.now();
+    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+      'event': 'advertiser', 'isRunning': _advertiser.isAdvertising, 'now': now.millisecondsSinceEpoch});
+  }
+
+  void onCentralStateChanged() {
     if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
-    _isRunning = _advertiser.isAdvertising && _scanner.isScanning;
-    notifyListeners();
+    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
+    if (_isRunning != isRunning) {
+      _isRunning = isRunning;
+      notifyListeners();
+    }
+    // main isolate への通知 (_onReceiveTaskDataへ)
+    final now = DateTime.now();
+    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+      'event': 'scanner', 'isRunning': _scanner.isScanning, 'now': now.millisecondsSinceEpoch});
   }
 
   // シングルトン
@@ -104,8 +127,8 @@ class BleNickname extends ChangeNotifier {
   }
   BleNickname._internal() {
     _timer = Timer.periodic(validDuration, _updateNickname);
-    _advertiser.addListener(_onStateChanged);
-    _scanner.addListener(_onStateChanged);
+    _advertiser.addListener(onPeripheralStateChanged);
+    _scanner.addListener(onCentralStateChanged);
     // _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname); // 広告・スキャンONのタイミングに変更
   }
 
@@ -131,16 +154,38 @@ class BleNickname extends ChangeNotifier {
     _kms.init(); // main() から移動
     _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname);
     _start();
-    if (!_advertiser.isAdvertising) await _advertiser.start();
-    if (!_scanner.isScanning) await _scanner.startScan();
+    if (!_advertiser.isAdvertising || _waitForPoweredOn) {
+      await _advertiser.start();
+    }
+    if (!_scanner.isScanning || _waitForPoweredOn) {
+      await _scanner.startScan();
+    }
+    _waitForPoweredOn = false;
   }
 
   /// BLE広告（アドバタイズ）とスキャンのOFF
-  Future<void> stopExchange() async {
+  Future<void> stopExchange([bool fPoweredOn = true]) async {
     _keyUpdateSub?.cancel();
     _timer?.cancel();
-    await _scanner.stopScan();
-    await _advertiser.stop();
+    if (fPoweredOn) {
+      await _scanner.stopScan(fPoweredOn);
+      await _advertiser.stop(fPoweredOn);
+    } else {
+      _waitForPoweredOn = true; // PowerOffでstopした場合はPowerOnで再開
+    }
+    _lastNickname = Uint8List(33);
+  }
+
+  Future<void> onBleStateChanged(BluetoothLowEnergyStateChangedEventArgs eventArgs) async {
+    final state = eventArgs.state;
+    if (state != BluetoothLowEnergyState.poweredOn) {
+      // PoweredOff なら main isolateに伝えて，KeyManagementTaskHandler を停止
+      if (_advertiser.isAdvertising || _scanner.isScanning) {
+        // main isolate への通知 (_onReceiveTaskDataへ)
+        KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+          'event': 'blePoweredOff', 'now': DateTime.now().millisecondsSinceEpoch});
+      }
+    }
   }
 
   /// ニックネームの前回のスロット
@@ -154,7 +199,7 @@ class BleNickname extends ChangeNotifier {
 
   /// ニックネームの更新（タイマーで呼び出す）
   /// validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
-  void _updateNickname(void _) async {
+  Future<void> _updateNickname(void _) async {
     final currentValidDuration = Duration(milliseconds: _kms.slotMs);
     if (validDuration != currentValidDuration) {
       validDuration = currentValidDuration;
@@ -181,11 +226,19 @@ class BleNickname extends ChangeNotifier {
         throw e;
       });
       if (_advertiser.isAdvertising) {
-        await _advertiser.restart();
+        if (CentralManager().state == BluetoothLowEnergyState.poweredOn) {
+          await _advertiser.restart();
+        } else { // BluetoothがOffなどOn以外
+          stopExchange();
+        }
       }
 
       // notification．awaitしない
-      KeyManagementTaskHandler.UpdateNotificationText(localNickname: _lastNickname, now: DateTime.now());
+      KeyManagementTaskHandler.UpdateNotificationText(localNickname: _lastNickname, now: now);
+
+      // main isolate への通知
+      KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+        'event': 'localNickname', 'nickname': _lastNickname, 'now': now.millisecondsSinceEpoch});
 
       if (kDebugMode) {
         debugPrint('_updateNickname: $now, '
@@ -205,11 +258,14 @@ class BleNickname extends ChangeNotifier {
       throw e;
     });
 
+    if (kDebugMode) debugPrint('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
+
+    // await _updateNickname(null);
     // notification．awaitしない
     KeyManagementTaskHandler.UpdateNotificationText(localNickname: _lastNickname, now: DateTime.now());
-
-    if (kDebugMode) debugPrint('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
-    // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
+    // main isolate への通知
+    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+      'event': 'localNickname', 'nickname': _lastNickname, 'now': DateTime.now().millisecondsSinceEpoch});
   }
 
   /// リモートのニックネームを追加
@@ -223,6 +279,9 @@ class BleNickname extends ChangeNotifier {
       if (inserted) {
         // notification．awaitしない
         KeyManagementTaskHandler.UpdateNotificationText(remoteNickname: nickname, now: DateTime.now());
+        // main isolate への通知
+        KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+          'event': 'remoteNickname', 'nickname': nickname, 'now': now.millisecondsSinceEpoch});
         if (kDebugMode) {
           debugPrint('BLE_SCAN: new collected key stored');
         }
