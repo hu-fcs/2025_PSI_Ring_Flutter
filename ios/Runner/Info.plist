@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -24,6 +26,45 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+	<string>BLEデバイスとしてデータを送信するためにBluetoothを使用します。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key> <!-- iOS 13 以下 -->
+	<string>BLEデバイスとしてデータを送信するためにBluetoothを使用します。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key> <!-- iOS 12 以下 -->
+	<string>周辺のBLEデバイスとペアリング・通信するためにBluetoothを使用します。</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key> <!-- flutter_foreground_task -->
+    <array>
+        <string>com.pravera.flutter_foreground_task.refresh</string>
+    </array>
+	<key>UIBackgroundModes</key>    <!-- アプリがバックグラウンドに回ってもBLE通信を維持したい -->
+	<array>
+	     <string>bluetooth-central</string>
+         <string>bluetooth-peripheral</string>
+         <string>fetch</string> <!-- flutter_foreground_task -->
+	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>FlutterSceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -41,9 +82,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
 </dict>
 </plist>

@@ -6,11 +6,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+// import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../ble/ble_exchange_controller.dart';
+import '../ble/nickname.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
@@ -28,7 +29,7 @@ class ExchangePage extends StatefulWidget {
 }
 
 class _ExchangePageState extends State<ExchangePage> {
-  final _ble = BleExchangeController();
+  final _ble = BleNickname();
   bool get _bleRunning => _ble.isRunning;
 
   PsiGrpcServer? _grpcServer;
@@ -74,28 +75,31 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Future<bool> _ensureBluetoothEnabled() async {
     try {
-      if (await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on) {
+      // if (await FlutterBluePlus.adapterState.first ==] BluetoothAdapterState.on) {
+      if (await CentralManager().state == BluetoothLowEnergyState.unknown) {
+        await CentralManager().stateChanged.firstWhere(
+                (args) => args.state != BluetoothLowEnergyState.unknown);
+      }
+      if (await CentralManager().state == BluetoothLowEnergyState.poweredOn) {
         return true;
       }
-      await FlutterBluePlus.turnOn();
-      await FlutterBluePlus.adapterState
-          .firstWhere((s) => s == BluetoothAdapterState.on);
-      return true;
+      // await FlutterBluePlus.turnOn(); BTをオンにするメソッドが bluetooth_low_energyパッケージにはないので，
+      // ToDo: Bluetoothが使用できないとメッセージを出すべきだ
+      // CentralManager().showAppSettings();
+      return false;
     } catch (_) {
       return false;
     }
   }
 
   Future<void> _toggleBleExchange() async {
-    if (!_bleRunning) {
-      if (!await _ensureBlePermissions() || !await _ensureBluetoothEnabled()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bluetooth を使用できません')),
-          );
-        }
-        return;
+    if (! await _ensureBlePermissions() || ! await _ensureBluetoothEnabled()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bluetooth を使用できません')),
+        );
       }
+      return;
     }
     await _ble.toggleExchange();
     if (mounted) setState(() {});
@@ -623,9 +627,14 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
           ),
           const SizedBox(width: 12),
-          Switch(
-            value: _bleRunning,
-            onChanged: (_) => _toggleBleExchange(),
+          ListenableBuilder(
+            listenable: _ble,
+            builder: (context, child) {
+              return Switch(
+                value: _ble.isRunning,
+                onChanged: (_) => _toggleBleExchange(),
+              );
+            },
           ),
         ],
       ),
@@ -705,6 +714,22 @@ class _ExchangePageState extends State<ExchangePage> {
           ),
         ),
         const SizedBox(height: 10),
+        Text(
+          _serverIp!,
+          style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey.shade800,
+          ),
+        ),
+        Text(
+          _serverPort.toString(),
+          style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.grey.shade800,
+          ),
+        ),
         Center(
           child: OutlinedButton.icon(
             onPressed: _stopQr,
