@@ -1,0 +1,41 @@
+' plantuml ble_nickname.puml && open ble_nickname.png
+
+@startuml
+skinparam defaultFontName "Noto Sans JP"
+skinparam defaultFontSize 12
+hide empty description
+
+title class BleNickname extends ChangeNotifier
+
+[*] --> stopped
+stopped -right-> started: toggleExchange()\nstartExchange()\n_start()
+started -left-> stopped : toggleExchange()\nstopExchange()
+stopped --> [*]: dispose()
+started --> [*]: dispose() 
+
+stopped --> blePoweredOff: onBleStateChanged()\nPoweredOn以外\nsendDataToMain
+started --> blePoweredOff: onBleStateChanged()\nPoweredOn以外\nsendDataToMain
+blePoweredOff --> [*]: mainから停止\nKeyManagementTaskHandler.onDestory()
+
+stopped: _advertiser
+stopped: _scanner
+stopped: _isRunning
+
+started: _advertiser.isAdvertising
+started: _scanner.isScanning
+started: _isRunning
+started: _timer (広告ニックネームを定期的に更新)
+started:
+started: 広告と受信を同時にしていることに注意
+
+state started {
+  [*] --> 広告: onPeripheralStateChanged()
+  広告 --> 広告: _updateNickname()\nTimer.periodic()
+  [*] --> 受信: onCentralStateChanged()
+  受信 --> 受信: addRemote()\nKeyManagementService().insertCollectedKeyIfAbsent()
+}
+
+nickname2string: staticメソッド
+nickname2string: ニックネームを文字列にする
+
+@enduml

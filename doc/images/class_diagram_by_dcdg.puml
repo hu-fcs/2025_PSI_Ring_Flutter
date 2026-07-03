@@ -1,0 +1,773 @@
+@startuml
+set namespaceSeparator ::
+
+class "fluttersample_2025::ble::mutual_authentication.dart::BleMutualAuthentication" {
+  {static} +UUID authenticationCharacteristicUuid
+  {static} +GATTCharacteristic authenticationCharacteristic
+  {static} -BleMutualAuthentication _instance
+  {static} +int challengeBytes
+  {static} +int responseBytes
+  +void dispose()
+  +dynamic startAuthentication()
+  +dynamic onWriteRequest()
+  +dynamic onReadRequest()
+  -dynamic _firstCentral()
+  -dynamic _onFirstPeripheral()
+  +dynamic Future()
+  +dynamic ()
+  +dynamic >()
+  -dynamic _secondCentral()
+  -dynamic _onSecondPeripheral()
+  -dynamic _thirdCentral()
+  -dynamic _onThirdPeripheral()
+}
+
+"fluttersample_2025::ble::mutual_authentication.dart::BleMutualAuthentication" o-- "bluetooth_low_energy_platform_interface::src::uuid.dart::UUID"
+"fluttersample_2025::ble::mutual_authentication.dart::BleMutualAuthentication" o-- "bluetooth_low_energy_platform_interface::src::gatt.dart::GATTCharacteristic"
+"fluttersample_2025::ble::mutual_authentication.dart::BleMutualAuthentication" o-- "fluttersample_2025::ble::mutual_authentication.dart::BleMutualAuthentication"
+
+class "fluttersample_2025::ble::mutual_authentication.dart::_PeripheralState" {
+  {static} +LinkedHashMap<UUID, _PeripheralState> peripherals
+  +Central central
+  +_State state
+  +DateTime time
+  +Uint8List challenge1
+  +Uint8List response1
+  +Uint8List challenge2
+  +Uint8List response2
+}
+
+"fluttersample_2025::ble::mutual_authentication.dart::_PeripheralState" o-- "dart::collection::LinkedHashMap<UUID, _PeripheralState>"
+"fluttersample_2025::ble::mutual_authentication.dart::_PeripheralState" o-- "bluetooth_low_energy_platform_interface::src::central.dart::Central"
+"fluttersample_2025::ble::mutual_authentication.dart::_PeripheralState" o-- "fluttersample_2025::ble::mutual_authentication.dart::_State"
+"fluttersample_2025::ble::mutual_authentication.dart::_PeripheralState" o-- "dart::typed_data::Uint8List"
+
+class "fluttersample_2025::ble::mutual_authentication.dart::_State" {
+  +int index
+  {static} +List<_State> values
+  {static} +_State first
+}
+
+"fluttersample_2025::ble::mutual_authentication.dart::_State" o-- "fluttersample_2025::ble::mutual_authentication.dart::_State"
+"dart::core::Enum" <|-- "fluttersample_2025::ble::mutual_authentication.dart::_State"
+
+class "fluttersample_2025::ble::nickname.dart::BleNickname" {
+  {static} +UUID serviceUuid
+  {static} +UUID nicknameCharacteristicUuid
+  {static} +GATTService nicknameService
+  {static} +GATTCharacteristic nicknameCharacteristic
+  {static} +Duration validDuration
+  -Timer? _timer
+  -KeyManagementService _kms
+  -StreamSubscription<void>? _keyUpdateSub
+  -BlePeripheral _advertiser
+  -BleCentralManager _scanner
+  -bool _isRunning
+  -bool _waitForPoweredOn
+  {static} -BleNickname _instance
+  -int _lastSlotStartTime
+  -Uint8List _lastNickname
+  -Random _random
+  +bool isRunning
+  +Uint8List localNickname
+  +void onPeripheralStateChanged()
+  +void onCentralStateChanged()
+  +void dispose()
+  +dynamic toggleExchange()
+  +dynamic startExchange()
+  +dynamic stopExchange()
+  +dynamic onBleStateChanged()
+  -dynamic _updateNickname()
+  -dynamic _start()
+  +dynamic addRemote()
+  {static} +String nickname2string()
+}
+
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "bluetooth_low_energy_platform_interface::src::uuid.dart::UUID"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "bluetooth_low_energy_platform_interface::src::gatt.dart::GATTService"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "bluetooth_low_energy_platform_interface::src::gatt.dart::GATTCharacteristic"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "dart::async::Timer"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "fluttersample_2025::key_management.dart::KeyManagementService"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "dart::async::StreamSubscription<void>"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "fluttersample_2025::ble::peripheral.dart::BlePeripheral"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "fluttersample_2025::ble::central.dart::BleCentralManager"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "fluttersample_2025::ble::nickname.dart::BleNickname"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "dart::typed_data::Uint8List"
+"fluttersample_2025::ble::nickname.dart::BleNickname" o-- "dart::math::Random"
+"flutter::src::foundation::change_notifier.dart::ChangeNotifier" <|-- "fluttersample_2025::ble::nickname.dart::BleNickname"
+
+class "fluttersample_2025::ble::peripheral.dart::BlePeripheral" {
+  -bool _isAdvertising
+  -bool _addService
+  -StreamSubscription<dynamic>? _characteristicReadRequestedSubscription
+  -StreamSubscription<dynamic>? _characteristicWriteRequestedSubscription
+  -StreamSubscription<dynamic>? _characteristicNotifyStateChangedSubscription
+  -StreamSubscription<dynamic>? _mtuChangedSubscription
+  -StreamSubscription<dynamic>? _connectionStateChangedSubscription
+  -StreamSubscription<dynamic>? _stateChangedSubscription
+  +bool isAdvertising
+  +void dispose()
+  +dynamic start()
+  +dynamic startAdvertising()
+  +dynamic stop()
+  +dynamic restart()
+  -dynamic _onReadRequest()
+  -dynamic _onWriteRequest()
+  -void _onNotifyStateChanged()
+  -void _onMtuChanged()
+  -void _onConnectionStateChanged()
+  -void _onStateChanged()
+}
+
+"fluttersample_2025::ble::peripheral.dart::BlePeripheral" o-- "dart::async::StreamSubscription<dynamic>"
+"flutter::src::foundation::change_notifier.dart::ChangeNotifier" <|-- "fluttersample_2025::ble::peripheral.dart::BlePeripheral"
+
+class "fluttersample_2025::ble::central.dart::BleCentralManager" {
+  -bool _isScanning
+  -bool _isPoweredOn
+  -dynamic _discoveredPeripherals
+  -dynamic _waitingPeripherals
+  {static} +int maxConnections
+  -Set<UUID> _connectingPeripherals
+  -Set<UUID> _connectedPeripherals
+  -StreamSubscription<dynamic>? _stateChangedSubscription
+  -StreamSubscription<dynamic>? _discoveredSubscription
+  -StreamSubscription<dynamic>? _connectionStateSubscription
+  +bool isScanning
+  +bool isAvailable
+  +dynamic discoveredPeripherals
+  +dynamic QueueList()
+  +dynamic ()
+  +dynamic >()
+  +dynamic PriorityQueue()
+  +dynamic ()
+  +dynamic >()
+  +dynamic QueueList()
+  +dynamic ()
+  +dynamic >()
+  +void initialize()
+  +void dispose()
+  +dynamic startScan()
+  +dynamic stopScan()
+  -dynamic _onDeviceDiscovered()
+  -dynamic _connect()
+  -dynamic _onDeviceDisconnected()
+  -dynamic _onDeviceConnected()
+  -dynamic _printConnectedPeripherals()
+}
+
+"fluttersample_2025::ble::central.dart::BleCentralManager" o-- "dart::async::StreamSubscription<dynamic>"
+"flutter::src::foundation::change_notifier.dart::ChangeNotifier" <|-- "fluttersample_2025::ble::central.dart::BleCentralManager"
+
+class "fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient" {
+  {static} +String defaultHost
+  {static} +List<String> oauthScopes
+  {static} -ClientMethod<KeyExchangeReq, KeyExchangeResp> _$exchangeKeys
+  {static} -ClientMethod<ClientFinalReq, PsiDone> _$finalizePsi
+  {static} -ClientMethod<ClientChallenge, ServerChallenge> _$exchangeChallenges
+  {static} -ClientMethod<RingSignatureReq, RingSignatureResp> _$exchangeRingSignatures
+  +ResponseFuture<KeyExchangeResp> exchangeKeys()
+  +ResponseFuture<PsiDone> finalizePsi()
+  +ResponseFuture<ServerChallenge> exchangeChallenges()
+  +ResponseFuture<RingSignatureResp> exchangeRingSignatures()
+}
+
+"fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient" o-- "grpc::src::client::method.dart::ClientMethod<KeyExchangeReq, KeyExchangeResp>"
+"fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient" o-- "grpc::src::client::method.dart::ClientMethod<ClientFinalReq, PsiDone>"
+"fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient" o-- "grpc::src::client::method.dart::ClientMethod<ClientChallenge, ServerChallenge>"
+"fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient" o-- "grpc::src::client::method.dart::ClientMethod<RingSignatureReq, RingSignatureResp>"
+"grpc::src::client::client.dart::Client" <|-- "fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient"
+
+abstract class "fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceBase" {
+  +String $name
+  +dynamic exchangeKeys_Pre()
+  +dynamic exchangeKeys()
+  +dynamic finalizePsi_Pre()
+  +dynamic finalizePsi()
+  +dynamic exchangeChallenges_Pre()
+  +dynamic exchangeChallenges()
+  +dynamic exchangeRingSignatures_Pre()
+  +dynamic exchangeRingSignatures()
+}
+
+"grpc::src::server::service.dart::Service" <|-- "fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceBase"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq" {
+  {static} -BuilderInfo _i
+  {static} -KeyExchangeReq? _defaultInstance
+  +BuilderInfo info_
+  +PbList<List<int>> encKeys
+  +KeyExchangeReq clone()
+  +KeyExchangeReq copyWith()
+  {static} +KeyExchangeReq create()
+  +KeyExchangeReq createEmptyInstance()
+  {static} +KeyExchangeReq getDefault()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq"
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq" o-- "protobuf::src::protobuf::internal.dart::PbList<List<int>>"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeReq"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp" {
+  {static} -BuilderInfo _i
+  {static} -KeyExchangeResp? _defaultInstance
+  +BuilderInfo info_
+  +PbList<List<int>> serverEncKeys
+  +PbList<List<int>> clientReencKeys
+  +KeyExchangeResp clone()
+  +KeyExchangeResp copyWith()
+  {static} +KeyExchangeResp create()
+  +KeyExchangeResp createEmptyInstance()
+  {static} +KeyExchangeResp getDefault()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp"
+"fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp" o-- "protobuf::src::protobuf::internal.dart::PbList<List<int>>"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::KeyExchangeResp"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq" {
+  {static} -BuilderInfo _i
+  {static} -ClientFinalReq? _defaultInstance
+  +BuilderInfo info_
+  +PbList<List<int>> clientReencServerKeys
+  +ClientFinalReq clone()
+  +ClientFinalReq copyWith()
+  {static} +ClientFinalReq create()
+  +ClientFinalReq createEmptyInstance()
+  {static} +ClientFinalReq getDefault()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq"
+"fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq" o-- "protobuf::src::protobuf::internal.dart::PbList<List<int>>"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::ClientFinalReq"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::PsiDone" {
+  {static} -BuilderInfo _i
+  {static} -PsiDone? _defaultInstance
+  +BuilderInfo info_
+  +PsiDone clone()
+  +PsiDone copyWith()
+  {static} +PsiDone create()
+  +PsiDone createEmptyInstance()
+  {static} +PsiDone getDefault()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::PsiDone" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::PsiDone" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::PsiDone"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::PsiDone"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::ClientChallenge" {
+  {static} -BuilderInfo _i
+  {static} -ClientChallenge? _defaultInstance
+  +BuilderInfo info_
+  +List<int> challengeC
+  +ClientChallenge clone()
+  +ClientChallenge copyWith()
+  {static} +ClientChallenge create()
+  +ClientChallenge createEmptyInstance()
+  {static} +ClientChallenge getDefault()
+  +bool hasChallengeC()
+  +void clearChallengeC()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::ClientChallenge" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::ClientChallenge" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::ClientChallenge"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::ClientChallenge"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::ServerChallenge" {
+  {static} -BuilderInfo _i
+  {static} -ServerChallenge? _defaultInstance
+  +BuilderInfo info_
+  +List<int> challengeS
+  +ServerChallenge clone()
+  +ServerChallenge copyWith()
+  {static} +ServerChallenge create()
+  +ServerChallenge createEmptyInstance()
+  {static} +ServerChallenge getDefault()
+  +bool hasChallengeS()
+  +void clearChallengeS()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::ServerChallenge" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::ServerChallenge" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::ServerChallenge"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::ServerChallenge"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureReq" {
+  {static} -BuilderInfo _i
+  {static} -RingSignatureReq? _defaultInstance
+  +BuilderInfo info_
+  +List<int> signatureForServer
+  +RingSignatureReq clone()
+  +RingSignatureReq copyWith()
+  {static} +RingSignatureReq create()
+  +RingSignatureReq createEmptyInstance()
+  {static} +RingSignatureReq getDefault()
+  +bool hasSignatureForServer()
+  +void clearSignatureForServer()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureReq" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureReq" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureReq"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureReq"
+
+class "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureResp" {
+  {static} -BuilderInfo _i
+  {static} -RingSignatureResp? _defaultInstance
+  +BuilderInfo info_
+  +List<int> signatureForClient
+  +RingSignatureResp clone()
+  +RingSignatureResp copyWith()
+  {static} +RingSignatureResp create()
+  +RingSignatureResp createEmptyInstance()
+  {static} +RingSignatureResp getDefault()
+  +bool hasSignatureForClient()
+  +void clearSignatureForClient()
+}
+
+"fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureResp" o-- "protobuf::src::protobuf::internal.dart::BuilderInfo"
+"fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureResp" o-- "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureResp"
+"protobuf::src::protobuf::internal.dart::GeneratedMessage" <|-- "fluttersample_2025::proto::generated::grpc.pb.dart::RingSignatureResp"
+
+class "fluttersample_2025::key_management.dart::KeyManagementService" {
+  {static} -KeyManagementService _instance
+  +RingSignatureRange ringRange
+  {static} -String _masterKeyAlias
+  -FlutterSecureStorage _secureStorage
+  -NativeKeyService _nativeKeyService
+  +int slotMs
+  -StreamController<void> _keyUpdatedController
+  {static} -bool _locationServicePermitted
+  +Stream<void> onKeyUpdated
+  -void _notifyKeyUpdated()
+  -bool _isValidCompressedPubkey33()
+  -void _attachLocationAsync()
+  +dynamic init()
+  -dynamic _ensureMasterKey()
+  -dynamic _getPublicKeyForAdvertise()
+  +dynamic getPublicKeyForBleAdvertise()
+  +dynamic hasCollectedKey()
+  +dynamic insertCollectedKeyIfAbsent()
+  +dynamic getLatestKeyPair()
+  +dynamic getAllGeneratedPublicKeys()
+  +dynamic getAllCollectedPublicKeys()
+  +dynamic getTimestampForKey()
+  -String _k()
+  -Iterable<List<Uint8List>> _chunkPubkeys()
+  -dynamic _loadGeneratedRowsForPubkeys()
+  -dynamic _loadCollectedTimesForPubkeys()
+  -dynamic _buildTimestampMap()
+  +dynamic selectSignerKeyFromIntersection()
+  +dynamic filterKeysBySameSlot()
+  +KeyPair? generateDummyKeyPair()
+  +dynamic getMasterKeyBase64()
+  +dynamic getMasterKeyHexString()
+  +dynamic deleteMasterKey()
+  {static} +dynamic geoLocatorPermission()
+}
+
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "fluttersample_2025::key_management.dart::KeyManagementService"
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "fluttersample_2025::key_management.dart::RingSignatureRange"
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "flutter_secure_storage::flutter_secure_storage.dart::FlutterSecureStorage"
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "fluttersample_2025::ffi::native_key_service.dart::NativeKeyService"
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "dart::async::StreamController<void>"
+"fluttersample_2025::key_management.dart::KeyManagementService" o-- "dart::async::Stream<void>"
+
+class "fluttersample_2025::key_management.dart::_GeneratedRow" {
+  +Uint8List sec
+  +Uint8List pub
+  +int expire
+  +int generate
+}
+
+"fluttersample_2025::key_management.dart::_GeneratedRow" o-- "dart::typed_data::Uint8List"
+
+class "fluttersample_2025::key_management.dart::RingSignatureRange" {
+  +int index
+  {static} +List<RingSignatureRange> values
+  {static} +RingSignatureRange slot
+  {static} +RingSignatureRange day
+  {static} +RingSignatureRange all
+}
+
+"fluttersample_2025::key_management.dart::RingSignatureRange" o-- "fluttersample_2025::key_management.dart::RingSignatureRange"
+"dart::core::Enum" <|-- "fluttersample_2025::key_management.dart::RingSignatureRange"
+
+class "fluttersample_2025::grpc::grpc_client.dart::GrpcClient" {
+  -ClientChannel? _channel
+  -GrpcServiceClient? _stub
+  -NativeKeyService _keyService
+  -KeyManagementService _kms
+  -GrpcCommon _grpcCommon
+  -dynamic _ready
+  +bool isConnected
+  -dynamic _initialize()
+  -dynamic _ensureReady()
+  +dynamic connect()
+  +dynamic disconnect()
+  +dynamic executePsi()
+  +dynamic Future()
+  +dynamic ()
+  +dynamic >()
+  -dynamic _runRingSignaturePhase()
+  -Uint8List? _createRingSignature()
+  -bool _verifyRingSignature()
+}
+
+"fluttersample_2025::grpc::grpc_client.dart::GrpcClient" o-- "grpc::src::client::http2_channel.dart::ClientChannel"
+"fluttersample_2025::grpc::grpc_client.dart::GrpcClient" o-- "fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceClient"
+"fluttersample_2025::grpc::grpc_client.dart::GrpcClient" o-- "fluttersample_2025::ffi::native_key_service.dart::NativeKeyService"
+"fluttersample_2025::grpc::grpc_client.dart::GrpcClient" o-- "fluttersample_2025::key_management.dart::KeyManagementService"
+"fluttersample_2025::grpc::grpc_client.dart::GrpcClient" o-- "fluttersample_2025::grpc::grpc_common.dart::GrpcCommon"
+
+class "fluttersample_2025::grpc::grpc_common.dart::GrpcCommon" {
+  {static} -GrpcCommon _instance
+  +bool enableGzip
+  +CodecRegistry codecRegistry
+  +dynamic ensureTlsAssetsLoaded()
+  +ChannelOptions buildClientOptions()
+  +ServerTlsCredentials? buildServerSecurity()
+  {static} +String bytesToHex()
+  {static} +int comparePubKey()
+}
+
+"fluttersample_2025::grpc::grpc_common.dart::GrpcCommon" o-- "fluttersample_2025::grpc::grpc_common.dart::GrpcCommon"
+"fluttersample_2025::grpc::grpc_common.dart::GrpcCommon" o-- "grpc::src::shared::codec_registry.dart::CodecRegistry"
+
+class "fluttersample_2025::grpc::grpc_common.dart::PsiResult" {
+  +bool isFamiliar
+  +int saKeyCount
+  +int sbKeyCount
+  +List<String> commonKeys
+  +int ringSize
+  +int dbLoadTimeMs
+  +int psiTimeMs
+  +int ringSelectTimeMs
+  +int ringSigTimeMs
+  +int totalTimeMs
+  +int psiKeyCount
+}
+
+class "fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" {
+  -NativeKeyService _keyService
+  -KeyManagementService _kms
+  -dynamic _ready
+  -Uint8List _mySecret
+  -List<Uint8List> _myKeys
+  -List<Uint8List> _myEncKeys
+  -List<String> _myGeneratedKeysHex
+  -List<Uint8List> _serverAbQ
+  -List<Uint8List> _lastIntersection
+  -int _lastSaKeyCount
+  -Uint8List? _lastChallengeC
+  -Uint8List? _lastChallengeS
+  -dynamic _serverSignatureFuture
+  -dynamic _ringSelectionFuture
+  -_RingSelection? _ringSelection
+  -StreamController<PsiResult> _psiEventController
+  -StreamController<PsiResult> _ringAuthController
+  -int _sbKeyCount
+  +Stream<PsiResult> onPsiFinished
+  +Stream<PsiResult> onRingAuthenticated
+  -dynamic _initialize()
+  -dynamic _reloadKeys()
+  -dynamic _ensureReady()
+  +dynamic exchangeKeys()
+  +dynamic finalizePsi()
+  +dynamic exchangeChallenges()
+  -dynamic _computeRingSelectionAsync()
+  -dynamic _computeServerSignatureAsync()
+  +dynamic exchangeRingSignatures()
+  -dynamic _verifyClientSignatureLater()
+  -List<Uint8List> _computeIntersection()
+}
+
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "fluttersample_2025::ffi::native_key_service.dart::NativeKeyService"
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "fluttersample_2025::key_management.dart::KeyManagementService"
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "dart::typed_data::Uint8List"
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "fluttersample_2025::grpc::grpc_server.dart::_RingSelection"
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "dart::async::StreamController<PsiResult>"
+"fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl" o-- "dart::async::Stream<PsiResult>"
+"fluttersample_2025::proto::generated::grpc.pbgrpc.dart::GrpcServiceBase" <|-- "fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl"
+
+class "fluttersample_2025::grpc::grpc_server.dart::_RingSelection" {
+  +KeyPair signer
+  +List<Uint8List> ring
+}
+
+"fluttersample_2025::grpc::grpc_server.dart::_RingSelection" o-- "fluttersample_2025::ffi::native_key_service.dart::KeyPair"
+
+class "fluttersample_2025::grpc::grpc_server.dart::PsiGrpcServer" {
+  -Server? _server
+  -int? _port
+  +GrpcServiceImpl service
+  -GrpcCommon _grpcCommon
+  +bool isRunning
+  +dynamic start()
+  +dynamic stop()
+}
+
+"fluttersample_2025::grpc::grpc_server.dart::PsiGrpcServer" o-- "grpc::src::server::server.dart::Server"
+"fluttersample_2025::grpc::grpc_server.dart::PsiGrpcServer" o-- "fluttersample_2025::grpc::grpc_server.dart::GrpcServiceImpl"
+"fluttersample_2025::grpc::grpc_server.dart::PsiGrpcServer" o-- "fluttersample_2025::grpc::grpc_common.dart::GrpcCommon"
+
+class "fluttersample_2025::main.dart::MyApp" {
+  +Widget build()
+}
+
+"flutter::src::widgets::framework.dart::StatelessWidget" <|-- "fluttersample_2025::main.dart::MyApp"
+
+class "fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" {
+  -Pointer<T> Function<T extends NativeType>(String) _lookup
+  -Pointer<NativeFunction<Int Function(Pointer<Uint8>)>> _generate_master_keyPtr
+  -int Function(Pointer<Uint8>) _generate_master_key
+  -Pointer<NativeFunction<Int Function(Pointer<Uint8>, Uint64, Uint64, Pointer<Uint8>, Pointer<Uint8>)>> _derive_keypair_from_timestampPtr
+  -int Function(Pointer<Uint8>, int, int, Pointer<Uint8>, Pointer<Uint8>) _derive_keypair_from_timestamp
+  -Pointer<NativeFunction<Int Function(Pointer<Char>, Size, Pointer<Uint8>, Pointer<Uint8>, Int, Pointer<Uint8>)>> _create_ring_signaturePtr
+  -int Function(Pointer<Char>, int, Pointer<Uint8>, Pointer<Uint8>, int, Pointer<Uint8>) _create_ring_signature
+  -Pointer<NativeFunction<Int Function(Pointer<Char>, Size, Pointer<Uint8>, Pointer<Uint8>, Int)>> _verify_ring_signaturePtr
+  -int Function(Pointer<Char>, int, Pointer<Uint8>, Pointer<Uint8>, int) _verify_ring_signature
+  -Pointer<NativeFunction<Int Function()>> _psi_initPtr
+  -int Function() _psi_init
+  -Pointer<NativeFunction<Void Function()>> _psi_cleanupPtr
+  -void Function() _psi_cleanup
+  -Pointer<NativeFunction<Int Function(Pointer<Uint8>, Int32, Pointer<Uint8>, Pointer<Uint8>)>> _ecc_single_encrypt_setPtr
+  -int Function(Pointer<Uint8>, int, Pointer<Uint8>, Pointer<Uint8>) _ecc_single_encrypt_set
+  -Pointer<NativeFunction<Int Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, Int32, Int32, Pointer<Uint8>, Pointer<Int32>)>> _ecc_intersect_setsPtr
+  -int Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, int, int, Pointer<Uint8>, Pointer<Int32>) _ecc_intersect_sets
+  +int generate_master_key()
+  +int derive_keypair_from_timestamp()
+  +int create_ring_signature()
+  +int verify_ring_signature()
+  +int psi_init()
+  +void psi_cleanup()
+  +int ecc_single_encrypt_set()
+  +int ecc_intersect_sets()
+}
+
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::Pointer<T> Function<T extends NativeType>(String)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Uint8>)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Uint8>)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Uint8>, Uint64, Uint64, Pointer<Uint8>, Pointer<Uint8>)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Uint8>, int, int, Pointer<Uint8>, Pointer<Uint8>)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Char>, Size, Pointer<Uint8>, Pointer<Uint8>, Int, Pointer<Uint8>)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Char>, int, Pointer<Uint8>, Pointer<Uint8>, int, Pointer<Uint8>)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Char>, Size, Pointer<Uint8>, Pointer<Uint8>, Int)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Char>, int, Pointer<Uint8>, Pointer<Uint8>, int)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function()>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function()"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Void Function()>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::void Function()"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Uint8>, Int32, Pointer<Uint8>, Pointer<Uint8>)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Uint8>, int, Pointer<Uint8>, Pointer<Uint8>)"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "dart::ffi::Pointer<NativeFunction<Int Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, Int32, Int32, Pointer<Uint8>, Pointer<Int32>)>>"
+"fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings" o-- "null::int Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, int, int, Pointer<Uint8>, Pointer<Int32>)"
+
+class "fluttersample_2025::ffi::native_key_service.dart::KeyPair" {
+  +Uint8List privateKey
+  +Uint8List publicKey
+}
+
+"fluttersample_2025::ffi::native_key_service.dart::KeyPair" o-- "dart::typed_data::Uint8List"
+
+class "fluttersample_2025::ffi::native_key_service.dart::NativeKeyService" {
+  {static} -NativeKeyService _instance
+  -NativeKeyBindings _bindings
+  +Uint8List? generateMasterKey()
+  +KeyPair? deriveNewKeyPair()
+  +Uint8List generateRandomSecret()
+  +List<Uint8List> encryptSet()
+  +List<Uint8List> intersect()
+  +int createRingSignature()
+  +int verifyRingSignature()
+}
+
+"fluttersample_2025::ffi::native_key_service.dart::NativeKeyService" o-- "fluttersample_2025::ffi::native_key_service.dart::NativeKeyService"
+"fluttersample_2025::ffi::native_key_service.dart::NativeKeyService" o-- "fluttersample_2025::ffi::native_key_bindings.dart::NativeKeyBindings"
+
+class "fluttersample_2025::key_foreground_task.dart::KeyManagementTaskHandler" {
+  -BleNickname _ble
+  {static} +String notificationLocal
+  {static} +String notificationRemote
+  +dynamic onStart()
+  +void onRepeatEvent()
+  +dynamic onDestroy()
+  +void onReceiveData()
+  +void onNotificationButtonPressed()
+  +void onNotificationPressed()
+  +void onNotificationDismissed()
+  +void sendDataToMain()
+  {static} +dynamic requestPermissions()
+  {static} +dynamic initService()
+  {static} +dynamic startService()
+  {static} +dynamic stopService()
+  {static} +dynamic UpdateNotificationText()
+}
+
+"fluttersample_2025::key_foreground_task.dart::KeyManagementTaskHandler" o-- "fluttersample_2025::ble::nickname.dart::BleNickname"
+"flutter_foreground_task::task_handler.dart::TaskHandler" <|-- "fluttersample_2025::key_foreground_task.dart::KeyManagementTaskHandler"
+
+class "fluttersample_2025::db::database_helper.dart::DatabaseHelper" {
+  {static} -Database? _db
+  {static} +dynamic getDatabase()
+  {static} -dynamic _createTables()
+  {static} -dynamic _createIndexes()
+  {static} +dynamic insertCommonDummyKeys()
+  {static} +dynamic existsCollectedKey()
+  {static} +dynamic insertCollectedKeyIfAbsent()
+  {static} +dynamic insertCollectedKeysBatch()
+  +dynamic getTotalKeyCount()
+  {static} +dynamic deleteKey()
+}
+
+"fluttersample_2025::db::database_helper.dart::DatabaseHelper" o-- "sqflite_common::sqlite_api.dart::Database"
+
+class "fluttersample_2025::db::database_helper.dart::KeyTable" {
+  +int index
+  {static} +List<KeyTable> values
+  {static} +KeyTable generated
+  {static} +KeyTable collected
+}
+
+"fluttersample_2025::db::database_helper.dart::KeyTable" o-- "fluttersample_2025::db::database_helper.dart::KeyTable"
+"dart::core::Enum" <|-- "fluttersample_2025::db::database_helper.dart::KeyTable"
+
+class "fluttersample_2025::pages::debug_page.dart::DebugPage" {
+  +State<DebugPage> createState()
+}
+
+"flutter::src::widgets::framework.dart::StatefulWidget" <|-- "fluttersample_2025::pages::debug_page.dart::DebugPage"
+
+class "fluttersample_2025::pages::debug_page.dart::_DebugPageState" {
+  -TabController _tabController
+  -KeyManagementService _keyManager
+  -GrpcCommon _grpcCommon
+  -TextEditingController _dummyCountController
+  -StreamSubscription<void>? _keyUpdateSub
+  {static} -double _debugFontSize
+  +void initState()
+  +void dispose()
+  -dynamic _fetchLimitedKeys()
+  -dynamic _fetchTotalKeyCount()
+  -dynamic _deleteAllKeys()
+  -dynamic _generateAndInsertSingleDummyCollectedKey()
+  -dynamic _insertDummyCollectedKey()
+  -dynamic _insertMultipleDummyCollectedKeys()
+  -dynamic _insertCommonDummyKeysFromAsset()
+  -dynamic _insertDummyGeneratedKey()
+  -dynamic _deleteMasterKey()
+  -String _fullHex()
+  -void _showFullKeyDialog()
+  -void _showGeneratedKeyDialog()
+  -void _showFullStringDialog()
+  -void _showErrorSnackbar()
+  -dynamic _showAddMultipleDummiesDialog()
+  -dynamic _showAddCommonDummyDialog()
+  -String _shortHex()
+  -String _formatTime()
+  -String _toDMS()
+  -Widget _buildMasterKeyCard()
+  -Widget _buildSlotSelector()
+  -Widget _buildRingRangeSelector()
+  -Widget _buildGrpcOptionToggles()
+  -Widget _buildKeyListTab()
+  +Widget build()
+  -Widget _buildVerificationTab()
+}
+
+"fluttersample_2025::pages::debug_page.dart::_DebugPageState" o-- "flutter::src::material::tab_controller.dart::TabController"
+"fluttersample_2025::pages::debug_page.dart::_DebugPageState" o-- "fluttersample_2025::key_management.dart::KeyManagementService"
+"fluttersample_2025::pages::debug_page.dart::_DebugPageState" o-- "fluttersample_2025::grpc::grpc_common.dart::GrpcCommon"
+"fluttersample_2025::pages::debug_page.dart::_DebugPageState" o-- "flutter::src::widgets::editable_text.dart::TextEditingController"
+"fluttersample_2025::pages::debug_page.dart::_DebugPageState" o-- "dart::async::StreamSubscription<void>"
+"flutter::src::widgets::framework.dart::State" <|-- "fluttersample_2025::pages::debug_page.dart::_DebugPageState"
+"flutter::src::widgets::ticker_provider.dart::SingleTickerProviderStateMixin" <|-- "fluttersample_2025::pages::debug_page.dart::_DebugPageState"
+
+class "fluttersample_2025::pages::exchange_page.dart::ExchangePage" {
+  +State<ExchangePage> createState()
+}
+
+"flutter::src::widgets::framework.dart::StatefulWidget" <|-- "fluttersample_2025::pages::exchange_page.dart::ExchangePage"
+
+class "fluttersample_2025::pages::exchange_page.dart::_ExchangePageState" {
+  -bool _bleAdvertiserRunning
+  -bool _bleScannerRunning
+  -PsiGrpcServer? _grpcServer
+  -String? _serverIp
+  -int _serverPort
+  -DatabaseHelper _db
+  {static} -MethodChannel _mapChannel
+  -bool _grpcRunning
+  -String _qrPayload
+  +void initState()
+  +void dispose()
+  -void _onReceiveTaskData()
+  -dynamic _hasAnyKey()
+  -dynamic _requireKeyWarning()
+  -dynamic _requestPermissions()
+  -dynamic _requestPermissionsSnakBar()
+  -dynamic _ensureBluetoothEnabled()
+  -dynamic _toggleBleExchange()
+  -dynamic _getLocalWifiIp()
+  -dynamic _showQr()
+  -dynamic _stopQr()
+  -dynamic _scanQr()
+  -String _bytesToHex()
+  -String _fmtTime()
+  +dynamic Future()
+  +dynamic ()
+  +dynamic >()
+  -dynamic _calcMeetStats()
+  -dynamic _showUnifiedPsiDialog()
+  -dynamic _openExternalMap()
+  -Widget _mathLabel()
+  -Widget _debugRowWidget()
+  -Widget _debugRow()
+  +Widget build()
+  -Widget _statusRow()
+  -Widget _bleCard()
+  -Widget _familiarCheckCard()
+  -Widget _qrActionButtons()
+  -Widget _qrDisplaySection()
+  -Widget _card()
+  -Widget _statusBadge()
+}
+
+"fluttersample_2025::pages::exchange_page.dart::_ExchangePageState" o-- "fluttersample_2025::grpc::grpc_server.dart::PsiGrpcServer"
+"fluttersample_2025::pages::exchange_page.dart::_ExchangePageState" o-- "fluttersample_2025::db::database_helper.dart::DatabaseHelper"
+"fluttersample_2025::pages::exchange_page.dart::_ExchangePageState" o-- "flutter::src::services::platform_channel.dart::MethodChannel"
+"flutter::src::widgets::framework.dart::State" <|-- "fluttersample_2025::pages::exchange_page.dart::_ExchangePageState"
+
+class "fluttersample_2025::pages::scanner_page.dart::ScannerPage" {
+  +State<ScannerPage> createState()
+}
+
+"flutter::src::widgets::framework.dart::StatefulWidget" <|-- "fluttersample_2025::pages::scanner_page.dart::ScannerPage"
+
+class "fluttersample_2025::pages::scanner_page.dart::_ScannerPageState" {
+  -GrpcClient _client
+  +bool isConnecting
+  -bool _isProcessingScan
+  -bool _isManualInputMode
+  -MobileScannerController _scannerController
+  -bool _cameraLock
+  +TextEditingController ipController
+  +TextEditingController portController
+  +dynamic safeStopCamera()
+  +dynamic safeStartCamera()
+  +void dispose()
+  -dynamic _confirmAndConnect()
+  -dynamic _onDetect()
+  +Widget build()
+  -Widget _manualBottomSheet()
+}
+
+"fluttersample_2025::pages::scanner_page.dart::_ScannerPageState" o-- "fluttersample_2025::grpc::grpc_client.dart::GrpcClient"
+"fluttersample_2025::pages::scanner_page.dart::_ScannerPageState" o-- "mobile_scanner::src::mobile_scanner_controller.dart::MobileScannerController"
+"fluttersample_2025::pages::scanner_page.dart::_ScannerPageState" o-- "flutter::src::widgets::editable_text.dart::TextEditingController"
+"flutter::src::widgets::framework.dart::State" <|-- "fluttersample_2025::pages::scanner_page.dart::_ScannerPageState"
+
+
+@enduml

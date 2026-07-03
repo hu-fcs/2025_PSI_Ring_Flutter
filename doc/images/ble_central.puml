@@ -1,0 +1,44 @@
+' plantuml ble_central.puml && open ble_central.png
+
+@startuml
+skinparam defaultFontName "Noto Sans JP"
+skinparam defaultFontSize 12
+hide empty description
+
+title class BleCentralManager extends ChangeNotifier
+
+[*] --> initialized: initialize()\nnotifyListeners
+initialized -right-> scan: startScan()\nnotifyListeners
+scan -left-> initialized: stopScan()\nnotifyListeners
+scan  --> [*]: dispose()
+initialized  --> [*]: dispose()
+
+initialized: isScanning = false
+initialized: stateChanged.listen
+initialized: _isPoweredOn
+
+scan: isScanning = true
+scan: discovered.listen
+scan: connectionStateChanged.listen
+scan: _connectingPeripherals = Set<UUID>()
+scan: _connectedPeripherals = Set<UUID>()
+scan: _discoveredPeripherals
+scan: _waitingPeripherals
+scan:
+scan: peripheralごとの処理
+
+
+State scan {
+
+[*] --> discovered: _onDeviceDiscovered()\n_connect()
+discovered --> conncted: _onDeviceConnected()\n特性読み出しと切断
+conncted --> disconnected: _onDeviceDisconnected()\n待っているperipheralがあれば\n_connect()
+disconnected --> [*]
+
+[*] --> waiting: _onDeviceDiscovered()\n_waitingPeripherals
+waiting -left-> discovered: 別のデバイスの_onDeviceDisconnected()\n_connect()
+
+discovered: peripheral
+}
+
+@enduml

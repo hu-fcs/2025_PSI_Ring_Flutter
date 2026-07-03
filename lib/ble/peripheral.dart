@@ -5,15 +5,16 @@ Android: AndroidManifest.xml に BLUETOOTH_ADVERTISE や BLUETOOTH_CONNECT な�
 */
 
 import 'dart:async';
-import 'dart:io'; // Platform
+// import 'dart:io'; // Platform
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 // import 'dart:convert'; // utf8.decode
 import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-import 'package:permission_handler/permission_handler.dart';
+// import 'package:permission_handler/permission_handler.dart';
 import 'nickname.dart';
 import 'mutual_authentication.dart';
 
+/// BLEでニックネームを広告するクラス
 class BlePeripheral extends ChangeNotifier {
   bool _isAdvertising = false;
   /// 広告中．ChangeNotifierでUIに変化を通知

@@ -24,7 +24,7 @@ import 'dart:typed_data' show Uint8List;
 import 'package:flutter/foundation.dart'show kDebugMode, debugPrint, ChangeNotifier;
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
 import 'package:convert/convert.dart' show hex; // hex.decode(Uint8List)のため
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+// import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:fluttersample_2025/key_foreground_task.dart';
 import '../key_management.dart';
 import 'peripheral.dart';
@@ -43,6 +43,8 @@ import 'mutual_authentication.dart';
 /// - 収集したニックネームを登録する．_kms.insertCollectedKeyIfAbsent()
 /// - キーの更新をlisten．_kms.onKeyUpdated.listen(_updateNickname);
 /// - キーの更新間隔を時々問い合わせる．_kms.slotMs
+///
+/// 状態遷移図: /doc/images/ble_central.png
 class BleNickname extends ChangeNotifier {
   /// サービス識別子（UUID）
   static final UUID serviceUuid = UUID.fromString('D353434A-C5F4-4A63-A21A-974C68459ED2');
@@ -92,32 +94,6 @@ class BleNickname extends ChangeNotifier {
 
   /// BLEがONになったら，StartExchangeするためのフラグ
   bool _waitForPoweredOn = false;
-
-  void onPeripheralStateChanged() {
-    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising}');
-    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
-    if (_isRunning != isRunning) {
-      _isRunning = isRunning;
-      notifyListeners();
-    }
-    // main isolate への通知 (_onReceiveTaskDataへ)
-    final now = DateTime.now();
-    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
-      'event': 'advertiser', 'isRunning': _advertiser.isAdvertising, 'now': now.millisecondsSinceEpoch});
-  }
-
-  void onCentralStateChanged() {
-    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
-    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
-    if (_isRunning != isRunning) {
-      _isRunning = isRunning;
-      notifyListeners();
-    }
-    // main isolate への通知 (_onReceiveTaskDataへ)
-    final now = DateTime.now();
-    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
-      'event': 'scanner', 'isRunning': _scanner.isScanning, 'now': now.millisecondsSinceEpoch});
-  }
 
   // シングルトン
   static final BleNickname _instance = BleNickname._internal();
@@ -174,6 +150,32 @@ class BleNickname extends ChangeNotifier {
       _waitForPoweredOn = true; // PowerOffでstopした場合はPowerOnで再開
     }
     _lastNickname = Uint8List(33);
+  }
+
+  void onPeripheralStateChanged() {
+    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising}');
+    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
+    if (_isRunning != isRunning) {
+      _isRunning = isRunning;
+      notifyListeners();
+    }
+    // main isolate への通知 (_onReceiveTaskDataへ)
+    final now = DateTime.now();
+    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+      'event': 'advertiser', 'isRunning': _advertiser.isAdvertising, 'now': now.millisecondsSinceEpoch});
+  }
+
+  void onCentralStateChanged() {
+    if (kDebugMode) debugPrint('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
+    final isRunning = _advertiser.isAdvertising || _scanner.isScanning;
+    if (_isRunning != isRunning) {
+      _isRunning = isRunning;
+      notifyListeners();
+    }
+    // main isolate への通知 (_onReceiveTaskDataへ)
+    final now = DateTime.now();
+    KeyManagementTaskHandler().sendDataToMain(<String, Object>{
+      'event': 'scanner', 'isRunning': _scanner.isScanning, 'now': now.millisecondsSinceEpoch});
   }
 
   Future<void> onBleStateChanged(BluetoothLowEnergyStateChangedEventArgs eventArgs) async {

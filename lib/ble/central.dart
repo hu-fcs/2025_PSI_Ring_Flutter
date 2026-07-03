@@ -13,9 +13,10 @@ import 'nickname.dart';
 /// 相互認証して，UIに通知する．UIは友人として画面に表示する．
 ///
 /// bluetooth_low_energy パッケージを使う．
+/// 状態遷移図: doc/images/ble_central.png
 class BleCentralManager extends ChangeNotifier {
   bool _isScanning = false;
-  bool _isAvailable = false;
+  bool _isPoweredOn = false;
   final QueueList<({DiscoveredEventArgs arg, DateTime t})> _discoveredPeripherals = QueueList<({DiscoveredEventArgs arg, DateTime t})>();
   final PriorityQueue<({int rssi, Peripheral peripheral})> _waitingPeripherals = HeapPriorityQueue<({int rssi, Peripheral peripheral})>(
       (a, b) => b.rssi.compareTo(a.rssi)
@@ -24,18 +25,18 @@ class BleCentralManager extends ChangeNotifier {
   /// スキャン中．ChangeNotifierでUIに変化を通知
   bool get isScanning => _isScanning;
   /// BLE使用可能．ChangeNotifierでUIに変化を通知
-  bool get isAvailable => _isAvailable;
+  bool get isAvailable => _isPoweredOn;
   /// 発見したPeripheral
   QueueList<({DiscoveredEventArgs arg, DateTime t})> get discoveredPeripherals => _discoveredPeripherals;
 
   /// 同時最大接続peripheral数
   static final int maxConnections = 1;
   /// 接続中のPeripheral（connectを呼び出したがretrieveConnectedPeripheralsには反映されていないものを含む）．同時接続数の上限を決めるため．
-  Set<UUID> _connectingPeripherals = Set<UUID>();
+  final Set<UUID> _connectingPeripherals = Set<UUID>();
   /// 接続中のPeripheral（connectのコールバックがあったものだけ）
-  Set<UUID> _connectedPeripherals = Set<UUID>();
+  final Set<UUID> _connectedPeripherals = Set<UUID>();
 
-  StreamSubscription? _stateSubscription;
+  StreamSubscription? _stateChangedSubscription;
   StreamSubscription? _discoveredSubscription;
   StreamSubscription? _connectionStateSubscription;
 
@@ -44,9 +45,9 @@ class BleCentralManager extends ChangeNotifier {
     // await _requestPermissions(); // exchange_page.dart: ExchangePageクラスで実施済み
 
     // BLEが利用可能かチェック・監視
-    _stateSubscription = CentralManager().stateChanged.listen((arg) {
+    _stateChangedSubscription = CentralManager().stateChanged.listen((arg) {
       if (kDebugMode) debugPrint("BleCentralManager CentralManager().stateChanged.listen: ${arg.state}");
-      _isAvailable = (arg.state == BluetoothLowEnergyState.poweredOn);
+      _isPoweredOn = (arg.state == BluetoothLowEnergyState.poweredOn);
       notifyListeners(); // UIに通知
     });
   }
@@ -59,7 +60,7 @@ class BleCentralManager extends ChangeNotifier {
     await stopScan();
     // await _localNicknameStreamSubscription?.cancel();
 
-    await _stateSubscription?.cancel();
+    await _stateChangedSubscription?.cancel();
     await _discoveredSubscription?.cancel();
     await _connectionStateSubscription?.cancel();
     super.dispose(); // ChangeNotifierクラス
@@ -92,7 +93,8 @@ class BleCentralManager extends ChangeNotifier {
     }
     await _connectionStateSubscription?.cancel();
     await _connectionStateSubscription?.cancel();
-    _discoveredPeripherals?.clear();
+    _discoveredPeripherals.clear();
+    _waitingPeripherals.clear();
     _isScanning = false;
     notifyListeners();
   }
