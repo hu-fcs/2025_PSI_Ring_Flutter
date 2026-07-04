@@ -258,18 +258,66 @@ class KeyManagementService {
     }
   }
 
-  /*
-  /// 互換のために残す。内部は insertCollectedKeyIfAbsent を呼ぶ。
-  Future<void> insertCollectedBlePublicKey({
-    required Uint8List pubkey33,
-    required int receivedAtMs,
+  /// 将来分のニックネーム（圧縮公開鍵）リストを生成する
+  ///
+  /// [period] : どこまで先を生成するか（例: 1日 or 7日）
+  /// [slot]   : 1スロットの長さ（デフォルトは10分）
+  Future<List<SlotNickname>> generateFutureNicknameList({
+    required Duration period,
+    Duration slot = const Duration(minutes: 10),
   }) async {
-    await insertCollectedKeyIfAbsent(
-      pubkey33: pubkey33,
-      receivedAtMs: receivedAtMs,
-    );
+    // 1. マスターキーを確保（なければ生成）
+    final masterKey = await _ensureMasterKey();
+    if (masterKey == null) {
+      throw StateError('Master key not available');
+    }
+
+    // 2. 現在時刻とスロット長（ミリ秒）を計算
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final slotMs = slot.inMilliseconds;
+    if (slotMs <= 0) {
+      throw ArgumentError('slot duration must be > 0');
+    }
+
+    // 3. 「いま属しているスロットの開始時刻」に丸める
+    final currentSlotStartMs = (nowMs ~/ slotMs) * slotMs;
+
+    // 4. 何スロット分生成するかを計算（切り上げ）
+    final totalMs = period.inMilliseconds;
+    final slotCount = (totalMs / slotMs).ceil();
+    if (slotCount <= 0) {
+      return const [];
+    }
+
+    final List<SlotNickname> result = [];
+
+    // 5. 各スロットごとに公開鍵を生成
+    for (var i = 0; i < slotCount; i++) {
+      final slotStartMs = currentSlotStartMs + i * slotMs;
+
+      // 既存のネイティブ関数で「マスターキー＋スロット時刻」から鍵ペアを導出
+      final keyPair = _nativeKeyService.deriveNewKeyPair(
+        masterKey,
+        slotStartMs,
+        slotMs,
+      );
+
+      // 何らかの理由で生成に失敗したらスキップ
+      if (keyPair == null) {
+        continue;
+      }
+
+      result.add(
+        SlotNickname(
+          slotStart: DateTime.fromMillisecondsSinceEpoch(slotStartMs),
+          slotDuration: slot,
+          pubkey33: Uint8List.fromList(keyPair.publicKey),
+        ),
+      );
+    }
+
+    return result;
   }
-  */
 
   // ----- 鍵取得 -----
 
@@ -522,6 +570,24 @@ class KeyManagementService {
     }
     return _secureStorage.delete(key: _masterKeyAlias);
   }
+}
+
+/// 1スロット分のニックネーム（圧縮公開鍵）情報
+class SlotNickname {
+  /// このニックネームが有効になるスロットの開始時刻
+  final DateTime slotStart;
+
+  /// 1スロットの長さ（例: 10分）
+  final Duration slotDuration;
+
+  /// 33バイトの圧縮公開鍵（BLEニックネーム本体）
+  final Uint8List pubkey33;
+
+  const SlotNickname({
+    required this.slotStart,
+    required this.slotDuration,
+    required this.pubkey33,
+  });
 }
 
 class _GeneratedRow {
