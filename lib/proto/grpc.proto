@@ -1,0 +1,53 @@
+// grpc.proto
+syntax = "proto3";
+package grpc;
+
+// PSI の3段階（鍵交換 → PSI確定 → 匿名認証）のための gRPC 定義。
+
+// ----- Phase 1: PSI 鍵交換 -----
+
+message KeyExchangeReq {
+  repeated bytes enc_keys = 1; // クライアントの暗号化鍵列
+}
+
+message KeyExchangeResp {
+  repeated bytes server_enc_keys = 1;   // サーバの暗号化鍵列
+  repeated bytes client_reenc_keys = 2; // サーバが再暗号化したクライアント鍵列
+}
+
+// ----- Phase 2: PSI 確定 -----
+
+message ClientFinalReq {
+  repeated bytes client_reenc_server_keys = 1; // クライアントが再暗号化したサーバ鍵列
+}
+
+message PsiDone {}
+
+// ----- Phase 3A: チャレンジ交換 -----
+
+message ClientChallenge {
+  bytes challenge_c = 1; // クライアント生成のチャレンジ(32B)
+}
+
+message ServerChallenge {
+  bytes challenge_s = 1; // サーバ生成のチャレンジ(32B)
+}
+
+// ----- Phase 3B: リング署名交換 -----
+
+message RingSignatureReq {
+  bytes signature_for_server = 1; // challenge_s に対する署名
+}
+
+message RingSignatureResp {
+  bytes signature_for_client = 1; // challenge_c に対する署名
+}
+
+// ----- gRPC service -----
+
+service GrpcService {
+  rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
+  rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
+  rpc ExchangeChallenges (ClientChallenge) returns (ServerChallenge);
+  rpc ExchangeRingSignatures (RingSignatureReq) returns (RingSignatureResp);
+}

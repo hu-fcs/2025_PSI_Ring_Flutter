@@ -1,60 +1,18 @@
-import 'dart:ffi';
-import 'dart:isolate';
-import 'dart:math';
+// lib/pages/debug_page.dart
+
+import 'dart:async';
 import 'dart:typed_data';
-import 'package:convert/convert.dart' as convert;
-import 'package:ffi/ffi.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
-import '../boringssl_service.dart';
+
+// import '../ble/ble_scanner.dart';
+import '../ble/central.dart';
 import '../db/database_helper.dart';
-import '../key_management_service.dart';
-import '../native_key_service.dart';
-import '../db/friends_dao.dart';
-
-// Isolateで実行するためのトップレベル関数 (変更なし)
-Future<Map<String, dynamic>> _runRingSignatureInIsolate(Map<String, dynamic> args) async {
-  final nativeKeyService = NativeKeyService();
-  final stopwatch = Stopwatch()..start();
-  final String message = args['message'];
-  final Uint8List privateKey = args['privateKey'];
-  final List<Uint8List> ringPublicKeys = args['ringPublicKeys'];
-  final int ringSize = ringPublicKeys.length;
-  final msgPtr = message.toNativeUtf8().cast<Char>();
-  final privKeyPtr = calloc<Uint8>(privateKey.length)..asTypedList(privateKey.length).setAll(0, privateKey);
-  final totalRingKeyLength = ringPublicKeys.fold<int>(0, (sum, list) => sum + list.length);
-  final ringKeysPtr = calloc<Uint8>(totalRingKeyLength);
-  int offset = 0;
-  for (final key in ringPublicKeys) {
-    ringKeysPtr.asTypedList(totalRingKeyLength).setRange(offset, offset + key.length, key);
-    offset += key.length;
-  }
-  final signatureOutPtr = calloc<Uint8>((1 + ringSize) * 32);
-  try {
-    final creationResult = nativeKeyService.createRingSignature(
-        msgPtr, message.length, privKeyPtr, ringKeysPtr, ringSize, signatureOutPtr);
-    if (creationResult != 1) {
-      return {'success': false, 'error': '署名の作成に失敗しました。'};
-    }
-    final verificationResult = nativeKeyService.verifyRingSignature(
-        msgPtr, message.length, signatureOutPtr, ringKeysPtr, ringSize);
-    stopwatch.stop();
-    return {
-      'success': true,
-      'isVerified': verificationResult == 1,
-      'signatureHex': convert.hex.encode(signatureOutPtr.asTypedList((1 + ringSize) * 32)),
-      'elapsedTimeMs': stopwatch.elapsedMilliseconds,
-    };
-  } finally {
-    calloc.free(msgPtr);
-    calloc.free(privKeyPtr);
-    calloc.free(ringKeysPtr);
-    calloc.free(signatureOutPtr);
-  }
-}
-
+import '../key_management.dart';
+import '../grpc/grpc_common.dart';
 
 class DebugPage extends StatefulWidget {
   const DebugPage({super.key});
@@ -66,33 +24,46 @@ class DebugPage extends StatefulWidget {
 class _DebugPageState extends State<DebugPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+
   final KeyManagementService _keyManager = KeyManagementService();
-  final BoringSSLService _boringSSLService = BoringSSLService();
+  final GrpcCommon _grpcCommon = GrpcCommon();
+
   final TextEditingController _dummyCountController =
   TextEditingController(text: '5');
-  bool _isVerifying = false;
-  final ValueNotifier<int> _progressCountNotifier = ValueNotifier(0);
 
+  StreamSubscription<void>? _keyUpdateSub;
+
+  static const double _debugFontSize = 13;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+
+    // 鍵更新を検知したら表示を更新する
+    _keyUpdateSub = _keyManager.onKeyUpdated.listen((_) {
+      if (!mounted) return;
+      if (kDebugMode) {
+        debugPrint('[DebugPage] key updated; refresh');
+      }
+      setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _keyUpdateSub?.cancel();
     _tabController.dispose();
     _dummyCountController.dispose();
-    _progressCountNotifier.dispose();
     super.dispose();
   }
 
-  // --- データベース操作 ---
+  // ----- Database helpers -----
+
   Future<List<Map<String, dynamic>>> _fetchLimitedKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
-    final orderByColumn = tableName == 'generated_keys' ? 'id' : 'ts';
-    return db.query(tableName, orderBy: '$orderByColumn DESC', limit: 100);
+    final order = tableName == 'generated_keys' ? 'id' : 'receive_time';
+    return db.query(tableName, orderBy: '$order DESC', limit: 100);
   }
 
   Future<int> _fetchTotalKeyCount(String tableName) async {
@@ -104,21 +75,31 @@ class _DebugPageState extends State<DebugPage>
   Future<void> _deleteAllKeys(String tableName) async {
     final db = await DatabaseHelper.getDatabase();
     await db.delete(tableName);
+
+    // 収集鍵を全削除した場合はスキャン側の重複抑止キャッシュも初期化する
+    if (tableName == 'collected_keys') {
+      // BleScanner.clearCollectedCache();
+      BleCentralManager().discoveredPeripherals.clear();
+      if (kDebugMode) {
+        debugPrint('[DebugPage] collected cache cleared');
+      }
+    }
+
     setState(() {});
   }
 
-  // --- ダミーデータ操作 ---
+  // ----- Dummy data -----
+
   Future<void> _generateAndInsertSingleDummyCollectedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
     if (keyPair == null) return;
-    final random = Random();
     final db = await DatabaseHelper.getDatabase();
-    await db.insert('ecd_keys', {
-      'key_ecd': keyPair.publicKey,
-      'lat': 34000000 + random.nextInt(1000000),
-      'lon': 135000000 + random.nextInt(1000000),
-      'ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    },
+    await db.insert(
+      'collected_keys',
+      {
+        'pubkey_ecd': keyPair.publicKey,
+        'receive_time': DateTime.now().millisecondsSinceEpoch,
+      },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
   }
@@ -132,36 +113,45 @@ class _DebugPageState extends State<DebugPage>
     if (count <= 0) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: ValueListenableBuilder<int>(
-          valueListenable: _progressCountNotifier,
-          builder: (context, currentCount, child) {
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('ダミー鍵を追加中... ($currentCount/$count)'),
-              ],
-            );
-          },
-        ),
-        duration: Duration(seconds: (count * 0.1).ceil() + 5),
-      ),
+      SnackBar(content: Text('ダミー鍵を $count 件追加中...')),
     );
 
+    final keys = <Uint8List>[];
     for (int i = 0; i < count; i++) {
-      await _generateAndInsertSingleDummyCollectedKey();
-      await Future.delayed(Duration.zero);
-      _progressCountNotifier.value = i + 1;
+      final keyPair = _keyManager.generateDummyKeyPair();
+      if (keyPair != null) {
+        keys.add(keyPair.publicKey);
+      }
     }
 
-    setState(() {});
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    await DatabaseHelper.insertCollectedKeysBatch(publicKeys: keys);
+
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ $count件のダミー収集鍵を挿入しました。')),
+      const SnackBar(content: Text('ダミー鍵の追加を完了しました。')),
     );
-    _progressCountNotifier.value = 0;
+
+    setState(() {});
   }
 
+  Future<void> _insertCommonDummyKeysFromAsset(int count) async {
+    if (count <= 0) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('共通ダミー鍵を $count 件追加中...')),
+    );
+
+    final inserted = await DatabaseHelper.insertCommonDummyKeys(count: count);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('共通ダミー鍵を $inserted 件追加しました')),
+    );
+
+    setState(() {});
+  }
 
   Future<void> _insertDummyGeneratedKey() async {
     final keyPair = _keyManager.generateDummyKeyPair();
@@ -170,6 +160,8 @@ class _DebugPageState extends State<DebugPage>
     await db.insert('generated_keys', {
       'seckey_ecd': keyPair.privateKey,
       'pubkey_ecd': keyPair.publicKey,
+      'lat': null,
+      'lon': null,
       'generate_time': DateTime.now().millisecondsSinceEpoch,
       'expire_time':
       DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch,
@@ -177,127 +169,171 @@ class _DebugPageState extends State<DebugPage>
     setState(() {});
   }
 
-  // --- マスターキー操作 ---
   Future<void> _deleteMasterKey() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('マスターキーの削除'),
-        content: const Text('マスターキーを削除すると、アプリは初期状態に戻ります。よろしいですか？'),
+      builder: (_) => AlertDialog(
+        title: const Text('マスターキー削除'),
+        content: const Text('元に戻せません。削除しますか？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('キャンセル'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('削除', style: TextStyle(color: Colors.red)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('削除'),
           ),
         ],
       ),
     );
+
     if (confirm == true) {
       await _keyManager.deleteMasterKey();
       setState(() {});
     }
   }
 
-  // --- 機能検証ロジック ---
-  void _testRandBytes() {
-    try {
-      final result = _boringSSLService.testRandomBytes();
-      _showResultDialog(
-        title: 'BoringSSL RAND_bytes テスト',
-        isSuccess: true,
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('正常にランダムなバイト列が生成されました。'),
-            const SizedBox(height: 8),
-            SelectableText(
-              result,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      _showResultDialog(
-        title: 'BoringSSL RAND_bytes テスト',
-        isSuccess: false,
-        content: Text('エラー: $e'),
-      );
-    }
-  }
+  // ----- Dialog helpers -----
 
-  Future<void> _performRingSignatureAndVerify() async {
-    if (_isVerifying) return;
-    setState(() {
-      _isVerifying = true;
-    });
-
-    try {
-      final signerKeyPair = await _keyManager.getLatestKeyPair();
-      if (signerKeyPair == null) {
-        _showErrorSnackbar('署名用の鍵ペアが見つかりませんでした。');
-        return;
-      }
-      final collectedKeys = await _keyManager.getAllCollectedPublicKeys();
-      final ringPublicKeys = <Uint8List>[...collectedKeys];
-      if (!ringPublicKeys.any((key) => listEquals(key, signerKeyPair.publicKey))) {
-        ringPublicKeys.add(signerKeyPair.publicKey);
-      }
-      if (ringPublicKeys.length < 2) {
-        _showErrorSnackbar('リング署名には最低2つの鍵が必要です。');
-        return;
-      }
-
-      final args = {
-        'message': 'This is a test message for ring signature',
-        'privateKey': signerKeyPair.privateKey,
-        'ringPublicKeys': ringPublicKeys,
-      };
-
-      final result = await compute(_runRingSignatureInIsolate, args);
-
-      if (result['success'] == true) {
-        _showSignatureResultDialog(
-          result['signatureHex'],
-          result['isVerified'],
-          result['elapsedTimeMs'],
-        );
-      } else {
-        _showErrorSnackbar(result['error'] ?? '不明なエラーが発生しました。');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isVerifying = false;
-        });
-      }
-    }
-  }
-
-  // --- ヘルパー関数 (ダイアログ) ---
-
-  /// バイト配列を完全な16進数文字列に変換する
+  /// バイト配列を 16 進数文字列に変換する。
   String _fullHex(List<int>? bytes) {
     if (bytes == null || bytes.isEmpty) return 'N/A';
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
   }
 
-  /// 収集した鍵（1つ）を詳細表示するダイアログ
-  void _showFullKeyDialog(BuildContext context, String title, List<int>? keyBytes) {
+  void _showFullKeyDialog(
+      BuildContext context,
+      String title,
+      List<int>? keyBytes,
+      int keyId,
+      ) {
     if (keyBytes == null) return;
     final String fullHexKey = _fullHex(keyBytes);
-    _showFullStringDialog(context, title, fullHexKey);
+    if (fullHexKey.isEmpty) {
+      _showErrorSnackbar('キーがありません。');
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  fullHexKey,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  onPressed: () async {
+                    await DatabaseHelper.deleteKey(
+                      table: KeyTable.collected,
+                      id: keyId,
+                    );
+                    Navigator.of(context).pop();
+                    setState(() {});
+                  },
+                ),
+                const Spacer(),
+                TextButton(
+                  child: const Text('閉じる'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
   }
 
-  /// ★★★ マスターキー(String)表示用のダイアログを汎用化 ★★★
-  void _showFullStringDialog(BuildContext context, String title, String? content) {
+  void _showGeneratedKeyDialog(
+      BuildContext context,
+      List<int>? pubKeyBytes,
+      List<int>? secKeyBytes,
+      int keyId,
+      ) {
+    final String fullHexPub = _fullHex(pubKeyBytes);
+    final String fullHexSec = _fullHex(secKeyBytes);
+
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('生成済み鍵ペア'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '公開鍵 (Public Key):',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SelectableText(
+                  fullHexPub,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '秘密鍵 (Secret Key):',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SelectableText(
+                  fullHexSec,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text('削除', style: TextStyle(color: Colors.red)),
+                  onPressed: () async {
+                    await DatabaseHelper.deleteKey(
+                      table: KeyTable.generated,
+                      id: keyId,
+                    );
+                    Navigator.of(context).pop();
+                    setState(() {});
+                  },
+                ),
+                const Spacer(),
+                TextButton(
+                  child: const Text('閉じる'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showFullStringDialog(
+      BuildContext context,
+      String title,
+      String? content,
+      ) {
     if (content == null || content.isEmpty) {
-      _showErrorSnackbar("キーがありません。");
+      _showErrorSnackbar('キーがありません。');
       return;
     }
 
@@ -318,7 +354,7 @@ class _DebugPageState extends State<DebugPage>
               ],
             ),
           ),
-          actions: <Widget>[
+          actions: [
             TextButton(
               child: const Text('閉じる'),
               onPressed: () => Navigator.of(context).pop(),
@@ -328,164 +364,11 @@ class _DebugPageState extends State<DebugPage>
       },
     );
   }
-
-  /// 生成した鍵ペア（2つ）を詳細表示するダイアログ
-  void _showGeneratedKeyDialog(BuildContext context, List<int>? pubKeyBytes, List<int>? secKeyBytes) {
-    final String fullHexPub = _fullHex(pubKeyBytes);
-    final String fullHexSec = _fullHex(secKeyBytes);
-
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('生成済み鍵ペア'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('公開鍵 (Public Key):', style: TextStyle(fontWeight: FontWeight.bold)),
-                SelectableText(
-                  fullHexPub,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                const Text('秘密鍵 (Secret Key):', style: TextStyle(fontWeight: FontWeight.bold)),
-                SelectableText(
-                  fullHexSec,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-                ),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('閉じる'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
 
   void _showErrorSnackbar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
-  }
-
-  void _showResultDialog({required String title, required bool isSuccess, required Widget content}) {
-    if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(title),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      isSuccess ? Icons.check_circle : Icons.cancel,
-                      color: isSuccess ? Colors.green : Colors.red,
-                      size: 28,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      isSuccess ? '成功' : '失敗',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                        color: isSuccess ? Colors.green.shade700 : Colors.red.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                content,
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('OK'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showSignatureResultDialog(String signatureHex, bool isVerified, int elapsedTimeMs) {
-    if (!mounted) return;
-
-    final displayedSignature = signatureHex.length > 500
-        ? '${signatureHex.substring(0, 500)}...'
-        : signatureHex;
-
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('リング署名 結果'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Icon(
-                  isVerified ? Icons.check_circle : Icons.cancel,
-                  color: isVerified ? Colors.green : Colors.red,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  isVerified ? '検証成功' : '検証失敗',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: isVerified ? Colors.green : Colors.red),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                '処理時間: $elapsedTimeMs ms',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const Divider(height: 16),
-              SizedBox(
-                height: 150,
-                width: double.maxFinite,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('署名データ (Hex):'),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        displayedSignature,
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('OK'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -524,29 +407,66 @@ class _DebugPageState extends State<DebugPage>
     );
   }
 
-  // --- UI構築ヘルパー (変更なし) ---
+  Future<void> _showAddCommonDummyDialog() async {
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('共通ダミー鍵を追加（assets）'),
+          content: TextField(
+            controller: _dummyCountController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              labelText: '追加する個数',
+              hintText: '例: 1000',
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final count = int.tryParse(_dummyCountController.text) ?? 0;
+                Navigator.of(context).pop();
+                _insertCommonDummyKeysFromAsset(count);
+              },
+              child: const Text('追加実行'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ----- UI helpers -----
+
   String _shortHex(List<int>? bytes, {int length = 10}) {
     if (bytes == null || bytes.isEmpty) return 'N/A';
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
     return hex.length > length ? '${hex.substring(0, length)}...' : hex;
   }
 
-  String _formatTime(dynamic unixTimeMs, {bool isSecond = false}) {
-    if (unixTimeMs == null) return "N/A";
-    final millis = isSecond ? unixTimeMs * 1000 : unixTimeMs;
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+  String _formatTime(dynamic unixTimeMs) {
+    if (unixTimeMs == null) return 'N/A';
+    final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
+    return '${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _toDMS(double decimalDegree, {required bool isLatitude}) {
-    final direction = isLatitude ? (decimalDegree >= 0 ? 'N' : 'S') : (decimalDegree >= 0 ? 'E' : 'W');
+    final direction = isLatitude
+        ? (decimalDegree >= 0 ? 'N' : 'S')
+        : (decimalDegree >= 0 ? 'E' : 'W');
     final absDeg = decimalDegree.abs();
     final deg = absDeg.floor();
     final minDecimal = (absDeg - deg) * 60;
     final min = minDecimal.floor();
     final sec = ((minDecimal - min) * 60).toStringAsFixed(2);
-    return "$deg° $min′ $sec″ $direction";
+    return '$deg° $min′ $sec″ $direction';
   }
 
   Widget _buildMasterKeyCard() {
@@ -554,55 +474,77 @@ class _DebugPageState extends State<DebugPage>
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
       color: Colors.indigo.shade50,
       elevation: 4,
-      // InkWell を Card の子にして、Card の外観（影や丸み）を維持する
       child: FutureBuilder<String?>(
         future: _keyManager.getMasterKeyBase64(),
         builder: (context, snapshot) {
           final String? masterKeyBase64 = snapshot.data;
 
           return InkWell(
-            borderRadius: BorderRadius.circular(12.0), // Cardの丸みに合わせる
+            borderRadius: BorderRadius.circular(12.0),
             onTap: () {
-              if (snapshot.connectionState == ConnectionState.done && masterKeyBase64 != null) {
-                // タップしたら、新しく作った汎用ダイアログを呼び出す
-                _showFullStringDialog(context, '🔑 マスターキー (Base64)', masterKeyBase64);
+              if (snapshot.connectionState == ConnectionState.done &&
+                  masterKeyBase64 != null) {
+                _showFullStringDialog(
+                  context,
+                  'マスターキー (Base64)',
+                  masterKeyBase64,
+                );
               } else if (snapshot.connectionState == ConnectionState.done) {
-                _showErrorSnackbar("マスターキーはまだ保存されていません。");
+                _showErrorSnackbar('マスターキーはまだ保存されていません。');
               }
             },
             child: Stack(
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 40, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    // ★★★ mainAxisSize: MainAxisSize.min, を削除 ★★★
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          const Text('🔑 マスターキー', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 8),
-                          Text('(Base64)', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      // FutureBuilder の中身は snapshot を利用して表示
-                      if (snapshot.connectionState == ConnectionState.waiting)
-                        const SizedBox(height: 20, child: LinearProgressIndicator())
-                      else if (masterKeyBase64 != null)
-                        SelectionArea(
-                          child: Text(
-                            masterKeyBase64,
-                            style: const TextStyle(fontFamily: 'monospace'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                  child: DefaultTextStyle.merge(
+                    style: const TextStyle(fontSize: _debugFontSize),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            const Text(
+                              'マスターキー',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '(Base64)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        if (snapshot.connectionState == ConnectionState.waiting)
+                          const SizedBox(
+                            height: 20,
+                            child: LinearProgressIndicator(),
+                          )
+                        else if (masterKeyBase64 != null)
+                          SelectionArea(
+                            child: Text(
+                              masterKeyBase64,
+                              style: const TextStyle(fontFamily: 'monospace'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          )
+                        else
+                          const Text(
+                            '保存されていません',
+                            style: TextStyle(color: Colors.grey),
                           ),
-                        )
-                      else
-                        const Text('保存されていません', style: TextStyle(color: Colors.grey)),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 Positioned(
@@ -624,43 +566,133 @@ class _DebugPageState extends State<DebugPage>
     );
   }
 
+  Widget _buildSlotSelector() {
+    final int current = _keyManager.slotMs;
 
-  Widget _buildVerificationTab() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _testRandBytes,
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('BoringSSLのRAND_bytesをテスト'),
+    Widget label(String text) {
+      return SizedBox(
+        width: 80,
+        child: Center(child: Text(text)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '現在のスロット時間: ${_keyManager.slotMs} ms',
+          style: const TextStyle(
+            fontSize: _debugFontSize,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<int>(
+          segments: [
+            ButtonSegment(
+              value: 10 * 60 * 1000,
+              label: label('10分'),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _isVerifying ? null : _performRingSignatureAndVerify,
-              icon: _isVerifying
-                  ? Container(
-                width: 24,
-                height: 24,
-                padding: const EdgeInsets.all(2.0),
-                child: const CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
-                ),
-              )
-                  : const Icon(Icons.edit_document),
-              label: Text(_isVerifying ? '検証中...' : 'リング署名を作成・検証'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
-              ),
+            ButtonSegment(
+              value: 1 * 60 * 1000,
+              label: label('1分'),
+            ),
+            ButtonSegment(
+              value: 10 * 1000,
+              label: label('10秒'),
             ),
           ],
+          selected: {current},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _keyManager.slotMs = selection.first;
+            });
+          },
         ),
+      ],
+    );
+  }
+
+  Widget _buildRingRangeSelector() {
+    final RingSignatureRange range = _keyManager.ringRange;
+
+    Widget label(String text) {
+      return SizedBox(
+        width: 80,
+        child: Center(child: Text(text)),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'リング署名対象期間',
+          style: TextStyle(
+            fontSize: _debugFontSize,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SegmentedButton<RingSignatureRange>(
+          segments: [
+            ButtonSegment(
+              value: RingSignatureRange.slot,
+              label: label('スロット'),
+            ),
+            ButtonSegment(
+              value: RingSignatureRange.day,
+              label: label('1日'),
+            ),
+            ButtonSegment(
+              value: RingSignatureRange.all,
+              label: label('全期間'),
+            ),
+          ],
+          selected: {range},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _keyManager.ringRange = selection.first;
+            });
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGrpcOptionToggles() {
+    return DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: _debugFontSize),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'gRPC 通信設定',
+            style: TextStyle(
+              fontSize: _debugFontSize,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('gzip 圧縮'),
+            subtitle: const Text('アプリケーションレベル圧縮'),
+            value: _grpcCommon.enableGzip,
+            onChanged: (v) {
+              setState(() {
+                _grpcCommon.enableGzip = v;
+              });
+            },
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text(
+              '※ 次回の gRPC 接続から有効になります',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -682,268 +714,197 @@ class _DebugPageState extends State<DebugPage>
         }
 
         final totalCount = (snapshot.data?[0] as int?) ?? 0;
-        final records = (snapshot.data?[1] as List<Map<String, dynamic>>?) ?? [];
+        final records =
+            (snapshot.data?[1] as List<Map<String, dynamic>>?) ?? [];
 
-        return Column(
-          children: [
-            if (isGenerated) ...[
-              _buildMasterKeyCard(),
+        return DefaultTextStyle.merge(
+          style: const TextStyle(fontSize: _debugFontSize),
+          child: Column(
+            children: [
+              if (isGenerated) ...[
+                _buildMasterKeyCard(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _insertDummyGeneratedKey,
+                        child: const Text('ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => _deleteAllKeys('generated_keys'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade100,
+                        ),
+                        child: const Text('全削除'),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 0,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _insertDummyCollectedKey,
+                        child: const Text('ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: _showAddMultipleDummiesDialog,
+                        child: const Text('複数ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: _showAddCommonDummyDialog,
+                        child: const Text('複数共通ダミー追加'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => _deleteAllKeys('collected_keys'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade100,
+                        ),
+                        child: const Text('全削除'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
-                  ElevatedButton(onPressed: _insertDummyGeneratedKey, child: const Text('ダミー追加')),
-                  ElevatedButton(
-                    onPressed: () => _deleteAllKeys('generated_keys'),
-                    child: const Text('全削除'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
-                  ),
-                ]),
-              ),
-            ] else ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
-                  ElevatedButton(onPressed: _insertDummyCollectedKey, child: const Text('ダミー追加')),
-                  ElevatedButton(onPressed: _showAddMultipleDummiesDialog, child: const Text('複数追加')),
-                  ElevatedButton(
-                    onPressed: () => _deleteAllKeys('ecd_keys'),
-                    child: const Text('全削除'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade100),
-                  ),
-                ]),
-              ),
-            ],
-
-            Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 4),
-              child: Column(
-                children: [
-                  Text(
-                    '現在の総鍵数: $totalCount',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  if (totalCount > 100)
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Column(
+                  children: [
                     Text(
-                      '(最新100件のみ表示)',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      '現在の総鍵数: $totalCount',
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                ],
+                    if (totalCount > 100)
+                      Text(
+                        '(最新100件のみ表示)',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
               ),
-            ),
-
-            Expanded(
-              child: records.isEmpty
-                  ? const Center(child: Text('データがありません'))
-                  : ListView.builder(
-                itemCount: records.length,
-                itemBuilder: (context, index) {
-                  final row = records[index];
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-                    child: InkWell( // Card の中身を InkWell で包む
-                      borderRadius: BorderRadius.circular(12.0), // Card の丸みに合わせる
-                      onTap: () {
-                        // タップ時の動作
-                        if (isGenerated) {
-                          _showGeneratedKeyDialog(
-                            context,
-                            row['pubkey_ecd'] as List<int>?,
-                            row['seckey_ecd'] as List<int>?,
-                          );
-                        } else {
-                          _showFullKeyDialog(
-                            context,
-                            '収集した鍵',
-                            row['key_ecd'] as List<int>?,
-                          );
-                        }
-                      },
-                      child: Padding( // 元々 Card が持っていた Padding を InkWell の子にする
-                        padding: const EdgeInsets.all(12.0),
-                        child: isGenerated
-                            ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              Expanded(child: Text('Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}')),
-                              Expanded(child: Text('Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}')),
-                            ]),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(child: Text('生成: ${_formatTime(row['generate_time'])}')),
-                              Expanded(child: Text('期限: ${_formatTime(row['expire_time'])}')),
-                            ]),
-                          ],
-                        )
-                            : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Center(
-                              child: Text('Key: ${_shortHex(row['key_ecd'] as List<int>?, length: 20)}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('緯度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_toDMS((row['lat'] as int) / 1e6, isLatitude: true)),
-                              ])),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('経度', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_toDMS((row['lon'] as int) / 1e6, isLatitude: false)),
-                              ])),
-                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text('取得', style: TextStyle(fontWeight: FontWeight.bold)),
-                                Text(_formatTime(row['ts'], isSecond: true)),
-                              ])),
-                            ]),
-                          ],
+              Expanded(
+                child: records.isEmpty
+                    ? const Center(child: Text('データがありません'))
+                    : ListView.builder(
+                  itemCount: records.length,
+                  itemBuilder: (context, index) {
+                    final row = records[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        vertical: 4,
+                        horizontal: 12,
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12.0),
+                        onTap: () {
+                          if (isGenerated) {
+                            _showGeneratedKeyDialog(
+                              context,
+                              row['pubkey_ecd'] as List<int>?,
+                              row['seckey_ecd'] as List<int>?,
+                              row['id'] as int,
+                            );
+                          } else {
+                            _showFullKeyDialog(
+                              context,
+                              '収集した鍵',
+                              row['pubkey_ecd'] as List<int>?,
+                              row['id'] as int,
+                            );
+                          }
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: isGenerated
+                              ? Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '生成: ${_formatTime(row['generate_time'])}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      '期限: ${_formatTime(row['expire_time'])}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                (row['lat'] == null ||
+                                    row['lon'] == null)
+                                    ? '位置: 未取得'
+                                    : '位置: '
+                                    '${_toDMS((row['lat'] as int) / 1e6, isLatitude: true)} / '
+                                    '${_toDMS((row['lon'] as int) / 1e6, isLatitude: false)}',
+                                style: TextStyle(
+                                  color: (row['lat'] == null ||
+                                      row['lon'] == null)
+                                      ? Colors.grey
+                                      : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          )
+                              : Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      '取得: ${_formatTime(row['receive_time'])}',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
-    );
-  }
-
-  Widget _buildFriendsTab() {
-    // 画面を下に引っ張って更新できるようにする
-    return RefreshIndicator(
-      onRefresh: () async {
-        setState(() {});
-      },
-      child: ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Card(
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('共有の保存状況（friends / friend_nicknames）',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-
-                  FutureBuilder<int>(
-                    future: FriendsDao.instance.getTotalFriendNicknames(),
-                    builder: (context, snap) {
-                      final total = snap.data ?? 0;
-                      return Text('保存された friend_nicknames 総数: $total');
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  FilledButton.icon(
-                    onPressed: () async {
-                      final deleted = await FriendsDao.instance.deleteExpiredFriendNicknames();
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('期限切れニックネームを $deleted 件削除しました')),
-                      );
-                      setState(() {}); // 表示更新
-                    },
-                    icon: const Icon(Icons.cleaning_services),
-                    label: const Text('期限切れを掃除'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          FutureBuilder<List<Map<String, Object?>>>(
-            future: FriendsDao.instance.listFriendsWithNicknameCounts(),
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const Center(child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(),
-                ));
-              }
-              if (snap.hasError) {
-                return Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text('エラー: ${snap.error}'),
-                );
-              }
-
-              final rows = snap.data ?? [];
-              if (rows.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('友達データがありません（まだ受信していない可能性）'),
-                );
-              }
-
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: Column(
-                  children: rows.map((r) {
-                    final id = r['id'];
-                    final label = r['label'] ?? '(no label)';
-                    final note = r['note'];
-                    final cnt = r['nickname_count'] ?? 0;
-                    final createdAt = r['created_at'];
-
-                    return ListTile(
-                      title: Text('$label'),
-                      subtitle: Text('id=$id  note=${note ?? "-"}  created_at=$createdAt'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('${cnt}件'),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'この友達と共有リストを削除',
-                            onPressed: () async {
-                              final friendId = (r['id'] as int);
-
-                              final ok = await showDialog<bool>(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  title: const Text('削除確認'),
-                                  content: Text('$label の共有ニックネームリストを削除しますか？\n（復元できません）'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(context, false),
-                                      child: const Text('キャンセル'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () => Navigator.pop(context, true),
-                                      child: const Text('削除'),
-                                    ),
-                                  ],
-                                ),
-                              );
-
-                              if (ok == true) {
-                                await FriendsDao.instance.deleteFriend(friendId);
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('$label を削除しました')),
-                                );
-                                setState(() {}); // 再描画して一覧更新
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
     );
   }
 
@@ -959,21 +920,37 @@ class _DebugPageState extends State<DebugPage>
               Tab(text: '収集した鍵'),
               Tab(text: '生成した鍵'),
               Tab(text: '機能検証'),
-              Tab(text: '友達'),
             ],
           ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildKeyListTab('ecd_keys', false),
+                _buildKeyListTab('collected_keys', false),
                 _buildKeyListTab('generated_keys', true),
                 _buildVerificationTab(),
-                _buildFriendsTab(),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVerificationTab() {
+    return DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: _debugFontSize),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSlotSelector(),
+            _buildRingRangeSelector(),
+            const SizedBox(height: 24),
+            _buildGrpcOptionToggles(),
+          ],
+        ),
       ),
     );
   }

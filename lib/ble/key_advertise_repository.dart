@@ -1,7 +1,7 @@
 // lib/ble/key_advertise_repository.dart
 import 'dart:typed_data';
-import '../key_management_service.dart'; // 既存のKMSを利用
-import 'ble_constants.dart';
+import '../key_management.dart'; // 既存のKMSを利用
+// import 'ble_constants.dart';
 
 class KeyAdvertiseRepository {
   KeyAdvertiseRepository() : _kms = KeyManagementService();

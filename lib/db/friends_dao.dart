@@ -1,9 +1,7 @@
 import 'dart:typed_data';
-
 import 'package:sqflite/sqflite.dart';
-
 import 'database_helper.dart';
-import '../key_management_service.dart'; // SlotNickname を使う
+import '../key_management.dart'; // SlotNickname を使う
 
 /// friends テーブル1行分
 class FriendEntry {

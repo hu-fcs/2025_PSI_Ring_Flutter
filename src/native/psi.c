@@ -2,141 +2,217 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "PsiECC"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#include <stdio.h>
+#define LOGI(...) printf("[INFO] " __VA_ARGS__); printf("\n")
+#define LOGE(...) printf("[ERROR] " __VA_ARGS__); printf("\n")
+#endif
+
 #include <openssl/evp.h>
 #include <openssl/ec.h>
-#include <openssl/sha.h>
 #include <openssl/bn.h>
-#include <openssl/err.h>
-#include <openssl/crypto.h>
+#include <openssl/obj_mac.h>
 
-// --- 内部構造体 ---
-struct PsiContext {
-    BIGNUM *p_modulus;
-    BN_CTX *bn_ctx;
-};
+/*
+ * PSI の共通集合抽出では，(二重暗号化集合, 元の公開鍵) を対応付けて保持し，
+ * 二重暗号化集合どうしの一致から元の公開鍵を復元する。
+ */
+typedef struct {
+    const uint8_t* dbl;   // my_double_set[i] (33B)
+    const uint8_t* orig;  // original_keys[i] (33B)
+} dbl_pair_t;
 
-// --- 内部ヘルパー関数 ---
-
-// 入力: 圧縮形式(33B)の公開鍵バイト列を EVP_PKEY に変換
-static EVP_PKEY* pkey_from_pub_bytes(const uint8_t* pub_key_bytes) {
-    EVP_PKEY* pkey = NULL;
-    EC_KEY* ec_key = NULL;
-    const EC_GROUP* group = NULL;
-    EC_POINT* pub_point = NULL;
-    BN_CTX* tmp_ctx = NULL;
-
-    ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-    if (!ec_key) goto cleanup;
-
-    group = EC_KEY_get0_group(ec_key);
-    pub_point = EC_POINT_new(group);
-    tmp_ctx = BN_CTX_new();
-    if (!pub_point || !tmp_ctx) goto cleanup;
-
-    // 圧縮点(33B)を EC_POINT へ復元
-    if (!EC_POINT_oct2point(group, pub_point, pub_key_bytes, PUB_KEY_LEN, tmp_ctx)) goto cleanup;
-    if (!EC_KEY_set_public_key(ec_key, pub_point)) goto cleanup;
-
-    pkey = EVP_PKEY_new();
-    if (!pkey) goto cleanup;
-
-    if (!EVP_PKEY_set1_EC_KEY(pkey, ec_key)) {
-        EVP_PKEY_free(pkey);
-        pkey = NULL;
-    }
-
-    cleanup:
-    if (ec_key) EC_KEY_free(ec_key);
-    if (pub_point) EC_POINT_free(pub_point);
-    if (tmp_ctx) BN_CTX_free(tmp_ctx);
-    return pkey;
+static int cmp_pubkey_33b(const void* a, const void* b) {
+    return memcmp(a, b, PUB_KEY_LEN);
 }
 
-static int hash_public_key(const uint8_t* pub_key_bytes, uint8_t* digest) {
-    EVP_PKEY* pkey = pkey_from_pub_bytes(pub_key_bytes);
-    if (!pkey) return 0;
+static int cmp_dbl_pair(const void* a, const void* b) {
+    const dbl_pair_t* pa = (const dbl_pair_t*)a;
+    const dbl_pair_t* pb = (const dbl_pair_t*)b;
+    return memcmp(pa->dbl, pb->dbl, PUB_KEY_LEN);
+}
 
-    unsigned char *pubkey_der = NULL;
-    int len = i2d_PublicKey(pkey, &pubkey_der); // SPKI DER で標準化
-    if (len <= 0) {
-        EVP_PKEY_free(pkey);
+static EC_GROUP* g_curve_group = NULL;
+
+/* 初期化: secp256r1(prime256v1) の曲線グループを用意する */
+EXPORT int psi_init() {
+    if (g_curve_group) return 1;
+    g_curve_group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
+    if (!g_curve_group) {
+        LOGE("psi_init: failed to create EC_GROUP");
         return 0;
     }
-    SHA256(pubkey_der, len, digest);
-    OPENSSL_free(pubkey_der);
-    EVP_PKEY_free(pkey);
     return 1;
 }
 
-static void power_encrypt_single(PsiContext* ctx, const uint8_t *base_val, const uint8_t *exponent_val, uint8_t *result) {
-    BIGNUM *base = BN_bin2bn(base_val, HASH_LEN, NULL);
-    BIGNUM *exp = BN_bin2bn(exponent_val, HASH_LEN, NULL);
-    BIGNUM *res = BN_new();
-    BN_mod_exp(res, base, exp, ctx->p_modulus, ctx->bn_ctx);
-    memset(result, 0, HASH_LEN);
-    BN_bn2binpad(res, result, HASH_LEN);
-    BN_free(base);
-    BN_free(exp);
-    BN_free(res);
-}
-
-// --- 公開APIの実装 ---
-
-EXPORT PsiContext* psi_context_new() {
-    PsiContext* ctx = (PsiContext*)malloc(sizeof(PsiContext));
-    if (!ctx) return NULL;
-
-    ctx->p_modulus = BN_new();
-    ctx->bn_ctx = BN_CTX_new();
-    if (!ctx->p_modulus || !ctx->bn_ctx) {
-        psi_context_free(ctx);
-        return NULL;
+EXPORT void psi_cleanup() {
+    if (g_curve_group) {
+        EC_GROUP_free(g_curve_group);
+        g_curve_group = NULL;
     }
-    // 256-bit セーフプライム（第2引数=ビット長）。用途に応じて固定モジュラスに差し替え可。
-    if (!BN_generate_prime_ex(ctx->p_modulus, 256, 1, NULL, NULL, NULL)) {
-        psi_context_free(ctx);
-        return NULL;
+}
+
+/* テスト用: ランダムな圧縮公開鍵(33B)を生成する */
+EXPORT int generate_random_dummy_key_bytes(uint8_t* out33b) {
+    if (!g_curve_group && !psi_init()) return 0;
+
+    EC_KEY* pkey = EC_KEY_new();
+    EC_KEY_set_group(pkey, g_curve_group);
+
+    if (!EC_KEY_generate_key(pkey)) {
+        EC_KEY_free(pkey);
+        return 0;
     }
-    return ctx;
+
+    const EC_POINT* pub = EC_KEY_get0_public_key(pkey);
+    const size_t len = EC_POINT_point2oct(
+            g_curve_group,
+            pub,
+            POINT_CONVERSION_COMPRESSED,
+            out33b,
+            PUB_KEY_LEN,
+            NULL
+    );
+
+    EC_KEY_free(pkey);
+    return (len == PUB_KEY_LEN) ? 1 : 0;
 }
 
-EXPORT void psi_context_free(PsiContext* ctx) {
-    if (!ctx) return;
-    if (ctx->p_modulus) BN_free(ctx->p_modulus);
-    if (ctx->bn_ctx) BN_CTX_free(ctx->bn_ctx);
-    free(ctx);
+/* 内部: EC点をスカラー倍し，圧縮形式(33B)で出力する */
+static int ecc_point_mul(
+        const uint8_t* input_33b,
+        const uint8_t* secret_32b,
+        uint8_t* output_33b
+) {
+    if (!g_curve_group) return 0;
+
+    BN_CTX* ctx = BN_CTX_new();
+    EC_POINT* point = EC_POINT_new(g_curve_group);
+    EC_POINT* result = EC_POINT_new(g_curve_group);
+    BIGNUM* scalar = BN_bin2bn(secret_32b, PRIV_KEY_LEN, NULL);
+    int ret = 0;
+
+    if (ctx && point && result && scalar) {
+        if (EC_POINT_oct2point(g_curve_group, point, input_33b, PUB_KEY_LEN, ctx) &&
+            EC_POINT_mul(g_curve_group, result, NULL, point, scalar, ctx) &&
+            EC_POINT_point2oct(
+                    g_curve_group,
+                    result,
+                    POINT_CONVERSION_COMPRESSED,
+                    output_33b,
+                    PUB_KEY_LEN,
+                    ctx
+            ) == PUB_KEY_LEN) {
+            ret = 1;
+        }
+    }
+
+    if (scalar) BN_free(scalar);
+    if (point) EC_POINT_free(point);
+    if (result) EC_POINT_free(result);
+    if (ctx) BN_CTX_free(ctx);
+
+    return ret;
 }
 
-EXPORT int psi_context_get_modulus(PsiContext* ctx, uint8_t* out_modulus_32b) {
-    if (!ctx || !ctx->p_modulus || !out_modulus_32b) return 0;
-    return BN_bn2binpad(ctx->p_modulus, out_modulus_32b, HASH_LEN);
-}
+/*
+ * 単一暗号化集合の計算:
+ * input_keys[i] を secret_32b でスカラー倍し，out_keys[i] に格納する。
+ */
+EXPORT int ecc_single_encrypt_set(
+        const uint8_t* input_keys,
+        int count,
+        const uint8_t* secret_32b,
+        uint8_t* out_keys
+) {
+    if (!input_keys || !secret_32b || !out_keys) return 0;
+    if (!g_curve_group && !psi_init()) return 0;
 
-EXPORT int psi_context_set_modulus(PsiContext* ctx, const uint8_t* modulus_32b) {
-    if (!ctx || !modulus_32b) return 0;
-    if (!BN_bin2bn(modulus_32b, HASH_LEN, ctx->p_modulus)) return 0;
-    return 1;
-}
-
-EXPORT int hash_and_encrypt_pubkey_set(PsiContext* ctx, const uint8_t* pub_keys, int count, const uint8_t* secret_32b, uint8_t* out_encrypted_hashes) {
-    if (!ctx || !pub_keys || !secret_32b || !out_encrypted_hashes) return 0;
-
-    uint8_t temp_hash[HASH_LEN];
     for (int i = 0; i < count; ++i) {
-        const uint8_t* pk = pub_keys + (size_t)i * PUB_KEY_LEN;
-        if (!hash_public_key(pk, temp_hash)) {
+        const uint8_t* in = input_keys + (size_t)i * PUB_KEY_LEN;
+        uint8_t* out = out_keys + (size_t)i * PUB_KEY_LEN;
+        if (!ecc_point_mul(in, secret_32b, out)) {
+            memset(out, 0, PUB_KEY_LEN);
             return 0;
         }
-        power_encrypt_single(ctx, temp_hash, secret_32b, out_encrypted_hashes + (size_t)i * HASH_LEN);
     }
     return 1;
 }
 
-EXPORT int encrypt_hash_set(PsiContext* ctx, const uint8_t* input_hashes, int count, const uint8_t* secret_32b, uint8_t* out_encrypted_hashes) {
-    if (!ctx || !input_hashes || !secret_32b || !out_encrypted_hashes) return 0;
-
-    for (int i = 0; i < count; ++i) {
-        power_encrypt_single(ctx, input_hashes + (size_t)i * HASH_LEN, secret_32b, out_encrypted_hashes + (size_t)i * HASH_LEN);
+/*
+ * PSI の共通集合抽出（ソート＋マージ）:
+ * - A側: (my_double_set, original_keys) をペア化して my_double_set でソート
+ * - B側: remote_double_set をコピーしてソート
+ * - 両者をマージして一致した要素に対応する original_keys を result_keys に格納する
+ */
+EXPORT int ecc_intersect_sets(
+        const uint8_t* original_keys,
+        const uint8_t* my_double_set,
+        const uint8_t* remote_double_set,
+        int count_a,
+        int count_b,
+        uint8_t* result_keys,
+        int* result_count
+) {
+    if (!original_keys || !my_double_set || !remote_double_set ||
+        !result_keys || !result_count) {
+        return 0;
     }
+
+    *result_count = 0;
+    if (count_a <= 0 || count_b <= 0) {
+        return 1;
+    }
+
+    dbl_pair_t* a = (dbl_pair_t*)malloc(sizeof(dbl_pair_t) * (size_t)count_a);
+    if (!a) return 0;
+
+    for (int i = 0; i < count_a; i++) {
+        a[i].dbl  = my_double_set  + (size_t)i * PUB_KEY_LEN;
+        a[i].orig = original_keys + (size_t)i * PUB_KEY_LEN;
+    }
+
+    uint8_t* b = (uint8_t*)malloc((size_t)count_b * PUB_KEY_LEN);
+    if (!b) {
+        free(a);
+        return 0;
+    }
+    memcpy(b, remote_double_set, (size_t)count_b * PUB_KEY_LEN);
+
+    qsort(a, (size_t)count_a, sizeof(dbl_pair_t), cmp_dbl_pair);
+    qsort(b, (size_t)count_b, PUB_KEY_LEN, cmp_pubkey_33b);
+
+    int i = 0, j = 0;
+    int found = 0;
+
+    while (i < count_a && j < count_b) {
+        const uint8_t* bj = b + (size_t)j * PUB_KEY_LEN;
+        const int c = memcmp(a[i].dbl, bj, PUB_KEY_LEN);
+
+        if (c == 0) {
+            memcpy(
+                    result_keys + (size_t)found * PUB_KEY_LEN,
+                    a[i].orig,
+                    PUB_KEY_LEN
+            );
+            found++;
+            i++;
+            j++;
+        } else if (c < 0) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+
+    *result_count = found;
+
+    free(a);
+    free(b);
     return 1;
 }
