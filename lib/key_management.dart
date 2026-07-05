@@ -34,7 +34,9 @@ class KeyManagementService {
   /// 時刻スロット幅（ミリ秒）
   ///
   /// 既定は 10 分。DebugPage 等から変更できる。
-  int slotMs = 10 * 60 * 1000;
+  int _slotMs = 10 * 60 * 1000;
+  int get slotMs => _slotMs;
+  set slotMs(int value) => _slotMs = value; // デバッグ用
 
   /// 鍵の追加・更新を通知するストリーム（BLE / UI / gRPC で利用）
   final StreamController<void> _keyUpdatedController =
@@ -260,11 +262,15 @@ class KeyManagementService {
 
   /// 将来分のニックネーム（圧縮公開鍵）リストを生成する
   ///
+  /// [firstSlotStartIn]   : 最初のニックネームの開始時刻（丸め処理があるので現在時刻でよい)
   /// [period] : どこまで先を生成するか（例: 1日 or 7日）
-  /// [slot]   : 1スロットの長さ（デフォルトは10分）
-  Future<List<SlotNickname>> generateFutureNicknameList({
+  ///
+  /// [nicknameList]と[firstSlotStartMs]を返します．
+  /// [nicknameList] : ニックネーム（公開鍵）のリスト
+  /// [firstSlotStart] : ニックネームの開始時刻（ミリ秒）を返す
+  Future<(List<Uint8List>, DateTime)> generateFutureNicknameList({
+    required DateTime firstSlotStartIn,
     required Duration period,
-    Duration slot = const Duration(minutes: 10),
   }) async {
     // 1. マスターキーを確保（なければ生成）
     final masterKey = await _ensureMasterKey();
@@ -273,50 +279,41 @@ class KeyManagementService {
     }
 
     // 2. 現在時刻とスロット長（ミリ秒）を計算
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final slotMs = slot.inMilliseconds;
-    if (slotMs <= 0) {
-      throw ArgumentError('slot duration must be > 0');
-    }
+    final nowMs = firstSlotStartIn.millisecondsSinceEpoch;
 
     // 3. 「いま属しているスロットの開始時刻」に丸める
-    final currentSlotStartMs = (nowMs ~/ slotMs) * slotMs;
+    final firstSlotStartMs = (nowMs ~/ slotMs) * slotMs;
+    final firstSlotStart = DateTime.fromMillisecondsSinceEpoch(firstSlotStartMs);
 
     // 4. 何スロット分生成するかを計算（切り上げ）
     final totalMs = period.inMilliseconds;
-    final slotCount = (totalMs / slotMs).ceil();
+    final slotCount = (totalMs / _slotMs).ceil();
     if (slotCount <= 0) {
-      return const [];
+      return (<Uint8List>[], firstSlotStart);
     }
 
-    final List<SlotNickname> result = [];
+    final List<Uint8List> nicknameList = [];
 
     // 5. 各スロットごとに公開鍵を生成
+    var slotStartMs = firstSlotStartMs;
     for (var i = 0; i < slotCount; i++) {
-      final slotStartMs = currentSlotStartMs + i * slotMs;
-
       // 既存のネイティブ関数で「マスターキー＋スロット時刻」から鍵ペアを導出
       final keyPair = _nativeKeyService.deriveNewKeyPair(
         masterKey,
         slotStartMs,
         slotMs,
       );
+      slotStartMs += slotMs;
 
       // 何らかの理由で生成に失敗したらスキップ
       if (keyPair == null) {
         continue;
       }
 
-      result.add(
-        SlotNickname(
-          slotStart: DateTime.fromMillisecondsSinceEpoch(slotStartMs),
-          slotDuration: slot,
-          pubkey33: Uint8List.fromList(keyPair.publicKey),
-        ),
-      );
+      nicknameList.add(keyPair.publicKey);
     }
 
-    return result;
+    return (nicknameList, firstSlotStart);
   }
 
   // ----- 鍵取得 -----
@@ -570,24 +567,6 @@ class KeyManagementService {
     }
     return _secureStorage.delete(key: _masterKeyAlias);
   }
-}
-
-/// 1スロット分のニックネーム（圧縮公開鍵）情報
-class SlotNickname {
-  /// このニックネームが有効になるスロットの開始時刻
-  final DateTime slotStart;
-
-  /// 1スロットの長さ（例: 10分）
-  final Duration slotDuration;
-
-  /// 33バイトの圧縮公開鍵（BLEニックネーム本体）
-  final Uint8List pubkey33;
-
-  const SlotNickname({
-    required this.slotStart,
-    required this.slotDuration,
-    required this.pubkey33,
-  });
 }
 
 class _GeneratedRow {

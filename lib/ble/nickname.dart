@@ -21,7 +21,7 @@ library; // 上のドキュメントコメントをファイルに対するコ�
 import 'dart:async';      // Timer
 // import 'dart:js_interop';
 import 'dart:typed_data'; // Uint8List
-import 'dart:math' show min, Random;       // min
+import 'dart:math' show Random;       // min
 // import 'dart:collection';
 import 'package:flutter/foundation.dart'; // kDebugMode
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
@@ -110,6 +110,7 @@ class BleNickname extends ChangeNotifier {
   }
 
   /// クラスが破棄される時にストリーム・コントローラーを閉じる
+  @override
   void dispose() {
     // _localNicknameStreamController.close();
     _timer?.cancel();
@@ -211,7 +212,7 @@ class BleNickname extends ChangeNotifier {
     final hexString = hex.encode(bytes.sublist(0, len));
     final joined = RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
     if (len < bytes.length) {
-      return joined + '...';
+      return '$joined...';
     } else {
       return joined;
     }

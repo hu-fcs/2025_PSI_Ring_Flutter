@@ -12,6 +12,7 @@
 
 import 'dart:core' as $core;
 
+import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
@@ -432,6 +433,222 @@ class RingSignatureResp extends $pb.GeneratedMessage {
   $core.bool hasSignatureForClient() => $_has(0);
   @$pb.TagNumber(1)
   void clearSignatureForClient() => $_clearField(1);
+}
+
+class NicknameScheduleReqResp extends $pb.GeneratedMessage {
+  factory NicknameScheduleReqResp({
+    $core.String? ownerName,
+    $fixnum.Int64? periodDays,
+    $fixnum.Int64? slotMs,
+    $fixnum.Int64? firstSlotMs,
+    $core.Iterable<$core.List<$core.int>>? nicknameList,
+    $fixnum.Int64? ackLength,
+  }) {
+    final result = create();
+    if (ownerName != null) result.ownerName = ownerName;
+    if (periodDays != null) result.periodDays = periodDays;
+    if (slotMs != null) result.slotMs = slotMs;
+    if (firstSlotMs != null) result.firstSlotMs = firstSlotMs;
+    if (nicknameList != null) result.nicknameList.addAll(nicknameList);
+    if (ackLength != null) result.ackLength = ackLength;
+    return result;
+  }
+
+  NicknameScheduleReqResp._();
+
+  factory NicknameScheduleReqResp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory NicknameScheduleReqResp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NicknameScheduleReqResp',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'ownerName')
+    ..aInt64(2, _omitFieldNames ? '' : 'periodDays')
+    ..aInt64(3, _omitFieldNames ? '' : 'slotMs')
+    ..aInt64(4, _omitFieldNames ? '' : 'firstSlotMs')
+    ..p<$core.List<$core.int>>(
+        5, _omitFieldNames ? '' : 'nicknameList', $pb.PbFieldType.PY)
+    ..aInt64(6, _omitFieldNames ? '' : 'ackLength')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleReqResp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleReqResp copyWith(
+          void Function(NicknameScheduleReqResp) updates) =>
+      super.copyWith((message) => updates(message as NicknameScheduleReqResp))
+          as NicknameScheduleReqResp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleReqResp create() => NicknameScheduleReqResp._();
+  @$core.override
+  NicknameScheduleReqResp createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleReqResp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NicknameScheduleReqResp>(create);
+  static NicknameScheduleReqResp? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get ownerName => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set ownerName($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasOwnerName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearOwnerName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get periodDays => $_getI64(1);
+  @$pb.TagNumber(2)
+  set periodDays($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPeriodDays() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPeriodDays() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get slotMs => $_getI64(2);
+  @$pb.TagNumber(3)
+  set slotMs($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSlotMs() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSlotMs() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get firstSlotMs => $_getI64(3);
+  @$pb.TagNumber(4)
+  set firstSlotMs($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasFirstSlotMs() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearFirstSlotMs() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $pb.PbList<$core.List<$core.int>> get nicknameList => $_getList(4);
+
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get ackLength => $_getI64(5);
+  @$pb.TagNumber(6)
+  set ackLength($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasAckLength() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearAckLength() => $_clearField(6);
+}
+
+class NicknameScheduleAckReq extends $pb.GeneratedMessage {
+  factory NicknameScheduleAckReq({
+    $core.String? ownerName,
+    $fixnum.Int64? ackLength,
+  }) {
+    final result = create();
+    if (ownerName != null) result.ownerName = ownerName;
+    if (ackLength != null) result.ackLength = ackLength;
+    return result;
+  }
+
+  NicknameScheduleAckReq._();
+
+  factory NicknameScheduleAckReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory NicknameScheduleAckReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NicknameScheduleAckReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'ownerName')
+    ..aInt64(6, _omitFieldNames ? '' : 'ackLength')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleAckReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleAckReq copyWith(
+          void Function(NicknameScheduleAckReq) updates) =>
+      super.copyWith((message) => updates(message as NicknameScheduleAckReq))
+          as NicknameScheduleAckReq;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleAckReq create() => NicknameScheduleAckReq._();
+  @$core.override
+  NicknameScheduleAckReq createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleAckReq getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NicknameScheduleAckReq>(create);
+  static NicknameScheduleAckReq? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get ownerName => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set ownerName($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasOwnerName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearOwnerName() => $_clearField(1);
+
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get ackLength => $_getI64(1);
+  @$pb.TagNumber(6)
+  set ackLength($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(6)
+  $core.bool hasAckLength() => $_has(1);
+  @$pb.TagNumber(6)
+  void clearAckLength() => $_clearField(6);
+}
+
+class NicknameScheduleAckResp extends $pb.GeneratedMessage {
+  factory NicknameScheduleAckResp() => create();
+
+  NicknameScheduleAckResp._();
+
+  factory NicknameScheduleAckResp.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory NicknameScheduleAckResp.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NicknameScheduleAckResp',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleAckResp clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NicknameScheduleAckResp copyWith(
+          void Function(NicknameScheduleAckResp) updates) =>
+      super.copyWith((message) => updates(message as NicknameScheduleAckResp))
+          as NicknameScheduleAckResp;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleAckResp create() => NicknameScheduleAckResp._();
+  @$core.override
+  NicknameScheduleAckResp createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static NicknameScheduleAckResp getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NicknameScheduleAckResp>(create);
+  static NicknameScheduleAckResp? _defaultInstance;
 }
 
 const $core.bool _omitFieldNames =

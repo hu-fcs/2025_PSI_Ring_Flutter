@@ -30,7 +30,7 @@ flutter run
 `.proto` を変更した場合のみ、以下で再生成してください。
 
 ```agsl
-protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/psi.proto
+protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/grpc.proto
 ```
 
 ## OpenSSL のダミー鍵生成

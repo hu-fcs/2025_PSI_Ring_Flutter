@@ -288,24 +288,16 @@ class _ExchangePageState extends State<ExchangePage> {
     final period = _selectedPeriod.duration;
 
     try {
-      // 1) 期間分の将来ニックネームを生成
-      final schedule = await KeyManagementService().generateFutureNicknameList(
+      // 1) gRPC 送信（nickname_schedule JSON）
+      await _grpcClient.connect(host,port); // 既存実装に合わせて
+      await _grpcClient.exchangeNicknameSchedule(
+        ownerName: owner,
         period: period,
         slot: slot,
       );
 
-      // 2) gRPC 送信（nickname_schedule JSON）
-      await _grpcClient.connect(host,port); // 既存実装に合わせて
-      /* todo: nicknamelist mergeの途中
-      await _grpcClient.sendNicknameSchedule(
-        ownerName: owner,
-        period: period,
-        slot: slot,
-        schedule: schedule,
-      ); */
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${schedule.length}件）')),
+        SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -804,35 +796,33 @@ class _ExchangePageState extends State<ExchangePage> {
         color: Theme.of(context).colorScheme.surfaceVariant,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _nearbyLastSeenMs.isEmpty
-                  ? '近くの友達: なし'
-                  : '近くの友達: ${_nearbyLastSeenMs.length}人',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            if (_nearbyLastSeenMs.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              ..._nearbyLastSeenMs.keys.map((name) {
-                final ok = _nearbyAuth[name] ?? false;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      Icon(ok ? Icons.verified : Icons.person, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(name)),
-                      Text(ok ? 'OK' : '未認証', style: const TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                );
-              }),
-            ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _nearbyLastSeenMs.isEmpty
+                ? '近くの友達: なし'
+                : '近くの友達: ${_nearbyLastSeenMs.length}人',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          if (_nearbyLastSeenMs.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ..._nearbyLastSeenMs.keys.map((name) {
+              final ok = _nearbyAuth[name] ?? false;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Icon(ok ? Icons.verified : Icons.person, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(name)),
+                    Text(ok ? 'OK' : '未認証', style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              );
+            }),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -875,63 +865,58 @@ class _ExchangePageState extends State<ExchangePage> {
         color: Theme.of(context).colorScheme.surfaceVariant,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('将来ニックネームの共有（送信側）',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('将来ニックネームの共有（送信側）',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
 
-            TextField(
-              controller: _ownerNameController,
-              decoration: const InputDecoration(labelText: '相手に表示される自分の名前'),
-            ),
-            const SizedBox(height: 8),
+          TextField(
+            controller: _ownerNameController,
+            decoration: const InputDecoration(labelText: '相手に表示される自分の名前'),
+          ),
+          const SizedBox(height: 8),
 
-            TextField(
-              controller: _hostController,
-              decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
-            ),
-            const SizedBox(height: 8),
+          TextField(
+            controller: _hostController,
+            decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
+          ),
+          const SizedBox(height: 8),
 
-            TextField(
-              controller: _portController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'ポート'),
-            ),
-            const SizedBox(height: 12),
-
-            InputDecorator(
-              decoration: const InputDecoration(
-                labelText: '共有期間',
-                helper: Text(
-                  'この期間分の将来ニックネームを生成し、相手端末へ共有します。',
-                  softWrap: true,
-                ),
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          TextField(
+            controller: _portController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'ポート'),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: '共有期間',
+              helper: Text(
+                'この期間分の将来ニックネームを生成し、相手端末へ共有します。',
+                softWrap: true,
               ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<NicknameSchedulePeriod>(
-                  value: _selectedPeriod,
-                  isExpanded: true,
-                  items: NicknameSchedulePeriod.values
-                      .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
-                      .toList(),
-                  onChanged: (p) => setState(() => _selectedPeriod = p!),
-                ),
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<NicknameSchedulePeriod>(
+                value: _selectedPeriod,
+                isExpanded: true,
+                items: NicknameSchedulePeriod.values
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
+                    .toList(),
+                onChanged: (p) => setState(() => _selectedPeriod = p!),
               ),
             ),
-            const SizedBox(height: 12),
-
-
-            ElevatedButton(
-              onPressed: _generateAndShare,
-              child: const Text('生成して共有'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _generateAndShare,
+            child: const Text('生成して共有'),
+          ),
+        ],
       ),
     );
   }

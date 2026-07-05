@@ -604,7 +604,7 @@ class _DebugPageState extends State<DebugPage>
           selected: {current},
           onSelectionChanged: (selection) {
             setState(() {
-              _keyManager.slotMs = selection.first;
+              _keyManager.slotMs;
             });
           },
         ),

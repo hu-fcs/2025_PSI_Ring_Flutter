@@ -6,10 +6,12 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
+import 'package:fixnum/fixnum.dart' as $fixnum show Int64;
 
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management.dart';
+import '../db/friends_dao.dart';
 import 'grpc_common.dart';
 
 /// gRPC クライアント（PSI + リング署名）。
@@ -22,6 +24,7 @@ class GrpcClient {
   final GrpcCommon _grpcCommon = GrpcCommon();
 
   late final Future<void> _ready;
+
   bool get isConnected => _stub != null;
 
   GrpcClient() {
@@ -30,7 +33,7 @@ class GrpcClient {
 
   Future<void> _initialize() async {
     if (kDebugMode) {
-      debugPrint('[CLIENT] init');
+      debugPrint('[GPRC CLIENT] init');
     }
   }
 
@@ -42,7 +45,7 @@ class GrpcClient {
     await _ensureReady();
 
     if (kDebugMode) {
-      debugPrint('[CLIENT] connect: $host:$port');
+      debugPrint('[GRPC CLIENT] connect: $host:$port');
     }
 
     try {
@@ -59,11 +62,11 @@ class GrpcClient {
       _stub = GrpcServiceClient(_channel!);
 
       if (kDebugMode) {
-        debugPrint('[CLIENT] connected');
+        debugPrint('[GRPC CLIENT] connected');
       }
     } catch (e, st) {
       if (kDebugMode) {
-        debugPrint('[CLIENT] connect failed: $e');
+        debugPrint('[GRPC CLIENT] connect failed: $e');
         debugPrint('$st');
       }
       rethrow;
@@ -83,12 +86,14 @@ class GrpcClient {
   Future<PsiResult> executePsi() async {
     await _ensureReady();
     final stub = _stub;
-    if (stub == null) throw StateError('[CLIENT] not connected');
+    if (stub == null) throw StateError('[GRPC CLIENT] not connected');
 
-    final totalSw = Stopwatch()..start();
+    final totalSw = Stopwatch()
+      ..start();
 
     // 1) 鍵読み込み（生成鍵 + 収集鍵）
-    final dbSw = Stopwatch()..start();
+    final dbSw = Stopwatch()
+      ..start();
     final generated = await _kms.getAllGeneratedPublicKeys();
     final collected = await _kms.getAllCollectedPublicKeys();
     dbSw.stop();
@@ -115,7 +120,8 @@ class GrpcClient {
     }
 
     // 2) PSI
-    final psiSw = Stopwatch()..start();
+    final psiSw = Stopwatch()
+      ..start();
 
     // bQ 計算
     final mySecret = _keyService.generateRandomSecret();
@@ -123,7 +129,8 @@ class GrpcClient {
 
     // サーバと暗号化集合を交換
     final resp = await stub.exchangeKeys(
-      KeyExchangeReq()..encKeys.addAll(myEncKeys),
+      KeyExchangeReq()
+        ..encKeys.addAll(myEncKeys),
     );
 
     final serverEncKeys =
@@ -140,7 +147,8 @@ class GrpcClient {
     final clientCommon = _keyService.intersect(myKeys, abQ, abP);
 
     await stub.finalizePsi(
-      ClientFinalReq()..clientReencServerKeys.addAll(abP),
+      ClientFinalReq()
+        ..clientReencServerKeys.addAll(abP),
     );
 
     psiSw.stop();
@@ -149,7 +157,10 @@ class GrpcClient {
     // 3) PSI による顔見知り判定（共通集合に自端末の生成鍵が含まれるか）
     final commonHex = clientCommon.map(GrpcCommon.bytesToHex).toList();
     final myGenHex = generated.map(GrpcCommon.bytesToHex).toSet();
-    final familiarByPsi = commonHex.toSet().intersection(myGenHex).isNotEmpty;
+    final familiarByPsi = commonHex
+        .toSet()
+        .intersection(myGenHex)
+        .isNotEmpty;
 
     // 4) リング署名（必要時のみ）
     bool ringOk = false;
@@ -191,7 +202,8 @@ class GrpcClient {
     required GrpcServiceClient stub,
     required List<Uint8List> intersection,
   }) async {
-    final buildSw = Stopwatch()..start();
+    final buildSw = Stopwatch()
+      ..start();
 
     final signerKey = await _kms.selectSignerKeyFromIntersection(intersection);
     if (signerKey == null) {
@@ -207,7 +219,8 @@ class GrpcClient {
 
     final challengeC = _keyService.generateRandomSecret();
     final challengeFuture = stub.exchangeChallenges(
-      ClientChallenge()..challengeC = challengeC,
+      ClientChallenge()
+        ..challengeC = challengeC,
     );
 
     // 同一時刻スロット内の鍵に限定してリングを構成する
@@ -224,7 +237,8 @@ class GrpcClient {
     buildSw.stop();
     final ringSelectTimeMs = buildSw.elapsedMilliseconds;
 
-    final sigSw = Stopwatch()..start();
+    final sigSw = Stopwatch()
+      ..start();
 
     final resp = await challengeFuture;
     final challengeS = Uint8List.fromList(resp.challengeS);
@@ -245,7 +259,8 @@ class GrpcClient {
     }
 
     final sigResp = await stub.exchangeRingSignatures(
-      RingSignatureReq()..signatureForServer = sigForServer,
+      RingSignatureReq()
+        ..signatureForServer = sigForServer,
     );
 
     final sigFromServer = Uint8List.fromList(sigResp.signatureForClient);
@@ -259,11 +274,9 @@ class GrpcClient {
 
   // ----- Signature -----
 
-  Uint8List? _createRingSignature(
-      String msgHex,
+  Uint8List? _createRingSignature(String msgHex,
       Uint8List privKey,
-      List<Uint8List> ring,
-      ) {
+      List<Uint8List> ring,) {
     final msgPtr = msgHex.toNativeUtf8().cast<Char>();
     final privPtr = calloc<Uint8>(privKey.length)
       ..asTypedList(privKey.length).setAll(0, privKey);
@@ -305,11 +318,9 @@ class GrpcClient {
     return result;
   }
 
-  bool _verifyRingSignature(
-      String msgHex,
+  bool _verifyRingSignature(String msgHex,
       Uint8List sig,
-      List<Uint8List> ring,
-      ) {
+      List<Uint8List> ring,) {
     final msgPtr = msgHex.toNativeUtf8().cast<Char>();
 
     const pubLen = 33;
@@ -338,5 +349,78 @@ class GrpcClient {
     calloc.free(ringPtr);
 
     return rc == 1;
+  }
+
+  Future<void> exchangeNicknameSchedule({
+    required String ownerName,
+    required Duration period,
+    required Duration slot,
+  }) async {
+    final stub = _stub;
+    if (stub == null) throw StateError('[GRPC CLIENT] exchangeNicknameSchedule not connected');
+
+    // 1. 期間分の将来ニックネームを生成
+    final (nicknameList, firstSlotStart) = await KeyManagementService().generateFutureNicknameList(
+      firstSlotStartIn: DateTime.now(),
+      period: period,
+    );
+
+    // 2. 将来ニックネームをサーバに送信．サーバ（相手）の将来ニックネームを受信
+    if (kDebugMode) {
+      debugPrint('[GRPC CLIENT] exchangeNicknameSchedule: client_name $ownerName, ${nicknameList.length} slots, period.inDays=${period.inDays} slot.inMS=${slot.inMilliseconds}');
+    }
+    final response = await stub.exchangeNicknameSchedule(
+        NicknameScheduleReqResp()
+          ..ownerName = ownerName
+          ..periodDays = $fixnum.Int64(period.inDays)
+          ..slotMs = $fixnum.Int64(slot.inMilliseconds)
+          ..firstSlotMs = $fixnum.Int64(firstSlotStart.millisecondsSinceEpoch)
+          ..nicknameList.addAll(nicknameList)
+    );
+    // 私（GRPCクライアント）に表示させたい相手（GRPCサーバ）の名前（ニックネーム）
+    final remoteOwnerName = response.ownerName;
+    // サーバに届いたニックネーム数の確認
+    final ackLength = response.ackLength.toInt();
+    if (kDebugMode) {
+      debugPrint('[GRPC CLIENT] exchangeNicknameSchedule: ACK server_name $remoteOwnerName, length $ackLength slots');
+    }
+
+    // 何日先までのニックネームか（日単位）
+    final remotePeriodDays = response.periodDays; // Int64
+    final remotePeriodDuration = Duration(days: remotePeriodDays.toInt());
+    // 一つのニックネームの有効時間（ミリ秒単位）
+    final remoteSlotMs = response.slotMs;         // Int64
+    final remoteSlot = Duration(milliseconds: remoteSlotMs.toInt());
+    // 最初のニックネームの開始時刻（ミリ秒単位）
+    final remoteFirstSlotMs = response.firstSlotMs;   // Int64
+    var remoteFirstSlot = DateTime.fromMillisecondsSinceEpoch(remoteFirstSlotMs.toInt());
+    // 将来ニックネームのリスト．KeyManagementService.generateFutureNicknameList() の結果
+    final remoteNicknameList = response.nicknameList
+        .map((bytes) => Uint8List.fromList(bytes))
+        .toList(); // PbList<List<int>> を List<Uint8List> に
+
+    // 3. サーバ（相手）の名前を friends テーブルに登録
+    final friendsDao = FriendsDao.instance;
+    final remoteFriendId = await friendsDao.insertFriend(label: remoteOwnerName, note: null);
+
+    // 4. friend_nicknames テーブルにまとめて保存
+    await friendsDao.insertFriendNicknames(
+      friendId: remoteFriendId,
+      firstSlot: remoteFirstSlot,
+      slot: remoteSlot,
+      nicknameList: remoteNicknameList,
+    );
+
+    // 5. 返送された名前とニックネームに対する ACK
+    if (kDebugMode) {
+      debugPrint('[GRPC CLIENT] exchangeNicknameSchedule: ACK back to server_name $remoteOwnerName, '
+          '${remoteNicknameList.length} slots, period.inDays=${remotePeriodDuration.inDays} slot.inMS=${remoteSlot.inMilliseconds}');
+    }
+    // final response2 =
+    await stub.exchangeNicknameScheduleAck(
+        NicknameScheduleAckReq()
+          ..ownerName = ownerName
+          ..ackLength = $fixnum.Int64(remoteNicknameList.length)
+    );
   }
 }
