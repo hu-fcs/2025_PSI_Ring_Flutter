@@ -3,8 +3,9 @@ import 'dart:io'; // Platform
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-import 'package:fluttersample_2025/ble/mutual_authentication.dart';
 import 'nickname.dart';
+import 'mutual_authentication.dart';
+import '../db/friends_dao.dart';
 
 /// BLEのCentral機能．
 /// このアプリのサービスをスキャンし，
@@ -160,15 +161,6 @@ class BleCentralManager extends ChangeNotifier {
     GATTCharacteristic? nicknameCharacteristic;
     GATTCharacteristic? authenticationCharacteristic;
     try {
-      // MTUの確認（Androidでは20バイトを33バイトに増やす．iOSでは自動的に増やすらしいので不要）
-      final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      if (Platform.isAndroid && len1 < 33) {
-        final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
-        if (kDebugMode) print('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
-      } else {
-        if (kDebugMode) print('MTU write: $len1 (Peripheral ${peripheral.uuid})');
-      }
-
       // 特性（Characteristic）を探す
       final services = await CentralManager().discoverGATT(peripheral);
       for (var service in services) {
@@ -191,15 +183,24 @@ class BleCentralManager extends ChangeNotifier {
         return; // finallyは実行される
       }
 
+      // MTUの確認（Androidでは20バイトを33バイトに増やす．iOSでは自動的に増やすらしいので不要）
+      final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
+      if (Platform.isAndroid && len1 < 33) {
+        final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
+        if (kDebugMode) print('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
+      } else {
+        if (kDebugMode) print('MTU write: $len1 (Peripheral ${peripheral.uuid})');
+      }
+
       // Peripheraのニックネームを読み込み
       final now = DateTime.now();
       final remoteNickname = await CentralManager().readCharacteristic(
           peripheral, nicknameCharacteristic);
       if (kDebugMode) print('_onDeviceConnected read. length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${peripheral.uuid}, $now');
       BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
-      // CentralのニックネームをPeripheralに書き込み
-      int len = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      if (kDebugMode) print('getMaximumWriteLength $len');
+
+      // int len = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
+      // if (kDebugMode) print('getMaximumWriteLength $len');
 
       // CentralのニックネームをPeripheralに書き込み
       final Uint8List localNickname = BleNickname().localNickname;
@@ -210,8 +211,18 @@ class BleCentralManager extends ChangeNotifier {
       );
       if (kDebugMode) print('_onDeviceConnected write. Length: ${localNickname.length}), nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${peripheral.uuid}');
 
-      // ToDo: 将来ニックネームリストにremoteNicknameが含まれているときだけ認証に進む（山口 賢紘, 2026年2月，卒業論文）
-      if (true) { // 相互認証
+      // 将来ニックネームリストにremoteNicknameが含まれているときは認証に進む（山口 賢紘, 2026年2月，卒業論文）
+      // まずは，将来ニックネームリストにremoteNicknameが含まれているか探す
+      final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
+      debugPrint('debug $labels'); //
+      // ToDo: 複数のlabel（名前）が見つかるのは不自然では？同じニックネームを複数人が使っているということになる？
+      if (labels.isNotEmpty) { // 相互認証
+        // 候補として通知（authenticated=false）
+        for (final friendLabel in labels) {
+          // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
+          BleNickname().onFriendDetected?.call(friendLabel, false);
+        }
+       // 相互認証
         final centralPriKey = Uint8List(32); // ToDo: centralのlocalNicknameに対応する秘密鍵を取得する
         final success = await BleMutualAuthentication().startAuthentication(peripheral, authenticationCharacteristic, centralPriKey: centralPriKey, peripheralPubKey: remoteNickname);
       }

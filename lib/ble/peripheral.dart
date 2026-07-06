@@ -118,6 +118,9 @@ class BlePeripheral extends ChangeNotifier {
       final Uint8List remoteNickname = event.request.value;
       if (kDebugMode) print("_onWriteRequest length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${event.central.uuid}");
       BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
+
+      // 将来ニックネームリストにremoteNicknameが含まれているときには認証に進む（山口 賢紘, 2026年2月，卒業論文）
+      // Central側から認証に進むはずなので，Peripheral側からは認証を始めないでいいだろう．
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       BleMutualAuthentication().onWriteRequest(event);
     }

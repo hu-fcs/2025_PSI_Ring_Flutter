@@ -206,6 +206,9 @@ class BleNickname extends ChangeNotifier {
     }
   }
 
+  /// 友達ニックネームにマッチした & 認証結果を UI に通知するためのコールバック
+  void Function(String friendLabel, bool authenticated)? onFriendDetected;
+
   /// 33バイトのニックネームを16進表現の文字列にして，4バイトごとに_アンダースコアで区切る．クラスメソッド．主にデバッグ用
   static String nickname2string(Uint8List bytes, {int len = 0}) {
     if (len == 0) len = bytes.length;

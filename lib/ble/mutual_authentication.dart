@@ -2,12 +2,15 @@
 library; // 上のドキュメントコメントをファイルに対するコメントにするためにlibraryと書いている．
 
 import 'dart:async'; // Timer
+import 'dart:ffi';
 import 'dart:typed_data';                 // Uint8List
 import 'dart:collection';                 // LinkedHashMap
+import 'dart:math' show Random;
 import 'package:flutter/foundation.dart'; // kDebugMode
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
 import 'nickname.dart';
 import '../key_management.dart';
+import '../ffi/native_key_service.dart';
 
 /// BLEでニックネームを公開鍵として相互認証するBLEサービス
 /// 特性がread, writeされたときに署名生成・検証を行う
@@ -69,16 +72,20 @@ class BleMutualAuthentication {
     // super.dispose();
   }
 
-  static final challengeBytes = 16;
+  static final challengeLen = 32;
   static final responseBytes = 64;
+  final _rand = Random.secure();
+  final _native = NativeKeyService();
 
   /// Centralが認証シーケンスを処理する
   /// centralPubkey, peripheralPubkey はニックネームであり，公開鍵
+  /// ToDo: 双方向認証を反対側から開始すると二重になるので避ける
   Future<bool> startAuthentication(Peripheral peripheral,
       GATTCharacteristic authenticationCharacteristic, // discoverGATT(peripheral) で得たもの．static finalと同じ型だが中身が違う
       { required Uint8List centralPriKey,  // centralのニックネームに対応する秘密鍵
         required Uint8List peripheralPubKey, // peripheralのニックネームのこと
       }) async {
+    assert(centralPriKey.length == 32 && peripheralPubKey.length == 33);
     // final mtu = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);  -> 512だった．
     try {
       // C -> P: 1. Peripheralの認証のためにCentralが課題（チャレンジ）を書き込み（write 16バイト or 32バイト）
@@ -125,9 +132,9 @@ class BleMutualAuthentication {
     final central = event.central;
     assert(event.request.offset == 0);
     final Uint8List value = event.request.value;
-    final state = value[0];
+    final state = value.first;
     final payload = value.sublist(1);
-    if (state == _State.first.value && payload.length == challengeBytes) { // C -> P: 1
+    if (state == _State.first.value && payload.length == challengeLen) { // C -> P: 1
       final challenge1 = payload;
       await _onFirstPeripheral(event, challenge1);
       return;
@@ -137,9 +144,8 @@ class BleMutualAuthentication {
       if (authPeripheral != null && authPeripheral.state == _State.second
           && state == _State.third.value && payload.length == responseBytes) { // C -> P: 3
         final response2 = payload;
-        await _onThirdPeripheral(event, authPeripheral, response2);
-        return;
-
+        final success2 = await _onThirdPeripheral(event, authPeripheral, response2);
+        // ToDo: 認証成功・失敗（verificationResult）を伝える．どこにどうやって？
       }
     }
 
@@ -179,7 +185,8 @@ class BleMutualAuthentication {
   /// C -> P: 1.
   Future<Uint8List> _firstCentral(
       Peripheral peripheral, GATTCharacteristic authenticationCharacteristic) async {
-    final challenge1 = Uint8List(challengeBytes); // ToDo: チャレンジの生成
+    final challenge1 = Uint8List.fromList(
+        List.generate(challengeLen, (_) => _rand.nextInt(256)));
     final payload = Uint8List.fromList([_State.first.value, ...challenge1]);
     await CentralManager().writeCharacteristic(peripheral, authenticationCharacteristic,
         value: payload, type: GATTCharacteristicWriteType.withResponse);
@@ -207,9 +214,9 @@ class BleMutualAuthentication {
       Uint8List challenge1,
       Uint8List peripheralPubkey) async {
     final value = await CentralManager().readCharacteristic(peripheral, authenticationCharacteristic);
-    if (value.length != 1 + responseBytes + challengeBytes) {
+    if (value.length != 1 + responseBytes + challengeLen) {
       // Peripheralからのデータ長が不正
-      throw FormatException('ペリフェラルから受信したデータ長が${1 + responseBytes + challengeBytes}ではありません', value);
+      throw FormatException('ペリフェラルから受信したデータ長が${1 + responseBytes + challengeLen}ではありません', value);
     }
     final state = value[0];
     if (state != _State.second.value) {
@@ -217,8 +224,9 @@ class BleMutualAuthentication {
     }
     final response1 = value.sublist(1, 1 + responseBytes);
     final challenge2 = value.sublist(1 + responseBytes);
-    // ToDo: challenge1とperipheralPubkeyを使って，response1の検証
-    final verificationResult = true; // 仮に検証成功
+
+    // ToDo: challenge1とperipheralPubkeyを使って，response1の検証結果をverificationResultに
+    final verificationResult = _native.verifyChallenge(peripheralPubkey, challenge1, response1);
     return (verificationResult, challenge2);
   }
 
@@ -232,18 +240,15 @@ class BleMutualAuthentication {
     if (keyPair == null) {
       return; // ToDo: エラー処理
     }
-    // final publicKey = Uint8List.fromList(keyPair.publicKey);
-    // final privateKey = Uint8List.fromList(keyPair.privateKey);
-    BleNickname().localNickname;
     assert(listEquals(keyPair.publicKey, BleNickname().localNickname));
-    // final response1 = signChallenge(privateKey, challenge1);
 
-    var response1 = Uint8List(responseBytes); // ToDo: response1 を計算する
-    response1.first = 0x10; // ダミー
-    response1.last = 0x11; // ダミー
-    var challenge2 = Uint8List(challengeBytes); // ToDo: challenge2 を計算する
-    challenge2.first = 0x20; // ダミー
-    challenge2.last = 0x21; // ダミー
+    final response1 = _native.signChallenge(keyPair.privateKey, challenge1);
+    if (response1 == null) {
+      return; // ToDo: エラー処理
+    }
+
+    final challenge2 = Uint8List.fromList(
+        List.generate(challengeLen, (_) => _rand.nextInt(256)));
     if (kDebugMode) {
       print('BleMutualAuthentication _onSecondPeripheral: '
           'response1: (${response1.length}) ${BleNickname.nickname2string(response1)}, '
@@ -272,9 +277,12 @@ class BleMutualAuthentication {
       Uint8List centralPriKey,
       Uint8List challenge2) async {
     // ToDo: centralPriKeyとchallenge2を使って，response2を計算してperipheralに送る
-    final response2 = Uint8List(responseBytes);
-    final payload = Uint8List.fromList([_State.third.value, ...response2]);
+    final response2 = _native.signChallenge(centralPriKey, challenge2);
+    if (response2 == null) {
+      return Uint8List(0); // ToDo: エラー処理
+    }
 
+    final payload = Uint8List.fromList([_State.third.value, ...response2]);
     await CentralManager().writeCharacteristic(peripheral, authenticationCharacteristic,
         value: payload, type: GATTCharacteristicWriteType.withResponse);
     return response2;
@@ -282,12 +290,15 @@ class BleMutualAuthentication {
 
   /// ペリフェラル側．
   /// C -> P: 4.
-  Future<void> _onThirdPeripheral(
+  Future<bool> _onThirdPeripheral(
       GATTCharacteristicWriteRequestedEventArgs event,
       _PeripheralState authPeripheral,
       Uint8List response2) async {
     final challenge2 = authPeripheral.challenge2;
-    // ToDo: challenge2とcentralのニックネームを使って，response2を検証する
+    // ToDo: centralPubkey を持ってくる．
+    final centralPubkey = Uint8List(32); // ダミー
+    final verificationResult2 = _native.verifyChallenge(centralPubkey, challenge2, response2);
+
     if (kDebugMode) {
       print('BleMutualAuthentication _onThirdPeripheral: '
           'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
@@ -296,6 +307,7 @@ class BleMutualAuthentication {
     // 認証が終わったので後片付け．
     _PeripheralState.peripherals.remove(event.central.uuid);
     await PeripheralManager().respondWriteRequest(event.request);
+    return verificationResult2;
   }
 }
 

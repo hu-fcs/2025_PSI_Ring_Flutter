@@ -163,6 +163,7 @@ class FriendsDao {
 
     return rows.map((e) => e['label'] as String).toList(growable: false);
   }
+
   /// Debug用：friends 一覧 + friend_nicknames の総数
   Future<List<Map<String, Object?>>> listFriendsWithNicknameCounts() async {
     final db = await _db();

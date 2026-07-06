@@ -80,7 +80,7 @@ class _ExchangePageState extends State<ExchangePage> {
   @override
   void initState() {
     super.initState();
-    // _ble.onFriendDetected = _onFriendDetected; // todo: nicknamelist mergeの途中
+    _ble.onFriendDetected = _onFriendDetected;
 
     _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       final now = DateTime.now().millisecondsSinceEpoch;
