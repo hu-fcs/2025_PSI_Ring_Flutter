@@ -136,11 +136,15 @@ class BleNickname extends ChangeNotifier {
   /// ニックネームの前回のスロット
   int _lastSlotStartTime = 0;
   /// ニックネームの前回のニックネーム
-  Uint8List _lastNickname = Uint8List(33);
+  Uint8List _lastLocalNickname = Uint8List(33);
   /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
-  Uint8List get localNickname => _lastNickname;
-  ///
-  final _random = Random();
+  Uint8List get localNickname => _lastLocalNickname;
+  /// ニックネームの前回のニックネーム
+  Uint8List _lastLocalPrivateKey = Uint8List(33); // ToDo: KeyPairを保持したほうがいよさそう
+  /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
+  Uint8List get lastLocalPrivateKey => _lastLocalPrivateKey;
+
+  final _insecureRandom = Random();
 
   /// ニックネームの更新（タイマーで呼び出す）
   /// validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
@@ -151,10 +155,10 @@ class BleNickname extends ChangeNotifier {
       _timer?.cancel();
       _timer = Timer.periodic(validDuration, _updateNickname);
     }
-    if (_lastNickname[0] != 0x00) {
+    if (_lastLocalNickname[0] != 0x00) {
       // [0] == 0x00の場合，アプリ実行後の最初のニックネームでは，待ち時間なし．
       // ニックネームの更新
-      final jitter = _random.nextInt(validDuration.inMilliseconds ~/ 2);
+      final jitter = _insecureRandom.nextInt(validDuration.inMilliseconds ~/ 2);
       await Future.delayed(Duration(milliseconds: jitter));
     }
     // 杉浦プロジェクトと同様（3行）
@@ -164,29 +168,34 @@ class BleNickname extends ChangeNotifier {
 
     if (_lastSlotStartTime != slotStartTime) { // 時間が経っていなら更新しない．
       _lastSlotStartTime = slotStartTime;
-      _lastNickname = await _kms.getPublicKeyForBleAdvertise().catchError((e, st) {
+      final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
         if (kDebugMode) {
-          debugPrint('_updateNickname: getPublicKeyForBleAdvertise failed: $e');
+          debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
         }
         throw e;
       });
+      _lastLocalNickname = keyPair.publicKey;
+      _lastLocalPrivateKey = keyPair.privateKey;
+
       if (_advertiser.isAdvertising) {
         await _advertiser.restart();
       }
-      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
+      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastLocalNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
     }
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
     // BleRemoteMap().addRemote(_lastNickname!, DateTime.now(), local: true);
   }
 
   Future<void> _start() async {
-    _lastNickname = await _kms.getPublicKeyForBleAdvertise().catchError((e, st) {
+    final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
       if (kDebugMode) {
-        debugPrint('BleNickname: start failed: $e');
+        debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
       }
       throw e;
     });
-    if (kDebugMode) print('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
+    _lastLocalNickname = keyPair.publicKey;
+    _lastLocalPrivateKey = keyPair.privateKey;
+    if (kDebugMode) print('nickname _start ${nickname2string(_lastLocalNickname)} ${_kms.slotMs}');
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
   }
 

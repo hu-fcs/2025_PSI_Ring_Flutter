@@ -59,8 +59,7 @@ class KeyManagementService {
     return (p == 0x02 || p == 0x03);
   }
 
-  // ----- 位置情報の後付け（generated_keys のみ） -----
-
+  /// generated_keysテーブルに位置情報を後付けする（generated_keys のみ）
   void _attachLocationAsync({required Uint8List pubkey33}) {
     // 位置情報の取得は非同期で行い，鍵生成や UI をブロックしない
     () async {
@@ -149,10 +148,15 @@ class KeyManagementService {
   }
 
   // ----- Advertise（仮名公開鍵の取得） -----
-
-  Future<Uint8List?> _getPublicKeyForAdvertise() async {
+  /// BLEでAdvertiseするKeyPairを返す．KeyPairはニックネームと秘密鍵．
+  /// 生成済みのもの generated_keys テーブルにがあればそれを返す．
+  /// テーブルになければ生成してテーブルに追加してから返す．
+  /// 非同期に，テーブルのエントリに位置情報を追加する．
+  Future<KeyPair> _getKeyPairForAdvertise() async {
     final masterKey = await _ensureMasterKey();
-    if (masterKey == null) return null;
+    if (masterKey == null) {
+      throw StateError('Failed to obtain master key in KeyManagementService.');
+    }
 
     final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -166,25 +170,28 @@ class KeyManagementService {
     // 位置情報が未設定の場合のみ，後付けを試みる
     final existing = await db.query(
       'generated_keys',
-      columns: const ['pubkey_ecd', 'lat', 'lon'],
+      columns: const ['seckey_ecd', 'pubkey_ecd', 'lat', 'lon'],
       where: 'generate_time = ? AND expire_time > ?',
       whereArgs: [slotStartTime, now],
       limit: 1,
     );
 
     if (existing.isNotEmpty) {
+      final pri = Uint8List.fromList(existing.first['seckey_ecd'] as Uint8List);
       final pub = existing.first['pubkey_ecd'] as Uint8List;
       final lat = existing.first['lat'] as int?;
       final lon = existing.first['lon'] as int?;
       if (lat == null || lon == null) {
         _attachLocationAsync(pubkey33: pub);
       }
-      return pub;
+      return KeyPair(pri, pub);;
     }
 
     // スロットに対応する鍵対を導出する
     final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
-    if (keyPair == null) return null;
+    if (keyPair == null) {
+      throw StateError('Failed to obtain new key pair in KeyManagementService.');
+    }
 
     // 位置情報は後付けのため，まず NULL で保存する
     await db.insert('generated_keys', {
@@ -197,22 +204,21 @@ class KeyManagementService {
     });
 
     _attachLocationAsync(pubkey33: keyPair.publicKey);
-    return keyPair.publicKey;
+    return keyPair;
   }
 
-  // ----- BLE 用（圧縮公開鍵の検証つき） -----
-
-  Future<Uint8List> getPublicKeyForBleAdvertise() async {
-    final Uint8List? pubKey33 = await _getPublicKeyForAdvertise();
-    if (pubKey33 == null) {
+  /// BLEでAdvertiseするKeyPairを返す．KeyPairはニックネームと秘密鍵．
+  Future<KeyPair> getKeyPairForBleAdvertise() async {
+    final keyPair = await _getKeyPairForAdvertise();
+    if (keyPair == null) {
       throw StateError('Failed to obtain public key from KeyManagementService.');
     }
-    if (!_isValidCompressedPubkey33(pubKey33)) {
+    if (!_isValidCompressedPubkey33(keyPair.publicKey)) {
       throw StateError(
         'Invalid compressed public key (expected 33 bytes starting with 0x02/0x03).',
       );
     }
-    return pubKey33;
+    return keyPair;
   }
 
   // ----- collected_keys: 存在確認（BleScanner 用） -----
@@ -328,7 +334,7 @@ class KeyManagementService {
 
   // ----- 鍵取得 -----
 
-  Future<KeyPair?> getLatestKeyPair() async {
+  Future<KeyPair> getLatestKeyPair() async {
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
@@ -342,9 +348,8 @@ class KeyManagementService {
       if (sec != null && pub != null) return KeyPair(sec, pub);
     }
 
-    final pub = await _getPublicKeyForAdvertise();
-    if (pub != null) return getLatestKeyPair();
-    return null;
+    final keyPair = await _getKeyPairForAdvertise();
+    return keyPair;
   }
 
   Future<List<Uint8List>> getAllGeneratedPublicKeys() async {

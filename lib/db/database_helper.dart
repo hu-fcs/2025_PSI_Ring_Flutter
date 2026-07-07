@@ -144,46 +144,42 @@ class DatabaseHelper {
   }
 
   // ----- Collected keys -----
-
+  /// 収集鍵（collected_keys）にkey33が含まれているか調べる
+  // Todo: 未使用の関数なので削除する？
   static Future<bool> existsCollectedKey(Uint8List key33) async {
     final db = await getDatabase();
     final count = Sqflite.firstIntValue(
       await db.rawQuery(
-        'SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?',
-        [key33],
-      ),
-    );
+          'SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?',
+        [key33]));
     return (count ?? 0) > 0;
   }
 
   /// 収集鍵が未登録の場合のみ INSERT する。
+  /// 戻り値は未登録ならtrue。
   static Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int tms, // millisecondsSinceEpoch
   }) async {
     final db = await getDatabase();
 
+    // todo: この呼び出しはexistsCollectedKeyと共通．
     final exists = Sqflite.firstIntValue(
       await db.rawQuery(
         'SELECT COUNT(*) FROM collected_keys WHERE pubkey_ecd = ?',
-        [pubkey33],
-      ),
-    );
+        [pubkey33]));
+    if ((exists ?? 0) > 0) return false; // すでに登録されている
 
-    if ((exists ?? 0) > 0) return false;
-
-    await db.insert(
-      'collected_keys',
-      {
-        'pubkey_ecd': pubkey33,
-        'receive_time': tms,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-
+    // 未登録なので追加
+    await db.insert('collected_keys',
+      {'pubkey_ecd': pubkey33,
+        'receive_time': tms},
+      conflictAlgorithm: ConflictAlgorithm.ignore);
     return true;
   }
 
+  /// 収集鍵に複数の鍵をまとめて登録する。
+  /// デバッグ画面の収集した鍵で、複数ダミー追加で使用。
   static Future<void> insertCollectedKeysBatch({
     required List<Uint8List> publicKeys,
   }) async {
@@ -192,16 +188,11 @@ class DatabaseHelper {
     final now = DateTime.now().millisecondsSinceEpoch;
 
     for (final pubkey in publicKeys) {
-      batch.insert(
-        'collected_keys',
-        {
-          'pubkey_ecd': pubkey,
-          'receive_time': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      batch.insert('collected_keys',
+        {'pubkey_ecd': pubkey,
+          'receive_time': now},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
     }
-
     await batch.commit(noResult: true);
   }
 

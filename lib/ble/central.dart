@@ -17,6 +17,7 @@ import '../db/friends_dao.dart';
 class BleCentralManager extends ChangeNotifier {
   bool _isScanning = false;
   bool _isAvailable = false;
+  bool _verbose = false; // ToDo: debugPrintが多すぎるので verbose = true の時だけ出力するようにしたい
   final QueueList<({DiscoveredEventArgs arg, DateTime t})> _discoveredPeripherals = QueueList<({DiscoveredEventArgs arg, DateTime t})>();
   final PriorityQueue<({int rssi, Peripheral peripheral})> _waitingPeripherals = HeapPriorityQueue<({int rssi, Peripheral peripheral})>(
       (a, b) => b.rssi.compareTo(a.rssi)
@@ -223,8 +224,9 @@ class BleCentralManager extends ChangeNotifier {
           BleNickname().onFriendDetected?.call(friendLabel, false);
         }
        // 相互認証
-        final centralPriKey = Uint8List(32); // ToDo: centralのlocalNicknameに対応する秘密鍵を取得する
-        final success = await BleMutualAuthentication().startAuthentication(peripheral, authenticationCharacteristic, centralPriKey: centralPriKey, peripheralPubKey: remoteNickname);
+        final success = await BleMutualAuthentication().startAuthentication(
+            peripheral, authenticationCharacteristic,
+            centralPriKey: BleNickname().lastLocalPrivateKey, peripheralPubKey: remoteNickname);
       }
     } catch (e) {
       if (kDebugMode) print('BLE Error: _onDeviceConnected $e');
@@ -239,7 +241,7 @@ class BleCentralManager extends ChangeNotifier {
 
   /// 動作確認用に
   Future<void> _printConnectedPeripherals(String funcname) async {
-    if (kDebugMode) {
+    if (kDebugMode && _verbose) {
       List<Peripheral> list = await CentralManager().retrieveConnectedPeripherals();
       print('$funcname _printConnectedPeripherals c:${_connectingPeripherals.length} w:${_waitingPeripherals.length} r:${list.length}');
       for (Peripheral peripheral in list) {

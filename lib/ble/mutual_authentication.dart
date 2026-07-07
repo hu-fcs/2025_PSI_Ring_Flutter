@@ -137,7 +137,7 @@ class BleMutualAuthentication {
     if (state == _State.first.value && payload.length == challengeLen) { // C -> P: 1
       final challenge1 = payload;
       await _onFirstPeripheral(event, challenge1);
-      return;
+      return; // 正常終了
 
     } else {
       final authPeripheral = _PeripheralState.peripherals[central.uuid];
@@ -146,6 +146,7 @@ class BleMutualAuthentication {
         final response2 = payload;
         final success2 = await _onThirdPeripheral(event, authPeripheral, response2);
         // ToDo: 認証成功・失敗（verificationResult）を伝える．どこにどうやって？
+        return; // 正常終了
       }
     }
 
@@ -245,6 +246,7 @@ class BleMutualAuthentication {
     assert(listEquals(keyPair.publicKey, BleNickname().localNickname));
 
     final response1 = _native.signChallenge(keyPair.privateKey, challenge1);
+    // response1![0] = 0; // 認証に失敗するテストをするときに使う
     if (response1 == null) {
       return; // ToDo: エラー処理
     }
@@ -278,10 +280,10 @@ class BleMutualAuthentication {
       Peripheral peripheral, GATTCharacteristic authenticationCharacteristic,
       Uint8List centralPriKey,
       Uint8List challenge2) async {
-    // ToDo: centralPriKeyとchallenge2を使って，response2を計算してperipheralに送る
+    // centralPriKeyとchallenge2を使って，response2を計算してperipheralに送る
     final response2 = _native.signChallenge(centralPriKey, challenge2);
     if (response2 == null) {
-      return Uint8List(0); // ToDo: エラー処理
+      throw ErrorDescription('signChallenge failed in _thirdCentral'); // ToDo: エラー処理
     }
 
     final payload = Uint8List.fromList([_State.third.value, ...response2]);
@@ -297,14 +299,14 @@ class BleMutualAuthentication {
       _PeripheralState authPeripheral,
       Uint8List response2) async {
     final challenge2 = authPeripheral.challenge2;
-    // ToDo: centralPubkey を持ってくる．
+    // centralを認証するために，response2をchallenge2とcentralの公開鍵で検証する．
     final verificationResult2 = _native.verifyChallenge(authPeripheral.centralNickname, challenge2, response2);
 
     if (kDebugMode) {
       print('BleMutualAuthentication _onThirdPeripheral: '
+          'success2: $verificationResult2, '
           'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
-          'central: ${event.central.uuid}'
-          'verificationResult2: $verificationResult2');
+          'central: ${event.central.uuid}');
     }
     // 認証が終わったので後片付け．
     _PeripheralState.peripherals.remove(event.central.uuid);
