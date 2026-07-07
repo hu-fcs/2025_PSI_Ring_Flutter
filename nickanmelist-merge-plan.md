@@ -13,11 +13,20 @@ This branch is 2 commits ahead of and 73 commits behind master.
   `70 changed files  with 1,206,764 additions and 2,825 deletions.`
 
 # 途中経過
-エラーを一時的になくして実行可能にした．`todo: nicknamelist mergeの途中`の2箇所をコメントアウト．
-- `exchange_page.dart: _ble.onFriendDetected = _onFriendDitected;` 友達が見つかったときのコールバックの設定
-- `exchange_page.dart: _grpcClient.sendNicknameSchedule()` grpc部分を再実装する予定
-- 「QRを表示」ボタンが機能しなくなっている．おそらくmaster型の不具合．
-- `lib/ble/key_advertise_repository.dart`は使っていないようなので削除．
+- エラーを一時的になくして実行可能にした．`todo: nicknamelist mergeの途中`の2箇所をコメントアウト．
+- `exchange_page.dart: _grpcClient.sendNicknameSchedule()` grpc部分をprotobufを使って再実装した．双方向に将来ニックネームを交換する．
+- `lib/ble/key_advertise_repository.dart`は使っていないようなので削除した．
+- 画面のTextのフォントサイズなどをTextThemeを使うようにした．
+- friend_nicknames テーブルに一致する友達ラベルがないか検索
+  `final labels = await FriendsDao.instance.findFriendLabelsByPubkey(merged);`
+- 友達が見つかったときに画面に表示するためのコールバックを設定
+  `exchange_page.dart: _ble.onFriendDetected = _onFriendDitected;` 
+- 相互認証のフローを実装．一部未完成
+- 相互認証でPeripheral側がCentral側のニックネームを覚えていない．
+
+ToDo:
+- 同一友達の連続通知を抑制 `lib/ble/ble_scanner.dart`
+  
 
 # マージ（結合）プラン
 

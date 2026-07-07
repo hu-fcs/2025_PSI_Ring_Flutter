@@ -190,10 +190,16 @@ class BleNickname extends ChangeNotifier {
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
   }
 
+  /// リモートのニックネームをリモートのuuidから探せるようにするMap
+  /// ペリフェラルが相互認証するときにセントラルのニックネームを調べる必要があるため
+  final Map<UUID, ({Uint8List nickname, DateTime time})> _remoteNicknameCache = {};
+  /// _remoteNicknameCache から古いエントリーを削除するためのタイマー
+  Timer? _remoteNicknameCacheTimer;
+
   /// リモートのニックネームを追加
   Future<void> addRemote(Uint8List nickname, DateTime now, {UUID? peripheralUuid, UUID? centralUuid, bool local = false}) async {
     if (! local) { // リモートのニックネームを追加
-      // 収集鍵として登録する
+      // 収集鍵として collected_keys テーブルに登録する
       final inserted = await _kms.insertCollectedKeyIfAbsent(
         pubkey33: nickname,
         receivedAtMs: now.millisecondsSinceEpoch,
@@ -203,8 +209,30 @@ class BleNickname extends ChangeNotifier {
           debugPrint('BLE_SCAN: new collected key stored');
         }
       }
+
+      // 相互認証のPeripheral側でCentralのニックネームを探せるように記録する
+      if (centralUuid != null) {
+        _remoteNicknameCache[centralUuid] = (nickname: nickname, time: now);
+
+        // _remoteNicknameCache に残っている古いエントリーを削除するために周期タイマーを動かす．
+        // もし，すでにタイマーがセットいたら，新しいタイマーは動かさない
+        _remoteNicknameCacheTimer ??= Timer.periodic(const Duration(minutes: 30), (timer) {
+          // タイマーの動作．30分経過したリモートニックネームは _remoteNicknameCache から削除する
+          final expireTime = DateTime.now().subtract(Duration(minutes: 3));
+          _remoteNicknameCache.removeWhere((key, value) =>
+              value.time.isBefore(expireTime));
+          // _remoteNicknameCache から空になったら周期タイマーを停止
+          if (_remoteNicknameCache.isEmpty) {
+            timer.cancel();
+            _remoteNicknameCacheTimer = null;
+          }
+        });
+      }
     }
   }
+
+  /// Peripheral側でCentralのニックネームを探す．
+  Uint8List? findRemoteNickname(UUID centralUuid) => _remoteNicknameCache[centralUuid]?.nickname;
 
   /// 友達ニックネームにマッチした & 認証結果を UI に通知するためのコールバック
   void Function(String friendLabel, bool authenticated)? onFriendDetected;

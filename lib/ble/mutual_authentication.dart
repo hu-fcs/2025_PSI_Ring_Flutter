@@ -203,7 +203,9 @@ class BleMutualAuthentication {
           'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1)}, '
           'central: ${event.central.uuid}');
     }
-    _PeripheralState(central: event.central, challenge1: challenge1);
+    final centralNickname = BleNickname().findRemoteNickname(event.central.uuid);
+    if (centralNickname == null) return; // ToDo: エラー
+    _PeripheralState(central: event.central, challenge1: challenge1, centralNickname: centralNickname);
     await PeripheralManager().respondWriteRequest(event.request);
   }
 
@@ -296,13 +298,13 @@ class BleMutualAuthentication {
       Uint8List response2) async {
     final challenge2 = authPeripheral.challenge2;
     // ToDo: centralPubkey を持ってくる．
-    final centralPubkey = Uint8List(32); // ダミー
-    final verificationResult2 = _native.verifyChallenge(centralPubkey, challenge2, response2);
+    final verificationResult2 = _native.verifyChallenge(authPeripheral.centralNickname, challenge2, response2);
 
     if (kDebugMode) {
       print('BleMutualAuthentication _onThirdPeripheral: '
           'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
-          'central: ${event.central.uuid}');
+          'central: ${event.central.uuid}'
+          'verificationResult2: $verificationResult2');
     }
     // 認証が終わったので後片付け．
     _PeripheralState.peripherals.remove(event.central.uuid);
@@ -338,8 +340,9 @@ class _PeripheralState {
   late final Uint8List response1;  // peripheralからcentralへ
   late final Uint8List challenge2; // peripheralからcentralへ
   late final Uint8List response2;  // centralからperipheralへ
+  final Uint8List centralNickname; // centralのニックネーム（centralの認証に使う）
 
-  _PeripheralState({required this.central, required this.challenge1}) {
+  _PeripheralState({required this.central, required this.challenge1, required this.centralNickname}) {
     state = _State.first;
     time = DateTime.now();
     peripherals[central.uuid] = this;

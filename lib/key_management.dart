@@ -112,7 +112,16 @@ class KeyManagementService {
   }
 
   Future<Uint8List?> _ensureMasterKey() async {
-    final stored = await _secureStorage.read(key: _masterKeyAlias);
+    late final String? stored;
+    try {
+      stored = await _secureStorage.read(key: _masterKeyAlias);
+      // ToDo: _secureStorage.read()でUnhandled Exceptionが起こるとアプリケーションが表示されない．再現方法がわからない．
+      // PlatformException(Exception encountered, read, javax.crypto.IllegalBlockSizeException: error:1e00007b:Cipher functions:OPENSSL_internal:WRONG_FINAL_BLOCK_LENGTH
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('ERROR KMS: master key read $e');
+      }
+    }
     if (stored != null) {
       if (kDebugMode) {
         debugPrint('KMS: master key loaded');
@@ -224,6 +233,7 @@ class KeyManagementService {
 
   // ----- collected_keys: 追加（BleScanner 用） -----
 
+  // ToDo: 同名の関数 insertCollectedKeyIfAbsent が database_helper.dart にもあるので整理したい．
   Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int receivedAtMs,

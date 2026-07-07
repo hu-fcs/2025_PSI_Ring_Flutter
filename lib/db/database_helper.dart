@@ -38,54 +38,65 @@ class DatabaseHelper {
   // ----- Schema -----
 
   static Future<void> _createTables(Database db) async {
-    // -- や /* */ はSQL中のコメント
+    // 生成鍵（生成集合に相当）
     await db.execute('''
--- 生成鍵（生成集合に相当）
-CREATE TABLE IF NOT EXISTS generated_keys (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  seckey_ecd BLOB NOT NULL,
-  pubkey_ecd BLOB NOT NULL,
-  lat INTEGER,
-  lon INTEGER,
-  generate_time INTEGER NOT NULL,
-  expire_time INTEGER NOT NULL
-);
+    CREATE TABLE generated_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      seckey_ecd BLOB NOT NULL,
+      pubkey_ecd BLOB NOT NULL,
+      lat INTEGER,
+      lon INTEGER,
+      generate_time INTEGER NOT NULL,
+      expire_time INTEGER NOT NULL
+    )
+  ''');
 
--- 収集鍵（収集集合に相当）
--- pubkey_ecd は重複を許さない
-CREATE TABLE IF NOT EXISTS collected_keys (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  pubkey_ecd BLOB NOT NULL UNIQUE,
-  receive_time INTEGER NOT NULL
-);
+    // 収集鍵（収集集合に相当）
+    // pubkey_ecd は重複を許さない
+    await db.execute('''
+    CREATE TABLE collected_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pubkey_ecd BLOB NOT NULL UNIQUE,
+      receive_time INTEGER NOT NULL
+    )
+  ''');
 
--- 友達テーブル
-CREATE TABLE IF NOT EXISTS friends (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  label TEXT NOT NULL,         -- ユーザーが付ける名前（例：山田さん）
-  note TEXT,                   -- 任意のメモ
-  created_at INTEGER NOT NULL  -- 作成時刻 (Unix time, sec)
-);
+    // 友達テーブル
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS friends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        label TEXT NOT NULL,         -- ユーザーが付ける名前（例：山田さん）
+        note TEXT,                   -- 任意のメモ
+        created_at INTEGER NOT NULL  -- 作成時刻 (Unix time, sec)
+      )
+    ''');
 
--- 友達ごとの将来ニックネームテーブル
-CREATE TABLE IF NOT EXISTS friend_nicknames (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  friend_id INTEGER NOT NULL,
-  pubkey_ecd BLOB NOT NULL,    -- 33バイト圧縮公開鍵
-  slot_start INTEGER NOT NULL, -- スロット開始時刻 (sec)
-  slot_end INTEGER NOT NULL,   -- スロット終了時刻 (sec)
-  UNIQUE(friend_id, pubkey_ecd),
-  FOREIGN KEY(friend_id) REFERENCES friends(id) ON DELETE CASCADE
-);
+    // 友達ごとの将来ニックネームテーブル
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS friend_nicknames (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        friend_id INTEGER NOT NULL,
+        pubkey_ecd BLOB NOT NULL,    -- 33バイト圧縮公開鍵
+        slot_start INTEGER NOT NULL, -- スロット開始時刻 (sec)
+        slot_end INTEGER NOT NULL,   -- スロット終了時刻 (sec)
+        UNIQUE(friend_id, pubkey_ecd),
+        FOREIGN KEY(friend_id) REFERENCES friends(id) ON DELETE CASCADE
+      )
     ''');
   }
 
   static Future<void> _createIndexes(Database db) async {
-    await db.execute('''
-CREATE INDEX IF NOT EXISTS idx_generated_pubkey ON generated_keys(pubkey_ecd);
-CREATE INDEX IF NOT EXISTS idx_generated_generate_expire ON generated_keys(generate_time, expire_time);
-CREATE INDEX IF NOT EXISTS idx_generated_expire_time ON generated_keys(expire_time);
-    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_pubkey ON generated_keys(pubkey_ecd)',
+    );
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_generate_expire ON generated_keys(generate_time, expire_time)',
+    );
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_generated_expire_time ON generated_keys(expire_time)',
+    );
   }
 
   // ----- Debug / Seed -----
@@ -148,7 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_generated_expire_time ON generated_keys(expire_ti
   /// 収集鍵が未登録の場合のみ INSERT する。
   static Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
-    required int tms,
+    required int tms, // millisecondsSinceEpoch
   }) async {
     final db = await getDatabase();
 
