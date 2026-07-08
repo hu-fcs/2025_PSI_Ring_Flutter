@@ -1,9 +1,6 @@
 import 'dart:typed_data';
-
 import 'package:sqflite/sqflite.dart';
-
 import 'database_helper.dart';
-import '../key_management_service.dart'; // SlotNickname を使う
 
 /// friends テーブル1行分
 class FriendEntry {
@@ -60,28 +57,31 @@ class FriendsDao {
   /// [schedule] : KeyManagementService.generateFutureNicknameList() の結果
   Future<void> insertFriendNicknames({
     required int friendId,
-    required List<SlotNickname> schedule,
+    required DateTime firstSlot,
+    required Duration slot,
+    required List<Uint8List> nicknameList, // List<pubkey33list>
   }) async {
-    if (schedule.isEmpty) return;
+    if (nicknameList.isEmpty) return;
 
     final db = await _db();
     final batch = db.batch();
 
-    for (final s in schedule) {
-      final startSec = s.slotStart.millisecondsSinceEpoch ~/ 1000;
-      final endSec =
-          startSec + s.slotDuration.inMilliseconds ~/ 1000;
-
+    // 秒単位の最初のニックネーム開始時刻と有効時間
+    var startSec = firstSlot.millisecondsSinceEpoch ~/ 1000;
+    final slotSec = slot.inMilliseconds ~/ 1000;
+    // nicknameListのすべてのニックネームをデータベースに追加する
+    for (int i = 0; i < nicknameList.length; i++) {
       batch.insert(
         'friend_nicknames',
         {
           'friend_id': friendId,
-          'pubkey_ecd': s.pubkey33,
+          'pubkey_ecd': nicknameList[i],
           'slot_start': startSec,
-          'slot_end': endSec,
+          'slot_end': startSec + slotSec,
         },
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+      startSec += slotSec;
     }
 
     await batch.commit(noResult: true);
@@ -163,6 +163,7 @@ class FriendsDao {
 
     return rows.map((e) => e['label'] as String).toList(growable: false);
   }
+
   /// Debug用：friends 一覧 + friend_nicknames の総数
   Future<List<Map<String, Object?>>> listFriendsWithNicknameCounts() async {
     final db = await _db();

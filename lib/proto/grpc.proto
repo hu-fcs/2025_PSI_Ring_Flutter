@@ -1,0 +1,78 @@
+// grpc.proto
+syntax = "proto3";
+package grpc;
+
+// PSI の3段階（鍵交換 → PSI確定 → 匿名認証）のための gRPC 定義。
+
+// ----- Phase 1: PSI 鍵交換 -----
+
+message KeyExchangeReq {
+  repeated bytes enc_keys = 1; // クライアントの暗号化鍵列
+}
+
+message KeyExchangeResp {
+  repeated bytes server_enc_keys = 1;   // サーバの暗号化鍵列
+  repeated bytes client_reenc_keys = 2; // サーバが再暗号化したクライアント鍵列
+}
+
+// ----- Phase 2: PSI 確定 -----
+
+message ClientFinalReq {
+  repeated bytes client_reenc_server_keys = 1; // クライアントが再暗号化したサーバ鍵列
+}
+
+message PsiDone {}
+
+// ----- Phase 3A: チャレンジ交換 -----
+
+message ClientChallenge {
+  bytes challenge_c = 1; // クライアント生成のチャレンジ(32B)
+}
+
+message ServerChallenge {
+  bytes challenge_s = 1; // サーバ生成のチャレンジ(32B)
+}
+
+// ----- Phase 3B: リング署名交換 -----
+
+message RingSignatureReq {
+  bytes signature_for_server = 1; // challenge_s に対する署名
+}
+
+message RingSignatureResp {
+  bytes signature_for_client = 1; // challenge_c に対する署名
+}
+
+// ----- 将来ニックネームの共有．Phase 1:
+// request (ack_length なし）
+// response (ack_length あり）
+
+message NicknameScheduleReqResp {
+  string owner_name = 1;   // 相手に表示させたい自分の名前（ニックネーム）
+  int64 period_days = 2;   // 何日先までのニックネームか（日単位）
+  int64 slot_ms = 3;       // 一つのニックネームの有効時間（ミリ秒単位）
+  int64 first_slot_ms = 4; // 最初のニックネームの開始時刻（ミリ秒単位）
+  repeated bytes nickname_list = 5; // 将来ニックネームのリスト．KeyManagementService.generateFutureNicknameList() の結果
+  optional int64 ack_length = 6;    // 受信確認：受け取った長さ
+}
+
+// ----- 将来ニックネームの共有．Phase 2: 受信確認
+
+message NicknameScheduleAckReq {
+  string owner_name = 1;   // 相手に表示させたい自分の名前（ニックネーム）
+  int64 ack_length = 6;    // 受信確認：受け取った長さ
+}
+
+message NicknameScheduleAckResp {
+}
+
+// ----- gRPC service -----
+
+service GrpcService {
+  rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
+  rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
+  rpc ExchangeChallenges (ClientChallenge) returns (ServerChallenge);
+  rpc ExchangeRingSignatures (RingSignatureReq) returns (RingSignatureResp);
+  rpc ExchangeNicknameSchedule (NicknameScheduleReqResp) returns (NicknameScheduleReqResp);
+  rpc ExchangeNicknameScheduleAck (NicknameScheduleAckReq) returns (NicknameScheduleAckResp);
+}

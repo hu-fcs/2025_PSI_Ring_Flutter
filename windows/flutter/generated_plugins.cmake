@@ -3,8 +3,9 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  flutter_ble_peripheral
+  bluetooth_low_energy_windows
   flutter_secure_storage_windows
+  geolocator_windows
   permission_handler_windows
 )
 

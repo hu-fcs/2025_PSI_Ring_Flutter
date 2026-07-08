@@ -1,44 +1,48 @@
+// lib/main.dart
 import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:path/path.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'pages/exchange_page.dart';
+import 'db/database_helper.dart';
+import 'key_management.dart';
 import 'pages/debug_page.dart';
+import 'pages/exchange_page.dart';
 import 'pages/scanner_page.dart';
-import 'key_management_service.dart';
-import 'db/database_helper.dart'; // DatabaseHelperをインポート
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // デスクトップ環境では sqflite の FFI 実装を使用する
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
 
-  // データベースとテーブルを初期化（存在しない場合のみ作成）
-  await DatabaseHelper.initDatabase();
+  // DB を初期化する
+  await DatabaseHelper.getDatabase();
 
-  // KeyManagementServiceを初期化して鍵生成を開始
+  // マスターキーを初期化する
   final keyService = KeyManagementService();
   await keyService.init();
+
+  // Android フォアグラウンド サービスを使う（flutter_foreground_task パッケージ）
+  // FlutterForegroundTask.initCommunicationPort();
 
   runApp(const MyApp());
 }
 
-
-// アプリ全体のルートウィジェット
+/// アプリ全体のルートウィジェット
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false, // DEBUGリボンを非表示
+      debugShowCheckedModeBanner: false,
       title: '鍵交換アプリ',
       theme: ThemeData(
         fontFamily: 'NotoSansJP',

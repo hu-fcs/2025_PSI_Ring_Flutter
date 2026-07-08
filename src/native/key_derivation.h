@@ -10,19 +10,27 @@
 #define EXPORT
 #endif
 
+/**
+ * @brief 32バイトのマスターキーを生成する。
+ *
+ * @param out_master_key_32b 出力: マスターキー(32B)を書き込むバッファ。
+ * @return 成功時は 1，失敗時は 0。
+ */
 EXPORT int generate_master_key(
         uint8_t* out_master_key_32b
 );
 
 /**
- * @brief マスターキーとタイムスタンプから鍵ペアを導出する。
+ * @brief マスターキーと時刻スロットから鍵ペアを導出する。
  *
- * @param master_key       入力: 32バイトのマスターキー。
- * @param timestamp_ms     入力: 鍵導出の元となるタイムスタンプ（ミリ秒）。
- * @param slot_ms          入力: タイムスロットの間隔（ミリ秒）。
- * @param out_priv_key_32b 出力: 生成された32バイトの秘密鍵を格納するバッファ。
- * @param out_pub_key_65b  出力: 生成された33バイトの圧縮公開鍵を格納するバッファ。
- * @return 成功した場合は 1、失敗した場合は 0。
+ * timestamp_ms を slot_ms で丸めたスロット開始時刻に基づいて鍵を導出する。
+ *
+ * @param master_key        入力: マスターキー(32B)。
+ * @param timestamp_ms      入力: 時刻（ミリ秒）。
+ * @param slot_ms           入力: 時刻スロット幅（ミリ秒）。
+ * @param out_priv_key_32b  出力: 秘密鍵(32B)を書き込むバッファ。
+ * @param out_pub_key_33b   出力: 圧縮公開鍵(33B)を書き込むバッファ。
+ * @return 成功時は 1，失敗時は 0。
  */
 EXPORT int derive_keypair_from_timestamp(
         const uint8_t* master_key,
