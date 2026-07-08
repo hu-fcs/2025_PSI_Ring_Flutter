@@ -12,8 +12,14 @@ This branch is 2 commits ahead of and 73 commits behind master.
 - 73 commits behind:
   `70 changed files  with 1,206,764 additions and 2,825 deletions.`
 
+# 今後したいこと ToDo
+- 両方がCentralになって認証を開始すると二重になり無駄．
+- 自分の名前と識別子を shared_preference に保存する．
+- 認証後に，その端末からの広告を受信するたびに，近くの友達の表示を維持する．
+- 同一友達の連続通知を抑制を反映できていない `lib/ble/ble_scanner.dart`（nicknamelist branch 51c5c7f）
+
 # 途中経過
-- エラーを一時的になくして実行可能にした．`todo: nicknamelist mergeの途中`の2箇所をコメントアウト．
+- 画面への通知はCentral側の場合のみ．
 - `exchange_page.dart: _grpcClient.sendNicknameSchedule()` grpc部分をprotobufを使って再実装した．双方向に将来ニックネームを交換する．
 - `lib/ble/key_advertise_repository.dart`は使っていないようなので削除した．
 - 画面のTextのフォントサイズなどをTextThemeを使うようにした．
@@ -23,10 +29,6 @@ This branch is 2 commits ahead of and 73 commits behind master.
   `exchange_page.dart: _ble.onFriendDetected = _onFriendDitected;` 
 - 相互認証のフローを実装．一部未完成
 - 相互認証でPeripheral側がCentral側のニックネームを覚えていない．
-
-ToDo:
-- 同一友達の連続通知を抑制 `lib/ble/ble_scanner.dart`
-  
 
 # マージ（結合）プラン
 
