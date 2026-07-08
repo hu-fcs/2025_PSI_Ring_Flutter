@@ -17,7 +17,7 @@ import '../db/friends_dao.dart';
 class BleCentralManager extends ChangeNotifier {
   bool _isScanning = false;
   bool _isAvailable = false;
-  bool _verbose = false; // ToDo: debugPrintが多すぎるので verbose = true の時だけ出力するようにしたい
+  bool _verbose = false; // debugPrintが多すぎるので verbose = true の時だけ出力するように
   final QueueList<({DiscoveredEventArgs arg, DateTime t})> _discoveredPeripherals = QueueList<({DiscoveredEventArgs arg, DateTime t})>();
   final PriorityQueue<({int rssi, Peripheral peripheral})> _waitingPeripherals = HeapPriorityQueue<({int rssi, Peripheral peripheral})>(
       (a, b) => b.rssi.compareTo(a.rssi)
@@ -71,7 +71,7 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> startScan() async {
     if (_isScanning) return;
 
-    _discoveredPeripherals.clear(); // clearするタイミングはここだけでいいのか．
+    _discoveredPeripherals.clear(); // ToDo: clearするタイミングはここだけでいいのか．
     _discoveredSubscription = CentralManager().discovered.listen(_onDeviceDiscovered);
     _connectionStateSubscription = CentralManager().connectionStateChanged.listen((eventArgs) async {
       if (eventArgs.state == ConnectionState.connected) {
@@ -89,7 +89,7 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> stopScan() async {
     if (!_isScanning) return;
 
-    if (kDebugMode) print('stopScan');
+    if (kDebugMode) debugPrint('BLE stopScan');
     await CentralManager().stopDiscovery();
     await _discoveredSubscription?.cancel();
     _discoveredPeripherals.clear();
@@ -104,7 +104,7 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> _onDeviceDiscovered(DiscoveredEventArgs eventArg) async {
     final Peripheral peripheral = eventArg.peripheral;
     if (_discoveredPeripherals.any((arg) => peripheral.uuid == arg.arg.peripheral.uuid)) {
-      // if (kDebugMode) print("already added ${DateTime.now()}");
+      // if (kDebugMode) debugPrint("already added ${DateTime.now()}");
       return; // 以前に発見している
     }
     if (_connectingPeripherals.contains(peripheral.uuid)) {
@@ -116,10 +116,10 @@ class BleCentralManager extends ChangeNotifier {
     _discoveredPeripherals.add((arg: eventArg, t: now));
 
     if (_connectingPeripherals.length < maxConnections) { // 同時に7台まで接続．1ならテストで1台ずつ接続
-      if (kDebugMode) print('_onDeviceDiscovered: ${peripheral.uuid} $now');
+      if (kDebugMode) debugPrint('_onDeviceDiscovered: ${peripheral.uuid} $now');
       await _connect(peripheral);
     } else { // 後ほど _onDeviceDisconnectedで接続するのでrssiの大きいものから並んだ優先度付きキューに追加する
-      if (kDebugMode) print('_onDeviceDiscovered: ${peripheral.uuid} wait');
+      if (kDebugMode) debugPrint('_onDeviceDiscovered: ${peripheral.uuid} wait');
       _waitingPeripherals.add((rssi: eventArg.rssi, peripheral: eventArg.peripheral));
     }
   }
@@ -129,9 +129,9 @@ class BleCentralManager extends ChangeNotifier {
     _connectingPeripherals.add(peripheral.uuid);
     try {
       await CentralManager().connect(peripheral);
-      if (kDebugMode) print("_connect: ${peripheral.uuid}");
+      if (kDebugMode) debugPrint("_connect: ${peripheral.uuid}");
     } catch (e) {
-      if (kDebugMode) print('BLE Error: _connect $e');
+      if (kDebugMode) debugPrint('BLE Error: _connect $e');
     }
   }
 
@@ -142,12 +142,12 @@ class BleCentralManager extends ChangeNotifier {
     _connectedPeripherals.remove(peripheral.uuid);
     if (kDebugMode) {
       await _printConnectedPeripherals('_onDeviceDisconnected:');
-      print('_onDeviceDisconnected: _connectedPeripherals.contains(${peripheral.uuid}) -> $f, waited: ${_waitingPeripherals.length}');
+      debugPrint('_onDeviceDisconnected: _connectedPeripherals.contains(${peripheral.uuid}) -> $f, waited: ${_waitingPeripherals.length}');
     }
     // 接続を待たせているPeripheralがあれば接続する
     if (f && _waitingPeripherals.length > 0) {
       final element = _waitingPeripherals.removeFirst();
-      if (kDebugMode) print('_onDeviceDisconnected: connect next peripheral: ${element.peripheral.uuid}');
+      if (kDebugMode) debugPrint('_onDeviceDisconnected: connect next peripheral: ${element.peripheral.uuid}');
       await _connect(element.peripheral);
     }
   }
@@ -179,7 +179,7 @@ class BleCentralManager extends ChangeNotifier {
 
       // 特定が見つからないので，読み書きせずに切断する
       if (nicknameCharacteristic == null || authenticationCharacteristic == null) {
-        if (kDebugMode) print('BLE Error: _onDeviceConnected no characteristics n: $nicknameCharacteristic a: $authenticationCharacteristic');
+        if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected no characteristics n: $nicknameCharacteristic a: $authenticationCharacteristic');
         await CentralManager().disconnect(peripheral);
         return; // finallyは実行される
       }
@@ -188,20 +188,20 @@ class BleCentralManager extends ChangeNotifier {
       final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
       if (Platform.isAndroid && len1 < 33) {
         final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
-        if (kDebugMode) print('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
+        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
       } else {
-        if (kDebugMode) print('MTU write: $len1 (Peripheral ${peripheral.uuid})');
+        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 (Peripheral ${peripheral.uuid})');
       }
 
       // Peripheraのニックネームを読み込み
       final now = DateTime.now();
       final remoteNickname = await CentralManager().readCharacteristic(
           peripheral, nicknameCharacteristic);
-      if (kDebugMode) print('_onDeviceConnected read. length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${peripheral.uuid}, $now');
+      if (kDebugMode) debugPrint('_onDeviceConnected read. remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${peripheral.uuid}, $now');
       BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
 
       // int len = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      // if (kDebugMode) print('getMaximumWriteLength $len');
+      // if (kDebugMode) debugPrint('getMaximumWriteLength $len');
 
       // CentralのニックネームをPeripheralに書き込み
       final Uint8List localNickname = BleNickname().localNickname;
@@ -210,31 +210,31 @@ class BleCentralManager extends ChangeNotifier {
         value: localNickname,
         type: GATTCharacteristicWriteType.withoutResponse,
       );
-      if (kDebugMode) print('_onDeviceConnected write. Length: ${localNickname.length}), nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${peripheral.uuid}');
+      if (kDebugMode) debugPrint('_onDeviceConnected write. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${peripheral.uuid}');
 
       // 将来ニックネームリストにremoteNicknameが含まれているときは認証に進む（山口 賢紘, 2026年2月，卒業論文）
       // まずは，将来ニックネームリストにremoteNicknameが含まれているか探す
       final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
-      debugPrint('debug $labels'); //
       // ToDo: 複数のlabel（名前）が見つかるのは不自然では？同じニックネームを複数人が使っているということになる？
+      // 最初に見つかったlabelのみ使うように変更した．
       if (labels.isNotEmpty) { // 相互認証
         // 候補として通知（authenticated=false）
-        for (final friendLabel in labels) {
-          // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
-          BleNickname().onFriendDetected?.call(friendLabel, false);
-        }
-       // 相互認証
+        final friendLabel = labels.first;
+        // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
+        BleNickname().onFriendDetected?.call(friendLabel, false); // ToDo: central側しか表示していない
+         // 相互認証
         final success = await BleMutualAuthentication().startAuthentication(
             peripheral, authenticationCharacteristic,
-            centralPriKey: BleNickname().lastLocalPrivateKey, peripheralPubKey: remoteNickname);
+            centralPriKey: BleNickname().lastLocalPrivateKey,
+            peripheralPubKey: remoteNickname, peripheralName: friendLabel);
       }
     } catch (e) {
-      if (kDebugMode) print('BLE Error: _onDeviceConnected $e');
+      if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected $e');
     } finally {
       try {
         await CentralManager().disconnect(peripheral);
       } catch (e) {
-        if (kDebugMode) print('BLE Error: _onDeviceConnected disconnect $e');
+        if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected disconnect $e');
       }
     }
   }
@@ -243,9 +243,9 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> _printConnectedPeripherals(String funcname) async {
     if (kDebugMode && _verbose) {
       List<Peripheral> list = await CentralManager().retrieveConnectedPeripherals();
-      print('$funcname _printConnectedPeripherals c:${_connectingPeripherals.length} w:${_waitingPeripherals.length} r:${list.length}');
+      debugPrint('$funcname _printConnectedPeripherals c:${_connectingPeripherals.length} w:${_waitingPeripherals.length} r:${list.length}');
       for (Peripheral peripheral in list) {
-        print('_printConnectedPeripherals ${peripheral.uuid}');
+        debugPrint('_printConnectedPeripherals ${peripheral.uuid}');
       }
     }
   }
@@ -262,7 +262,7 @@ class BleCentralManager extends ChangeNotifier {
 
       // デバッグ確認用（すべての権限が許可されたか）
       final isGranted = statuses.values.every((status) => status.isGranted);
-      if (kDebugMode) print("Bluetooth 許可 (Android): $isGranted");
+      if (kDebugMode) debugPrint("Bluetooth 許可 (Android): $isGranted");
 
     } else if (Platform.isIOS) {
       // iOS用のBluetooth権限リクエスト
@@ -271,7 +271,7 @@ class BleCentralManager extends ChangeNotifier {
         // 設定画面を開いてユーザーに許可を促す
         openAppSettings();
       }
-      if (kDebugMode) print("Bluetooth 許可 (iOS Central): ${status}");
+      if (kDebugMode) debugPrint("Bluetooth 許可 (iOS Central): ${status}");
     }
   }*/
 }

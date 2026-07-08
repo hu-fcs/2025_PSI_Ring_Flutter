@@ -252,7 +252,7 @@ class BleNickname extends ChangeNotifier {
     final hexString = hex.encode(bytes.sublist(0, len));
     final joined = RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
     if (len < bytes.length) {
-      return '$joined...';
+      return '$joined...(${bytes.length})';
     } else {
       return joined;
     }

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -185,23 +186,42 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<String?> _getLocalWifiIp() async {
     try {
       final interfaces = await NetworkInterface.list();
+      // Android: wlan0（J9110実機  や Androidエミュレータ 36.6.11 など）
+      // iOS:     en0（らしい）ToDo: 要確認
+      // メモ：Androidエミュレータの eth0 はエミュレータ間で同じアドレスになっているので使わない．
       for (final i in interfaces) {
-        if (i.name == 'wlan0') {
+        if (i.name == 'wlan0' || i.name == 'en0') {
           for (final a in i.addresses) {
             if (a.type == InternetAddressType.IPv4) return a.address;
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (kDebugMode) debugPrint('ERROR in _getLocalWifiIp $e'); // PlatformExceptionにする？
+    }
     return null;
   }
 
   Future<void> _showQr() async {
     if (!await _requireKeyWarning()) return;
-    if (_grpcRunning) return;
+    if (_grpcRunning) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('すでにgRPCサーバが起動しています')),
+        );
+      }
+      return;
+    }
 
     final ip = await _getLocalWifiIp();
-    if (ip == null) return;
+    if (ip == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ネットワークが利用できません')),
+        );
+      }
+      return;
+    }
 
     final server = PsiGrpcServer();
     final port = await server.start(port: _serverPort);

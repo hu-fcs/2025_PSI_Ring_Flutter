@@ -11,6 +11,7 @@ import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
 import 'nickname.dart';
 import '../key_management.dart';
 import '../ffi/native_key_service.dart';
+import '../db/friends_dao.dart';
 
 /// BLEでニックネームを公開鍵として相互認証するBLEサービス
 /// 特性がread, writeされたときに署名生成・検証を行う
@@ -76,23 +77,25 @@ class BleMutualAuthentication {
   static final responseBytes = 64;
   final _rand = Random.secure();
   final _native = NativeKeyService();
+  bool _verbose = false; // ToDo: debugPrintが多すぎるので verbose = true の時だけ出力するようにしたい
 
   /// Centralが認証シーケンスを処理する
   /// centralPubkey, peripheralPubkey はニックネームであり，公開鍵
   /// ToDo: 双方向認証を反対側から開始すると二重になるので避ける
   Future<bool> startAuthentication(Peripheral peripheral,
       GATTCharacteristic authenticationCharacteristic, // discoverGATT(peripheral) で得たもの．static finalと同じ型だが中身が違う
-      { required Uint8List centralPriKey,  // centralのニックネームに対応する秘密鍵
+      { required Uint8List centralPriKey,    // centralのニックネームに対応する秘密鍵
         required Uint8List peripheralPubKey, // peripheralのニックネームのこと
+        required String peripheralName,      // peripheralの表示名
       }) async {
     assert(centralPriKey.length == 32 && peripheralPubKey.length == 33);
     // final mtu = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);  -> 512だった．
     try {
       // C -> P: 1. Peripheralの認証のためにCentralが課題（チャレンジ）を書き込み（write 16バイト or 32バイト）
       final challenge1 = await _firstCentral(peripheral, authenticationCharacteristic);
-      if (kDebugMode) {
+      if (kDebugMode && _verbose) {
         print('BLE startAuthentication _FirstCentral: '
-            'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1)}, '
+            'challenge1 ${BleNickname.nickname2string(challenge1, len: 8)}, '
             'peripheral ${peripheral.uuid}');
       }
 
@@ -100,19 +103,26 @@ class BleMutualAuthentication {
       //         3. Centralの認証のために，Peripheralが課題（チャレンジ）を返す（2と一緒にread or notify）
       final (success1, challenge2) = await _secondCentral(peripheral, authenticationCharacteristic, challenge1, peripheralPubKey);
       // success1はperipheralの認証に成功したときtrue
-      if (kDebugMode) {
+      if (kDebugMode && _verbose) {
         print('BLE startAuthentication _SecondCentral: '
             'success1 $success1, '
-            'challenge2 (${challenge2.length}) ${BleNickname.nickname2string(challenge2)}, '
+            'challenge2 ${BleNickname.nickname2string(challenge2, len: 8)}, '
+            'peripheral ${peripheral.uuid}');
+      }
+      BleNickname().onFriendDetected?.call(peripheralName, true); // ToDo: central側しか表示していない
+
+      // C -> P: 4. Centralが応答（レスポンス）を書き込む（write）．Peripheralは応答を検証する
+      final response2 = await _thirdCentral(peripheral,
+          authenticationCharacteristic, centralPriKey, challenge2);
+      if (kDebugMode && _verbose) {
+        print('BLE startAuthentication _ThirdCentral: '
+            'response2 ${BleNickname.nickname2string(response2, len: 8)}, '
             'peripheral ${peripheral.uuid}');
       }
 
-      // C -> P: 4. Centralが応答（レスポンス）を書き込む（write）．Peripheralは応答を検証する
-      final response2 = await _thirdCentral(peripheral, authenticationCharacteristic, centralPriKey, challenge2);
       if (kDebugMode) {
-        print('BLE startAuthentication _ThirdCentral: '
-            'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
-            'peripheral ${peripheral.uuid}');
+        print('BLE startAuthentication done: '
+            'success1: $success1, peripheral ${peripheral.uuid}');
       }
 
       return success1; // Peripheralの認証に成功．Centralの認証結果は不明
@@ -144,8 +154,8 @@ class BleMutualAuthentication {
       if (authPeripheral != null && authPeripheral.state == _State.second
           && state == _State.third.value && payload.length == responseBytes) { // C -> P: 3
         final response2 = payload;
-        final success2 = await _onThirdPeripheral(event, authPeripheral, response2);
-        // ToDo: 認証成功・失敗（verificationResult）を伝える．どこにどうやって？
+        final verified2 = await _onThirdPeripheral(event, authPeripheral, response2);
+        // ToDo: 認証成功・失敗（verified2）を伝える．どこにどうやって？
         return; // 正常終了
       }
     }
@@ -199,9 +209,9 @@ class BleMutualAuthentication {
   Future<void> _onFirstPeripheral(
       GATTCharacteristicWriteRequestedEventArgs event,
       Uint8List challenge1) async {
-    if (kDebugMode) {
+    if (kDebugMode && _verbose) {
       print('BleMutualAuthentication _onFirstPeripheral: '
-          'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1)}, '
+          'challenge1 (${challenge1.length}) ${BleNickname.nickname2string(challenge1, len: 8)}, '
           'central: ${event.central.uuid}');
     }
     final centralNickname = BleNickname().findRemoteNickname(event.central.uuid);
@@ -228,9 +238,9 @@ class BleMutualAuthentication {
     final response1 = value.sublist(1, 1 + responseBytes);
     final challenge2 = value.sublist(1 + responseBytes);
 
-    // ToDo: challenge1とperipheralPubkeyを使って，response1の検証結果をverificationResultに
-    final verificationResult = _native.verifyChallenge(peripheralPubkey, challenge1, response1);
-    return (verificationResult, challenge2);
+    // ToDo: challenge1とperipheralPubkeyを使って，response1の検証結果をverified1に
+    final verified1 = _native.verifyChallenge(peripheralPubkey, challenge1, response1);
+    return (verified1, challenge2);
   }
 
   /// ペリフェラル側．
@@ -253,10 +263,10 @@ class BleMutualAuthentication {
 
     final challenge2 = Uint8List.fromList(
         List.generate(challengeLen, (_) => _rand.nextInt(256)));
-    if (kDebugMode) {
+    if (kDebugMode && _verbose) {
       print('BleMutualAuthentication _onSecondPeripheral: '
-          'response1: (${response1.length}) ${BleNickname.nickname2string(response1)}, '
-          'challenge2: (${challenge2.length}) ${BleNickname.nickname2string(challenge2)}, '
+          'response1: ${BleNickname.nickname2string(response1, len: 8)}, '
+          'challenge2: ${BleNickname.nickname2string(challenge2, len: 8)}, '
           'central: ${event.central.uuid}');
     }
     final payload = Uint8List.fromList([
@@ -300,18 +310,18 @@ class BleMutualAuthentication {
       Uint8List response2) async {
     final challenge2 = authPeripheral.challenge2;
     // centralを認証するために，response2をchallenge2とcentralの公開鍵で検証する．
-    final verificationResult2 = _native.verifyChallenge(authPeripheral.centralNickname, challenge2, response2);
+    final verified2 = _native.verifyChallenge(authPeripheral.centralNickname, challenge2, response2);
 
-    if (kDebugMode) {
+    if (kDebugMode) { //
       print('BleMutualAuthentication _onThirdPeripheral: '
-          'success2: $verificationResult2, '
-          'response2 (${response2.length}) ${BleNickname.nickname2string(response2)}, '
+          'verified2: $verified2, '
+          'response2  ${BleNickname.nickname2string(response2, len: 8)}, '
           'central: ${event.central.uuid}');
     }
     // 認証が終わったので後片付け．
     _PeripheralState.peripherals.remove(event.central.uuid);
     await PeripheralManager().respondWriteRequest(event.request);
-    return verificationResult2;
+      return verified2;
   }
 }
 
@@ -333,16 +343,20 @@ enum _State {
   const _State(this.value);
 }
 
+/// BLE Peripheral 側で，接続している central との状態を保持するためのクラス
+// Bluetooth_low_energy パッケージの Peripheral オブジェクトに Expando オブジェクトを貼り付けたほうがいいのかもしれない．
 class _PeripheralState {
   static final LinkedHashMap<UUID, _PeripheralState> peripherals = LinkedHashMap();
   final Central central;
   late _State state;
-  late final DateTime time;        // 古いものを削除する（ToDo: 5分経過したものを削除．メモリリーク対策）
   final Uint8List challenge1;      // centralからperipheralへ
   late final Uint8List response1;  // peripheralからcentralへ
   late final Uint8List challenge2; // peripheralからcentralへ
   late final Uint8List response2;  // centralからperipheralへ
   final Uint8List centralNickname; // centralのニックネーム（centralの認証に使う）
+
+  // ToDo: 生成から5分経過したものを削除しないとメモリリークする．メモリリーク対策
+  late final DateTime time;        // オブジェクトの生成時刻
 
   _PeripheralState({required this.central, required this.challenge1, required this.centralNickname}) {
     state = _State.first;
