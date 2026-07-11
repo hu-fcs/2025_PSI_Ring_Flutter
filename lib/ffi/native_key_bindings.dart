@@ -217,4 +217,94 @@ class NativeKeyBindings {
           ffi.Pointer<ffi.Uint8>,
           ffi.Pointer<ffi.Int32>,
           )>();
+  /// ECDSA チャレンジ署名 (secp256r1, 署名は r||s の 64バイト)
+  ///
+  /// C 側シグネチャ:
+  /// int ecdsa_sign_challenge(
+  ///   const uint8_t* priv_key_32b,
+  ///   const uint8_t* msg,
+  ///   uint32_t msg_len,
+  ///   uint8_t* out_sig64
+  /// );
+  int ecdsa_sign_challenge(
+      ffi.Pointer<ffi.Uint8> priv_key_32b,
+      ffi.Pointer<ffi.Uint8> msg,
+      int msg_len,
+      ffi.Pointer<ffi.Uint8> out_sig64,
+      ) {
+    return _ecdsa_sign_challenge(
+      priv_key_32b,
+      msg,
+      msg_len,
+      out_sig64,
+    );
+  }
+
+  /// ECDSA チャレンジ検証 (secp256r1, 署名は r||s の 64バイト)
+  ///
+  /// C 側シグネチャ:
+  /// int ecdsa_verify_challenge(
+  ///   const uint8_t* pub_key_33b,
+  ///   const uint8_t* msg,
+  ///   uint32_t msg_len,
+  ///   const uint8_t* sig64
+  /// );
+  int ecdsa_verify_challenge(
+      ffi.Pointer<ffi.Uint8> pub_key_33b,
+      ffi.Pointer<ffi.Uint8> msg,
+      int msg_len,
+      ffi.Pointer<ffi.Uint8> sig64,
+      ) {
+    return _ecdsa_verify_challenge(
+      pub_key_33b,
+      msg,
+      msg_len,
+      sig64,
+    );
+  }
+  // C: int ecdsa_sign_challenge(
+  //      const uint8_t* priv_key_32b,
+  //      const uint8_t* msg,
+  //      uint32_t msg_len,
+  //      uint8_t* out_sig64);
+  late final _ecdsa_sign_challengePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int Function(
+              ffi.Pointer<ffi.Uint8>, // priv_key_32b
+              ffi.Pointer<ffi.Uint8>, // msg
+              ffi.Uint32,             // msg_len
+              ffi.Pointer<ffi.Uint8>, // out_sig64 (64 bytes)
+              )>>('ecdsa_sign_challenge');
+
+  late final _ecdsa_sign_challenge =
+  _ecdsa_sign_challengePtr.asFunction<
+      int Function(
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          )>();
+
+  // C: int ecdsa_verify_challenge(
+  //      const uint8_t* pub_key_33b,
+  //      const uint8_t* msg,
+  //      uint32_t msg_len,
+  //      const uint8_t* sig64);
+  late final _ecdsa_verify_challengePtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int Function(
+              ffi.Pointer<ffi.Uint8>, // pub_key_33b
+              ffi.Pointer<ffi.Uint8>, // msg
+              ffi.Uint32,             // msg_len
+              ffi.Pointer<ffi.Uint8>, // sig64 (64 bytes)
+              )>>('ecdsa_verify_challenge');
+
+  late final _ecdsa_verify_challenge =
+  _ecdsa_verify_challengePtr.asFunction<
+      int Function(
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          )>();
 }

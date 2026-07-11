@@ -21,7 +21,7 @@ library; // 上のドキュメントコメントをファイルに対するコ�
 import 'dart:async';      // Timer
 // import 'dart:js_interop';
 import 'dart:typed_data'; // Uint8List
-import 'dart:math' show min, Random;       // min
+import 'dart:math' show Random;       // min
 // import 'dart:collection';
 import 'package:flutter/foundation.dart'; // kDebugMode
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
@@ -110,6 +110,7 @@ class BleNickname extends ChangeNotifier {
   }
 
   /// クラスが破棄される時にストリーム・コントローラーを閉じる
+  @override
   void dispose() {
     // _localNicknameStreamController.close();
     _timer?.cancel();
@@ -135,11 +136,15 @@ class BleNickname extends ChangeNotifier {
   /// ニックネームの前回のスロット
   int _lastSlotStartTime = 0;
   /// ニックネームの前回のニックネーム
-  Uint8List _lastNickname = Uint8List(33);
+  Uint8List _lastLocalNickname = Uint8List(33);
   /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
-  Uint8List get localNickname => _lastNickname;
-  ///
-  final _random = Random();
+  Uint8List get localNickname => _lastLocalNickname;
+  /// ニックネームの前回のニックネーム
+  Uint8List _lastLocalPrivateKey = Uint8List(33); // ToDo: KeyPairを保持したほうがいよさそう
+  /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
+  Uint8List get lastLocalPrivateKey => _lastLocalPrivateKey;
+
+  final _insecureRandom = Random();
 
   /// ニックネームの更新（タイマーで呼び出す）
   /// validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
@@ -150,10 +155,10 @@ class BleNickname extends ChangeNotifier {
       _timer?.cancel();
       _timer = Timer.periodic(validDuration, _updateNickname);
     }
-    if (_lastNickname[0] != 0x00) {
+    if (_lastLocalNickname[0] != 0x00) {
       // [0] == 0x00の場合，アプリ実行後の最初のニックネームでは，待ち時間なし．
       // ニックネームの更新
-      final jitter = _random.nextInt(validDuration.inMilliseconds ~/ 2);
+      final jitter = _insecureRandom.nextInt(validDuration.inMilliseconds ~/ 2);
       await Future.delayed(Duration(milliseconds: jitter));
     }
     // 杉浦プロジェクトと同様（3行）
@@ -163,36 +168,47 @@ class BleNickname extends ChangeNotifier {
 
     if (_lastSlotStartTime != slotStartTime) { // 時間が経っていなら更新しない．
       _lastSlotStartTime = slotStartTime;
-      _lastNickname = await _kms.getPublicKeyForBleAdvertise().catchError((e, st) {
+      final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
         if (kDebugMode) {
-          debugPrint('_updateNickname: getPublicKeyForBleAdvertise failed: $e');
+          debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
         }
         throw e;
       });
+      _lastLocalNickname = keyPair.publicKey;
+      _lastLocalPrivateKey = keyPair.privateKey;
+
       if (_advertiser.isAdvertising) {
         await _advertiser.restart();
       }
-      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
+      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastLocalNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
     }
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
     // BleRemoteMap().addRemote(_lastNickname!, DateTime.now(), local: true);
   }
 
   Future<void> _start() async {
-    _lastNickname = await _kms.getPublicKeyForBleAdvertise().catchError((e, st) {
+    final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
       if (kDebugMode) {
-        debugPrint('BleNickname: start failed: $e');
+        debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
       }
       throw e;
     });
-    if (kDebugMode) print('nickname _start ${nickname2string(_lastNickname)} ${_kms.slotMs}');
+    _lastLocalNickname = keyPair.publicKey;
+    _lastLocalPrivateKey = keyPair.privateKey;
+    if (kDebugMode) print('nickname _start ${nickname2string(_lastLocalNickname)} ${_kms.slotMs}');
     // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
   }
+
+  /// リモートのニックネームをリモートのuuidから探せるようにするMap
+  /// ペリフェラルが相互認証するときにセントラルのニックネームを調べる必要があるため
+  final Map<UUID, ({Uint8List nickname, DateTime time})> _remoteNicknameCache = {};
+  /// _remoteNicknameCache から古いエントリーを削除するためのタイマー
+  Timer? _remoteNicknameCacheTimer;
 
   /// リモートのニックネームを追加
   Future<void> addRemote(Uint8List nickname, DateTime now, {UUID? peripheralUuid, UUID? centralUuid, bool local = false}) async {
     if (! local) { // リモートのニックネームを追加
-      // 収集鍵として登録する
+      // 収集鍵として collected_keys テーブルに登録する
       final inserted = await _kms.insertCollectedKeyIfAbsent(
         pubkey33: nickname,
         receivedAtMs: now.millisecondsSinceEpoch,
@@ -202,8 +218,33 @@ class BleNickname extends ChangeNotifier {
           debugPrint('BLE_SCAN: new collected key stored');
         }
       }
+
+      // 相互認証のPeripheral側でCentralのニックネームを探せるように記録する
+      if (centralUuid != null) {
+        _remoteNicknameCache[centralUuid] = (nickname: nickname, time: now);
+
+        // _remoteNicknameCache に残っている古いエントリーを削除するために周期タイマーを動かす．
+        // もし，すでにタイマーがセットいたら，新しいタイマーは動かさない
+        _remoteNicknameCacheTimer ??= Timer.periodic(const Duration(minutes: 30), (timer) {
+          // タイマーの動作．30分経過したリモートニックネームは _remoteNicknameCache から削除する
+          final expireTime = DateTime.now().subtract(Duration(minutes: 3));
+          _remoteNicknameCache.removeWhere((key, value) =>
+              value.time.isBefore(expireTime));
+          // _remoteNicknameCache から空になったら周期タイマーを停止
+          if (_remoteNicknameCache.isEmpty) {
+            timer.cancel();
+            _remoteNicknameCacheTimer = null;
+          }
+        });
+      }
     }
   }
+
+  /// Peripheral側でCentralのニックネームを探す．
+  Uint8List? findRemoteNickname(UUID centralUuid) => _remoteNicknameCache[centralUuid]?.nickname;
+
+  /// 友達ニックネームにマッチした & 認証結果を UI に通知するためのコールバック
+  void Function(String friendLabel, bool authenticated)? onFriendDetected;
 
   /// 33バイトのニックネームを16進表現の文字列にして，4バイトごとに_アンダースコアで区切る．クラスメソッド．主にデバッグ用
   static String nickname2string(Uint8List bytes, {int len = 0}) {
@@ -211,7 +252,7 @@ class BleNickname extends ChangeNotifier {
     final hexString = hex.encode(bytes.sublist(0, len));
     final joined = RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
     if (len < bytes.length) {
-      return joined + '...';
+      return '$joined...(${bytes.length})';
     } else {
       return joined;
     }

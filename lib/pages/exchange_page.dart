@@ -3,7 +3,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -12,11 +14,28 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../ble/nickname.dart';
+import '../key_management.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
+import '../grpc/grpc_client.dart';
 import 'debug_page.dart';
 
+enum NicknameSchedulePeriod { oneDay, oneWeek, oneMonth }
+
+extension NicknameSchedulePeriodExt on NicknameSchedulePeriod {
+  String get label => switch (this) {
+    NicknameSchedulePeriod.oneDay => '1日',
+    NicknameSchedulePeriod.oneWeek => '1週間',
+    NicknameSchedulePeriod.oneMonth => '1か月',
+  };
+
+  Duration get duration => switch (this) {
+    NicknameSchedulePeriod.oneDay => const Duration(days: 1),
+    NicknameSchedulePeriod.oneWeek => const Duration(days: 7),
+    NicknameSchedulePeriod.oneMonth => const Duration(days: 30),
+  };
+}
 /// 近接記録（BLE）と顔見知り確認（gRPC）を操作する画面。
 ///
 /// - BLE: 周辺端末へ仮名（公開鍵断片）を広告し，同時に周囲の仮名を収集する。
@@ -40,6 +59,65 @@ class _ExchangePageState extends State<ExchangePage> {
   final _db = DatabaseHelper();
 
   Future<bool> _hasAnyKey() async => (await _db.getTotalKeyCount()) > 0;
+
+  final _ownerNameController = TextEditingController(text: '自分の端末');
+  final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
+  final _portController = TextEditingController(text: '50051');
+
+  NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
+
+  final _grpcClient = GrpcClient();
+  // 近くにいる友達一覧（最後に見えた時刻も保持）
+  final Map<String, int> _nearbyLastSeenMs = {};
+  final Map<String, bool> _nearbyAuth = {};
+  Timer? _nearbyGcTimer;
+
+  static const Duration _nearbyTtl = Duration(seconds: 30); // 30秒見えなければ消す
+  // 認証OKを保持する時間
+  static const Duration _authHold = Duration(seconds: 30);
+  // friendLabelごとに「最後にOKになった時刻」を保存
+  final Map<String, int> _authOkLastMs = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _ble.onFriendDetected = _onFriendDetected;
+
+    _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final expired = _nearbyLastSeenMs.entries
+          .where((e) => now - e.value > _nearbyTtl.inMilliseconds)
+          .map((e) => e.key)
+          .toList();
+
+      if (expired.isEmpty) return;
+      setState(() {
+        for (final k in expired) {
+          _nearbyLastSeenMs.remove(k);
+          _nearbyAuth.remove(k);
+        }
+      });
+    });
+  }
+
+  // よく使うTextStyle．カスタマイズした Theme.of(context).textTheme
+  late TextStyle _textThemeBodySmallGreyShade600; // 説明のテキストで使うスタイル
+
+  @override
+  void didChangeDependencies() { // 画面が立ち上がった時などに呼び出される．
+    super.didChangeDependencies();
+    _textThemeBodySmallGreyShade600 = Theme.of(context).textTheme.bodySmall
+        !.copyWith(color: Colors.grey.shade600); // 説明のテキストで使われることが多い．
+  }
+
+  @override
+  void dispose() {
+    _nearbyGcTimer?.cancel();
+    _ownerNameController.dispose();
+    _hostController.dispose();
+    _portController.dispose();
+    super.dispose();
+  }
 
   Future<bool> _requireKeyWarning() async {
     if (await _hasAnyKey()) return true;
@@ -108,23 +186,42 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<String?> _getLocalWifiIp() async {
     try {
       final interfaces = await NetworkInterface.list();
+      // Android: wlan0（J9110実機  や Androidエミュレータ 36.6.11 など）
+      // iOS:     en0（らしい）ToDo: 要確認
+      // メモ：Androidエミュレータの eth0 はエミュレータ間で同じアドレスになっているので使わない．
       for (final i in interfaces) {
-        if (i.name == 'wlan0') {
+        if (i.name == 'wlan0' || i.name == 'en0') {
           for (final a in i.addresses) {
             if (a.type == InternetAddressType.IPv4) return a.address;
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (kDebugMode) debugPrint('ERROR in _getLocalWifiIp $e'); // PlatformExceptionにする？
+    }
     return null;
   }
 
   Future<void> _showQr() async {
     if (!await _requireKeyWarning()) return;
-    if (_grpcRunning) return;
+    if (_grpcRunning) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('すでにgRPCサーバが起動しています')),
+        );
+      }
+      return;
+    }
 
     final ip = await _getLocalWifiIp();
-    if (ip == null) return;
+    if (ip == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ネットワークが利用できません')),
+        );
+      }
+      return;
+    }
 
     final server = PsiGrpcServer();
     final port = await server.start(port: _serverPort);
@@ -159,6 +256,83 @@ class _ExchangePageState extends State<ExchangePage> {
     final result = await Navigator.pushNamed(context, '/scanner');
     if (result is PsiResult) {
       _showUnifiedPsiDialog(result, isServerSide: false);
+    }
+  }
+
+  void _onFriendDetected(String friendLabel, bool authenticated) {
+    if (!mounted) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // 初回だけSnackBar（連発防止）
+    final isNew = !_nearbyLastSeenMs.containsKey(friendLabel);
+
+    // 以前の認証状態
+    final prevAuth = _nearbyAuth[friendLabel] ?? false;
+
+    // 署名検証が通った“本当のOK”が来たら、OK時刻を更新
+    if (authenticated) {
+      _authOkLastMs[friendLabel] = now;
+    }
+
+    // OK保持中かどうか（保持中は false が来てもOK扱いにする）
+    final lastOk = _authOkLastMs[friendLabel] ?? 0;
+    final keepOk = (now - lastOk) < _authHold.inMilliseconds;
+
+    // 表示上の認証状態
+    final effectiveAuth = authenticated || keepOk;
+
+    // ★昇格判定（未認証→認証OKになった瞬間）
+    // これは “authenticated=true” が来た瞬間だけを昇格としたいので、そのまま
+    final isUpgrade = !prevAuth && authenticated;
+
+    setState(() {
+      _nearbyLastSeenMs[friendLabel] = now;
+
+      // 降格は「保持時間が切れた時」だけ許可
+      _nearbyAuth[friendLabel] = effectiveAuth;
+    });
+
+    // 昇格のときに出す
+    if (isNew || isUpgrade) {
+      final msg = authenticated
+          ? '近くで $friendLabel さんを検出しました ✅'
+          : '近くで $friendLabel さん候補を検出しました';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Future<void> _generateAndShare() async {
+    final owner = _ownerNameController.text.trim();
+    final host = _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim());
+
+    if (owner.isEmpty || host.isEmpty || port == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('名前 / ホスト / ポートを正しく入力してください')),
+      );
+      return;
+    }
+
+    const slot = Duration(minutes: 10);
+    final period = _selectedPeriod.duration;
+
+    try {
+      // 1) gRPC 送信（nickname_schedule JSON）
+      await _grpcClient.connect(host,port); // 既存実装に合わせて
+      await _grpcClient.exchangeNicknameSchedule(
+        ownerName: owner,
+        period: period,
+        slot: slot,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('共有に失敗: $e')),
+      );
     }
   }
 
@@ -279,12 +453,8 @@ class _ExchangePageState extends State<ExchangePage> {
                   const SizedBox(width: 8),
                   Text(
                     familiar ? '顔見知りです' : '見知らぬ人です',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: titleColor,
-                    ),
-                  ),
+                    style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold, color: titleColor)),
                 ],
               ),
               const SizedBox(height: 20),
@@ -300,21 +470,11 @@ class _ExchangePageState extends State<ExchangePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '会った回数',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
+                    Text('会った回数',
+                        style: Theme.of(context).textTheme.titleSmall),
                     const SizedBox(height: 4),
-                    Text(
-                      '${stats.count} 回',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text('${stats.count} 回',
+                        style: Theme.of(context).textTheme.headlineLarge),
                     const SizedBox(height: 10),
                     Row(
                       children: [
@@ -322,23 +482,13 @@ class _ExchangePageState extends State<ExchangePage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                '初めて会った',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                              Text('初めて会った',
+                                  style: Theme.of(context).textTheme.titleSmall),
                               const SizedBox(height: 4),
-                              Text(
-                                stats.first == null
-                                    ? 'N/A'
-                                    : _fmtTime(stats.first!),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                              Text(stats.first == null
+                                  ? 'N/A'
+                                  : _fmtTime(stats.first!),
+                                  style: Theme.of(context).textTheme.bodyLarge),
                             ],
                           ),
                         ),
@@ -362,23 +512,13 @@ class _ExchangePageState extends State<ExchangePage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                '最後に会った',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
+                              Text('最後に会った',
+                                  style: Theme.of(context).textTheme.titleSmall),
                               const SizedBox(height: 4),
-                              Text(
-                                stats.last == null
-                                    ? 'N/A'
-                                    : _fmtTime(stats.last!),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                              Text(stats.last == null
+                                  ? 'N/A'
+                                  : _fmtTime(stats.last!),
+                                  style: Theme.of(context).textTheme.bodyLarge),
                             ],
                           ),
                         ),
@@ -406,13 +546,12 @@ class _ExchangePageState extends State<ExchangePage> {
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: EdgeInsets.zero,
                   initiallyExpanded: false,
-                  title: Text(
-                    'デバッグ情報',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  title: Row(
+                    children: [
+                      const Icon(Icons.bug_report),
+                      Text('デバッグ情報',
+                          style: _textThemeBodySmallGreyShade600),
+                    ]
                   ),
                   trailing: Icon(
                     Icons.expand_more,
@@ -526,28 +665,28 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Widget _debugRowWidget(Widget label, String value) {
-    final s = TextStyle(fontSize: 11, color: Colors.grey.shade600);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          DefaultTextStyle.merge(style: s, child: label),
+          DefaultTextStyle.merge(
+              style: _textThemeBodySmallGreyShade600,
+              child: label),
           const Spacer(),
-          Text(value, style: s),
+          Text(value, style: _textThemeBodySmallGreyShade600),
         ],
       ),
     );
   }
 
   Widget _debugRow(String label, String value) {
-    final s = TextStyle(fontSize: 11, color: Colors.grey.shade600);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Text('$label:', style: s),
+          Text('$label:', style: _textThemeBodySmallGreyShade600),
           const Spacer(),
-          Text(value, style: s),
+          Text(value, style: _textThemeBodySmallGreyShade600),
         ],
       ),
     );
@@ -580,7 +719,11 @@ class _ExchangePageState extends State<ExchangePage> {
           const SizedBox(height: 20),
           _bleCard(),
           const SizedBox(height: 20),
+          _friendCard(),
+          const SizedBox(height: 20),
           _familiarCheckCard(),
+          const SizedBox(height: 20),
+          _futureNicknameShareCard(),
         ],
       ),
     );
@@ -619,10 +762,9 @@ class _ExchangePageState extends State<ExchangePage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  '近くの端末と匿名で鍵を交換します',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
+                Text('近くの端末と匿名のニックネームを交換します',
+                    style: _textThemeBodySmallGreyShade600),
+                // style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ],
             ),
           ),
@@ -641,9 +783,53 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
 
+  Widget _friendCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.person, size: 22),
+              const SizedBox(width: 8),
+              Text(_nearbyLastSeenMs.isEmpty
+                  ? '近くの友達：なし'
+                  : '近くの友達：${_nearbyLastSeenMs.length}人',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ],
+          ),
+          if (_nearbyLastSeenMs.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ..._nearbyLastSeenMs.keys.map((name) {
+              final ok = _nearbyAuth[name] ?? false;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Icon(ok ? Icons.verified : Icons.person, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(name)),
+                    Text(ok ? 'OK' : '未認証',
+                        style: Theme.of(context).textTheme.bodySmall),
+                        // style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _familiarCheckCard() {
     return _card(
-      icon: Icons.cloud,
+      icon: Icons.history, // Icons.cloud,
       title: '顔見知りチェック',
       description: '過去に会ったことがあるかを確認します',
       trailing: const SizedBox.shrink(),
@@ -651,22 +837,80 @@ class _ExchangePageState extends State<ExchangePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-          Text(
-            '使い方',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade800,
-            ),
-          ),
+          Text('使い方',
+              style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text(
-            '・一方の端末で「QRを表示する」をタップ\n'
-                '・もう一方の端末で「QRを読み取る」をタップ',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-          ),
+          Text('・一方の端末で「QRを表示する」をタップ\n'
+              '・もう一方の端末で「QRを読み取る」をタップ',
+              style: _textThemeBodySmallGreyShade600),
+                  // ?.copyWith(color: Colors.grey.shade700)),
           const SizedBox(height: 14),
           _grpcRunning ? _qrDisplaySection() : _qrActionButtons(),
+        ],
+      ),
+    );
+  }
+
+  Widget _futureNicknameShareCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.handshake, size: 22), // Icons.sync
+              const SizedBox(width: 8),
+              Text('将来ニックネームの共有（送信側）',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ],
+          ),
+          TextField(
+            controller: _ownerNameController,
+            decoration: const InputDecoration(labelText: '相手に表示される自分の名前'),
+          ),
+          const SizedBox(height: 8),
+
+          TextField(
+            controller: _hostController,
+            decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
+          ),
+          const SizedBox(height: 8),
+
+          TextField(
+            controller: _portController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'ポート'),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: InputDecoration(
+              labelText: '共有期間',
+              helper: Text('この期間分の将来ニックネームを生成し、相手端末へ共有します。',
+                  style: _textThemeBodySmallGreyShade600),
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<NicknameSchedulePeriod>(
+                value: _selectedPeriod,
+                isExpanded: true,
+                items: NicknameSchedulePeriod.values
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p.label)))
+                    .toList(),
+                onChanged: (p) => setState(() => _selectedPeriod = p!),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _generateAndShare,
+            child: const Text('生成して共有'),
+          ),
         ],
       ),
     );
@@ -698,14 +942,8 @@ class _ExchangePageState extends State<ExchangePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'このQRを相手に見せてください',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade800,
-          ),
-        ),
+        Text('このQRコードを相手に見せてください',
+            style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 10),
         Center(
           child: QrImageView(
@@ -714,22 +952,11 @@ class _ExchangePageState extends State<ExchangePage> {
           ),
         ),
         const SizedBox(height: 10),
-        Text(
-          _serverIp!,
-          style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade800,
-          ),
-        ),
-        Text(
-          _serverPort.toString(),
-          style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey.shade800,
-          ),
-        ),
+        Text('IPアドレス：${_serverIp!}',
+            style: _textThemeBodySmallGreyShade600),
+        Text('ポート番号：${_serverPort.toString()}',
+            style: _textThemeBodySmallGreyShade600),
+        const SizedBox(height: 10),
         Center(
           child: OutlinedButton.icon(
             onPressed: _stopQr,
@@ -767,10 +994,8 @@ class _ExchangePageState extends State<ExchangePage> {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            description,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-          ),
+          Text(description,
+              style: _textThemeBodySmallGreyShade600),
           if (extra != null) extra,
         ],
       ),
@@ -790,14 +1015,10 @@ class _ExchangePageState extends State<ExchangePage> {
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
+          Text(label,
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.bold, color: color)),
+              // style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color),
         ],
       ),
     );

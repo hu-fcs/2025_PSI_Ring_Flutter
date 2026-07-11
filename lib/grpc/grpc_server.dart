@@ -4,14 +4,17 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
+import 'package:fixnum/fixnum.dart' as $fixnum show Int64;
 
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management.dart';
+import '../db/friends_dao.dart';
 import 'grpc_common.dart';
 
 /// gRPC サーバ実装（PSI + リング署名）。
@@ -53,7 +56,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
     // 鍵更新を検知したら PSI 用の鍵セットを再構築する
     _kms.onKeyUpdated.listen((_) async {
       if (kDebugMode) {
-        debugPrint('[SERVER] keys updated; reload PSI set');
+        debugPrint('[GRPC SERVER] keys updated; reload PSI set');
       }
       await _reloadKeys();
     });
@@ -63,7 +66,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
   Future<void> _initialize() async {
     if (kDebugMode) {
-      debugPrint('[SERVER] init');
+      debugPrint('[GRPC SERVER] init');
     }
     _mySecret = _keyService.generateRandomSecret();
     await _reloadKeys();
@@ -80,7 +83,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     if (kDebugMode) {
       debugPrint(
-        '[SERVER] keys loaded: generated=${generated.length}, collected=${collected.length}',
+        '[GRPC SERVER] keys loaded: generated=${generated.length}, collected=${collected.length}',
       );
     }
   }
@@ -210,7 +213,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
   Future<Uint8List> _computeServerSignatureAsync() async {
     if (kDebugMode) {
-      debugPrint('[SERVER] create ring signature');
+      debugPrint('[GRPC SERVER] create ring signature');
     }
 
     final sel = _ringSelection ?? await _ringSelectionFuture!;
@@ -356,6 +359,75 @@ class GrpcServiceImpl extends GrpcServiceBase {
       }
     }
     return result;
+  }
+
+  @override
+  Future<NicknameScheduleReqResp> exchangeNicknameSchedule(
+      ServiceCall call, NicknameScheduleReqResp request) async {
+    // 相手（GRPCサーバ）に表示させたい自分（GRPCクライアント）の名前（ニックネーム）
+    final ownerName = request.ownerName;   // String
+    // 何日先までのニックネームか（日単位）
+    final periodDays = request.periodDays; // Int64
+    final period = Duration(days: periodDays.toInt());
+    // 一つのニックネームの有効時間（ミリ秒単位）
+    final slotMs = request.slotMs;         // Int64
+    final slot = Duration(milliseconds: slotMs.toInt());
+    // 最初のニックネームの開始時刻（ミリ秒単位）
+    final firstSlotMs = request.firstSlotMs;   // Int64
+    var firstSlot = DateTime.fromMillisecondsSinceEpoch(firstSlotMs.toInt());
+    // 将来ニックネームのリスト．KeyManagementService.generateFutureNicknameList() の結果
+    final nicknameList = request.nicknameList
+        .map((bytes) => Uint8List.fromList(bytes))
+        .toList(); // PbList<List<int>> を List<Uint8List> に
+
+    if (kDebugMode) {
+      debugPrint('[GRPC SERVER] exchangeNicknameSchedule: client_name $ownerName, '
+          '${nicknameList.length} slots, period.inDays=${period.inDays} slot.inMS=${slot.inMilliseconds}');
+    }
+
+    // 1. friends テーブルに登録
+    final friendsDao = FriendsDao.instance;
+    final friendId = await friendsDao.insertFriend(label: ownerName, note: null);
+
+    // 2. friend_nicknames テーブルにまとめて保存
+    await friendsDao.insertFriendNicknames(
+      friendId: friendId,
+      firstSlot: firstSlot,
+      slot: slot,
+      nicknameList: nicknameList,
+    );
+
+    // ToDo: クラアント側と同じように．ユーザに通知する．
+    // クライアント側は SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
+    // SnackBarにこだわる必要はないと思う．
+
+    // 3. 返送する将来ニックネームを計算する
+    final (localNicknameList, _) = await _kms.generateFutureNicknameList(
+        firstSlotStartIn: firstSlot, period: period);
+
+    return NicknameScheduleReqResp()
+        ..ownerName = '仮の名前 GPRC' // ToDo: 自分の名前を取得する
+        ..periodDays = periodDays
+        ..slotMs = slotMs
+        ..firstSlotMs = firstSlotMs
+        ..nicknameList.addAll(localNicknameList)
+        ..ackLength = $fixnum.Int64(nicknameList.length);
+    // throw UnimplementedError();
+  }
+
+  @override
+  Future<NicknameScheduleAckResp> exchangeNicknameScheduleAck(
+      ServiceCall call, NicknameScheduleAckReq request) async {
+    // TODO: 送ったニックネームがすべて届けられたか確認していない
+    // 相手（GRPCサーバ）に表示させたい自分（GRPCクライアント）の名前（ニックネーム）
+    final ownerName = request.ownerName;   // String
+    // クライアントに届いたニックネーム数の確認
+    final ackLength = request.ackLength.toInt();
+    if (kDebugMode) {
+      debugPrint('[GRPC SERVER] exchangeNicknameSchedule: ACK client_name $ownerName, length $ackLength slots');
+    }
+    return NicknameScheduleAckResp();
+    //throw UnimplementedError();
   }
 }
 

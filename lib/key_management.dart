@@ -34,7 +34,9 @@ class KeyManagementService {
   /// 時刻スロット幅（ミリ秒）
   ///
   /// 既定は 10 分。DebugPage 等から変更できる。
-  int slotMs = 10 * 60 * 1000;
+  int _slotMs = 10 * 60 * 1000;
+  int get slotMs => _slotMs;
+  set slotMs(int value) => _slotMs = value; // デバッグ用
 
   /// 鍵の追加・更新を通知するストリーム（BLE / UI / gRPC で利用）
   final StreamController<void> _keyUpdatedController =
@@ -57,8 +59,7 @@ class KeyManagementService {
     return (p == 0x02 || p == 0x03);
   }
 
-  // ----- 位置情報の後付け（generated_keys のみ） -----
-
+  /// generated_keysテーブルに位置情報を後付けする（generated_keys のみ）
   void _attachLocationAsync({required Uint8List pubkey33}) {
     // 位置情報の取得は非同期で行い，鍵生成や UI をブロックしない
     () async {
@@ -110,7 +111,16 @@ class KeyManagementService {
   }
 
   Future<Uint8List?> _ensureMasterKey() async {
-    final stored = await _secureStorage.read(key: _masterKeyAlias);
+    late final String? stored;
+    try {
+      stored = await _secureStorage.read(key: _masterKeyAlias);
+      // ToDo: _secureStorage.read()でUnhandled Exceptionが起こるとアプリケーションが表示されない．再現方法がわからない．
+      // PlatformException(Exception encountered, read, javax.crypto.IllegalBlockSizeException: error:1e00007b:Cipher functions:OPENSSL_internal:WRONG_FINAL_BLOCK_LENGTH
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('ERROR KMS: master key read $e');
+      }
+    }
     if (stored != null) {
       if (kDebugMode) {
         debugPrint('KMS: master key loaded');
@@ -138,10 +148,15 @@ class KeyManagementService {
   }
 
   // ----- Advertise（仮名公開鍵の取得） -----
-
-  Future<Uint8List?> _getPublicKeyForAdvertise() async {
+  /// BLEでAdvertiseするKeyPairを返す．KeyPairはニックネームと秘密鍵．
+  /// 生成済みのもの generated_keys テーブルにがあればそれを返す．
+  /// テーブルになければ生成してテーブルに追加してから返す．
+  /// 非同期に，テーブルのエントリに位置情報を追加する．
+  Future<KeyPair> _getKeyPairForAdvertise() async {
     final masterKey = await _ensureMasterKey();
-    if (masterKey == null) return null;
+    if (masterKey == null) {
+      throw StateError('Failed to obtain master key in KeyManagementService.');
+    }
 
     final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -155,25 +170,28 @@ class KeyManagementService {
     // 位置情報が未設定の場合のみ，後付けを試みる
     final existing = await db.query(
       'generated_keys',
-      columns: const ['pubkey_ecd', 'lat', 'lon'],
+      columns: const ['seckey_ecd', 'pubkey_ecd', 'lat', 'lon'],
       where: 'generate_time = ? AND expire_time > ?',
       whereArgs: [slotStartTime, now],
       limit: 1,
     );
 
     if (existing.isNotEmpty) {
+      final pri = Uint8List.fromList(existing.first['seckey_ecd'] as Uint8List);
       final pub = existing.first['pubkey_ecd'] as Uint8List;
       final lat = existing.first['lat'] as int?;
       final lon = existing.first['lon'] as int?;
       if (lat == null || lon == null) {
         _attachLocationAsync(pubkey33: pub);
       }
-      return pub;
+      return KeyPair(pri, pub);;
     }
 
     // スロットに対応する鍵対を導出する
     final keyPair = _nativeKeyService.deriveNewKeyPair(masterKey, now, slotMs);
-    if (keyPair == null) return null;
+    if (keyPair == null) {
+      throw StateError('Failed to obtain new key pair in KeyManagementService.');
+    }
 
     // 位置情報は後付けのため，まず NULL で保存する
     await db.insert('generated_keys', {
@@ -186,22 +204,21 @@ class KeyManagementService {
     });
 
     _attachLocationAsync(pubkey33: keyPair.publicKey);
-    return keyPair.publicKey;
+    return keyPair;
   }
 
-  // ----- BLE 用（圧縮公開鍵の検証つき） -----
-
-  Future<Uint8List> getPublicKeyForBleAdvertise() async {
-    final Uint8List? pubKey33 = await _getPublicKeyForAdvertise();
-    if (pubKey33 == null) {
+  /// BLEでAdvertiseするKeyPairを返す．KeyPairはニックネームと秘密鍵．
+  Future<KeyPair> getKeyPairForBleAdvertise() async {
+    final keyPair = await _getKeyPairForAdvertise();
+    if (keyPair == null) {
       throw StateError('Failed to obtain public key from KeyManagementService.');
     }
-    if (!_isValidCompressedPubkey33(pubKey33)) {
+    if (!_isValidCompressedPubkey33(keyPair.publicKey)) {
       throw StateError(
         'Invalid compressed public key (expected 33 bytes starting with 0x02/0x03).',
       );
     }
-    return pubKey33;
+    return keyPair;
   }
 
   // ----- collected_keys: 存在確認（BleScanner 用） -----
@@ -222,6 +239,7 @@ class KeyManagementService {
 
   // ----- collected_keys: 追加（BleScanner 用） -----
 
+  // ToDo: 同名の関数 insertCollectedKeyIfAbsent が database_helper.dart にもあるので整理したい．
   Future<bool> insertCollectedKeyIfAbsent({
     required Uint8List pubkey33,
     required int receivedAtMs,
@@ -258,22 +276,65 @@ class KeyManagementService {
     }
   }
 
-  /*
-  /// 互換のために残す。内部は insertCollectedKeyIfAbsent を呼ぶ。
-  Future<void> insertCollectedBlePublicKey({
-    required Uint8List pubkey33,
-    required int receivedAtMs,
+  /// 将来分のニックネーム（圧縮公開鍵）リストを生成する
+  ///
+  /// [firstSlotStartIn]   : 最初のニックネームの開始時刻（丸め処理があるので現在時刻でよい)
+  /// [period] : どこまで先を生成するか（例: 1日 or 7日）
+  ///
+  /// [nicknameList]と[firstSlotStartMs]を返します．
+  /// [nicknameList] : ニックネーム（公開鍵）のリスト
+  /// [firstSlotStart] : ニックネームの開始時刻（ミリ秒）を返す
+  Future<(List<Uint8List>, DateTime)> generateFutureNicknameList({
+    required DateTime firstSlotStartIn,
+    required Duration period,
   }) async {
-    await insertCollectedKeyIfAbsent(
-      pubkey33: pubkey33,
-      receivedAtMs: receivedAtMs,
-    );
+    // 1. マスターキーを確保（なければ生成）
+    final masterKey = await _ensureMasterKey();
+    if (masterKey == null) {
+      throw StateError('Master key not available');
+    }
+
+    // 2. 現在時刻とスロット長（ミリ秒）を計算
+    final nowMs = firstSlotStartIn.millisecondsSinceEpoch;
+
+    // 3. 「いま属しているスロットの開始時刻」に丸める
+    final firstSlotStartMs = (nowMs ~/ slotMs) * slotMs;
+    final firstSlotStart = DateTime.fromMillisecondsSinceEpoch(firstSlotStartMs);
+
+    // 4. 何スロット分生成するかを計算（切り上げ）
+    final totalMs = period.inMilliseconds;
+    final slotCount = (totalMs / _slotMs).ceil();
+    if (slotCount <= 0) {
+      return (<Uint8List>[], firstSlotStart);
+    }
+
+    final List<Uint8List> nicknameList = [];
+
+    // 5. 各スロットごとに公開鍵を生成
+    var slotStartMs = firstSlotStartMs;
+    for (var i = 0; i < slotCount; i++) {
+      // 既存のネイティブ関数で「マスターキー＋スロット時刻」から鍵ペアを導出
+      final keyPair = _nativeKeyService.deriveNewKeyPair(
+        masterKey,
+        slotStartMs,
+        slotMs,
+      );
+      slotStartMs += slotMs;
+
+      // 何らかの理由で生成に失敗したらスキップ
+      if (keyPair == null) {
+        continue;
+      }
+
+      nicknameList.add(keyPair.publicKey);
+    }
+
+    return (nicknameList, firstSlotStart);
   }
-  */
 
   // ----- 鍵取得 -----
 
-  Future<KeyPair?> getLatestKeyPair() async {
+  Future<KeyPair> getLatestKeyPair() async {
     final db = await DatabaseHelper.getDatabase();
     final rows = await db.query(
       'generated_keys',
@@ -287,9 +348,8 @@ class KeyManagementService {
       if (sec != null && pub != null) return KeyPair(sec, pub);
     }
 
-    final pub = await _getPublicKeyForAdvertise();
-    if (pub != null) return getLatestKeyPair();
-    return null;
+    final keyPair = await _getKeyPairForAdvertise();
+    return keyPair;
   }
 
   Future<List<Uint8List>> getAllGeneratedPublicKeys() async {

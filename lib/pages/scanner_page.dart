@@ -93,7 +93,7 @@ class _ScannerPageState extends State<ScannerPage> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      barrierColor: Colors.black.withOpacity(0.2),
+      barrierColor: Colors.black.withValues(alpha: 0.2),
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
@@ -184,14 +184,9 @@ class _ScannerPageState extends State<ScannerPage> {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      const Text(
-                        'スキャン',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text('スキャン',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(color: Colors.white)),
                       Positioned(
                         left: 6,
                         child: IconButton(
@@ -214,7 +209,7 @@ class _ScannerPageState extends State<ScannerPage> {
                   child: Icon(
                     Icons.qr_code_scanner,
                     size: 200,
-                    color: Colors.white.withOpacity(0.25),
+                    color: Colors.white.withValues(alpha: 0.25),
                   ),
                 ),
               ),
@@ -230,21 +225,16 @@ class _ScannerPageState extends State<ScannerPage> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
+                      color: Colors.black.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text(
-                          'QRコードをカメラにかざしてください',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        Text('QRコードをカメラにかざしてください',
                           textAlign: TextAlign.center,
-                        ),
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(color: Colors.white)),
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
@@ -258,7 +248,7 @@ class _ScannerPageState extends State<ScannerPage> {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white,
                               side: BorderSide(
-                                color: Colors.white.withOpacity(0.65),
+                                color: Colors.white.withValues(alpha: 0.65),
                               ),
                               padding: const EdgeInsets.symmetric(
                                 vertical: 12,
@@ -301,10 +291,8 @@ class _ScannerPageState extends State<ScannerPage> {
             children: [
               Row(
                 children: [
-                  Text(
-                    '手入力で接続',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                  Text('手入力で接続',
+                    style: Theme.of(context).textTheme.titleMedium),
                   const Spacer(),
                   IconButton(
                     tooltip: '閉じる',

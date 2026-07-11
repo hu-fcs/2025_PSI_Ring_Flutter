@@ -5,12 +5,12 @@ Android: AndroidManifest.xml に BLUETOOTH_ADVERTISE や BLUETOOTH_CONNECT な�
 */
 
 import 'dart:async';
-import 'dart:io'; // Platform
+// import 'dart:io'; // Platform
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 // import 'dart:convert'; // utf8.decode
 import 'dart:typed_data';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
-import 'package:permission_handler/permission_handler.dart';
+// import 'package:permission_handler/permission_handler.dart';
 import 'nickname.dart';
 import 'mutual_authentication.dart';
 
@@ -97,7 +97,7 @@ class BlePeripheral extends ChangeNotifier {
       try {
         // セントラルにデータを応答．33バイトのニックネーム
         final localNickname = BleNickname().localNickname;
-        if (kDebugMode) print("_onReadRequest. length: ${localNickname.length}, nickname: ${BleNickname.nickname2string(localNickname)}, peripheral: ${event.central.uuid}");
+        if (kDebugMode) print("_onReadRequest. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${event.central.uuid}");
         await PeripheralManager().respondReadRequestWithValue(
           event.request,
           value: localNickname,
@@ -116,9 +116,12 @@ class BlePeripheral extends ChangeNotifier {
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       // セントラルから書き込まれたデータ (Uint8List) を取得
       final Uint8List remoteNickname = event.request.value;
-      if (kDebugMode) print("_onWriteRequest length: ${remoteNickname.length}, nickname: ${BleNickname.nickname2string(remoteNickname)}, peripheral: ${event.central.uuid}");
+      if (kDebugMode) print("_onWriteRequest remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${event.central.uuid}");
       BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
+
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
+      // 将来ニックネームリストにremoteNicknameが含まれているときには認証に進む（山口 賢紘, 2026年2月，卒業論文）
+      // Central側から認証に進むはずなので，Peripheral側からは認証を始めないでいいだろう．
       BleMutualAuthentication().onWriteRequest(event);
     }
   }

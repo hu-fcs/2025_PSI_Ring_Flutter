@@ -136,3 +136,59 @@ const RingSignatureResp$json = {
 final $typed_data.Uint8List ringSignatureRespDescriptor = $convert.base64Decode(
     'ChFSaW5nU2lnbmF0dXJlUmVzcBIwChRzaWduYXR1cmVfZm9yX2NsaWVudBgBIAEoDFISc2lnbm'
     'F0dXJlRm9yQ2xpZW50');
+
+@$core.Deprecated('Use nicknameScheduleReqRespDescriptor instead')
+const NicknameScheduleReqResp$json = {
+  '1': 'NicknameScheduleReqResp',
+  '2': [
+    {'1': 'owner_name', '3': 1, '4': 1, '5': 9, '10': 'ownerName'},
+    {'1': 'period_days', '3': 2, '4': 1, '5': 3, '10': 'periodDays'},
+    {'1': 'slot_ms', '3': 3, '4': 1, '5': 3, '10': 'slotMs'},
+    {'1': 'first_slot_ms', '3': 4, '4': 1, '5': 3, '10': 'firstSlotMs'},
+    {'1': 'nickname_list', '3': 5, '4': 3, '5': 12, '10': 'nicknameList'},
+    {
+      '1': 'ack_length',
+      '3': 6,
+      '4': 1,
+      '5': 3,
+      '9': 0,
+      '10': 'ackLength',
+      '17': true
+    },
+  ],
+  '8': [
+    {'1': '_ack_length'},
+  ],
+};
+
+/// Descriptor for `NicknameScheduleReqResp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nicknameScheduleReqRespDescriptor = $convert.base64Decode(
+    'ChdOaWNrbmFtZVNjaGVkdWxlUmVxUmVzcBIdCgpvd25lcl9uYW1lGAEgASgJUglvd25lck5hbW'
+    'USHwoLcGVyaW9kX2RheXMYAiABKANSCnBlcmlvZERheXMSFwoHc2xvdF9tcxgDIAEoA1IGc2xv'
+    'dE1zEiIKDWZpcnN0X3Nsb3RfbXMYBCABKANSC2ZpcnN0U2xvdE1zEiMKDW5pY2tuYW1lX2xpc3'
+    'QYBSADKAxSDG5pY2tuYW1lTGlzdBIiCgphY2tfbGVuZ3RoGAYgASgDSABSCWFja0xlbmd0aIgB'
+    'AUINCgtfYWNrX2xlbmd0aA==');
+
+@$core.Deprecated('Use nicknameScheduleAckReqDescriptor instead')
+const NicknameScheduleAckReq$json = {
+  '1': 'NicknameScheduleAckReq',
+  '2': [
+    {'1': 'owner_name', '3': 1, '4': 1, '5': 9, '10': 'ownerName'},
+    {'1': 'ack_length', '3': 6, '4': 1, '5': 3, '10': 'ackLength'},
+  ],
+};
+
+/// Descriptor for `NicknameScheduleAckReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nicknameScheduleAckReqDescriptor =
+    $convert.base64Decode(
+        'ChZOaWNrbmFtZVNjaGVkdWxlQWNrUmVxEh0KCm93bmVyX25hbWUYASABKAlSCW93bmVyTmFtZR'
+        'IdCgphY2tfbGVuZ3RoGAYgASgDUglhY2tMZW5ndGg=');
+
+@$core.Deprecated('Use nicknameScheduleAckRespDescriptor instead')
+const NicknameScheduleAckResp$json = {
+  '1': 'NicknameScheduleAckResp',
+};
+
+/// Descriptor for `NicknameScheduleAckResp`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nicknameScheduleAckRespDescriptor =
+    $convert.base64Decode('ChdOaWNrbmFtZVNjaGVkdWxlQWNrUmVzcA==');

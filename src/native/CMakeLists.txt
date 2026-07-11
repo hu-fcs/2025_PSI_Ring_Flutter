@@ -11,6 +11,7 @@ add_library(
         key_derivation.c
         psi.c
         ring_signature.c
+        ecdsa.c
 )
 
 # include/ 配下のヘッダを参照する

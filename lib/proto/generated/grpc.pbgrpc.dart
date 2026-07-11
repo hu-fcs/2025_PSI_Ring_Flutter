@@ -65,6 +65,22 @@ class GrpcServiceClient extends $grpc.Client {
         options: options);
   }
 
+  $grpc.ResponseFuture<$0.NicknameScheduleReqResp> exchangeNicknameSchedule(
+    $0.NicknameScheduleReqResp request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$exchangeNicknameSchedule, request,
+        options: options);
+  }
+
+  $grpc.ResponseFuture<$0.NicknameScheduleAckResp> exchangeNicknameScheduleAck(
+    $0.NicknameScheduleAckReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$exchangeNicknameScheduleAck, request,
+        options: options);
+  }
+
   // method descriptors
 
   static final _$exchangeKeys =
@@ -87,6 +103,16 @@ class GrpcServiceClient extends $grpc.Client {
           '/grpc.GrpcService/ExchangeRingSignatures',
           ($0.RingSignatureReq value) => value.writeToBuffer(),
           $0.RingSignatureResp.fromBuffer);
+  static final _$exchangeNicknameSchedule = $grpc.ClientMethod<
+          $0.NicknameScheduleReqResp, $0.NicknameScheduleReqResp>(
+      '/grpc.GrpcService/ExchangeNicknameSchedule',
+      ($0.NicknameScheduleReqResp value) => value.writeToBuffer(),
+      $0.NicknameScheduleReqResp.fromBuffer);
+  static final _$exchangeNicknameScheduleAck =
+      $grpc.ClientMethod<$0.NicknameScheduleAckReq, $0.NicknameScheduleAckResp>(
+          '/grpc.GrpcService/ExchangeNicknameScheduleAck',
+          ($0.NicknameScheduleAckReq value) => value.writeToBuffer(),
+          $0.NicknameScheduleAckResp.fromBuffer);
 }
 
 @$pb.GrpcServiceName('grpc.GrpcService')
@@ -122,6 +148,24 @@ abstract class GrpcServiceBase extends $grpc.Service {
         false,
         ($core.List<$core.int> value) => $0.RingSignatureReq.fromBuffer(value),
         ($0.RingSignatureResp value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.NicknameScheduleReqResp,
+            $0.NicknameScheduleReqResp>(
+        'ExchangeNicknameSchedule',
+        exchangeNicknameSchedule_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) =>
+            $0.NicknameScheduleReqResp.fromBuffer(value),
+        ($0.NicknameScheduleReqResp value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.NicknameScheduleAckReq,
+            $0.NicknameScheduleAckResp>(
+        'ExchangeNicknameScheduleAck',
+        exchangeNicknameScheduleAck_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) =>
+            $0.NicknameScheduleAckReq.fromBuffer(value),
+        ($0.NicknameScheduleAckResp value) => value.writeToBuffer()));
   }
 
   $async.Future<$0.KeyExchangeResp> exchangeKeys_Pre($grpc.ServiceCall $call,
@@ -157,4 +201,22 @@ abstract class GrpcServiceBase extends $grpc.Service {
 
   $async.Future<$0.RingSignatureResp> exchangeRingSignatures(
       $grpc.ServiceCall call, $0.RingSignatureReq request);
+
+  $async.Future<$0.NicknameScheduleReqResp> exchangeNicknameSchedule_Pre(
+      $grpc.ServiceCall $call,
+      $async.Future<$0.NicknameScheduleReqResp> $request) async {
+    return exchangeNicknameSchedule($call, await $request);
+  }
+
+  $async.Future<$0.NicknameScheduleReqResp> exchangeNicknameSchedule(
+      $grpc.ServiceCall call, $0.NicknameScheduleReqResp request);
+
+  $async.Future<$0.NicknameScheduleAckResp> exchangeNicknameScheduleAck_Pre(
+      $grpc.ServiceCall $call,
+      $async.Future<$0.NicknameScheduleAckReq> $request) async {
+    return exchangeNicknameScheduleAck($call, await $request);
+  }
+
+  $async.Future<$0.NicknameScheduleAckResp> exchangeNicknameScheduleAck(
+      $grpc.ServiceCall call, $0.NicknameScheduleAckReq request);
 }
