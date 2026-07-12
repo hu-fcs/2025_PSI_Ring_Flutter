@@ -43,6 +43,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/dummy_keys.txt
+    - assets/grpc/server.crt
+    - assets/grpc/server.key
+    # - assets/grpc/server2.crt # テスト用，にせ証明書
   fonts:
     - family: NotoSansJP
       fonts:

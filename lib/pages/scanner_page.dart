@@ -143,8 +143,14 @@ class _ScannerPageState extends State<ScannerPage> {
       _isProcessingScan = true;
       try {
         await safeStopCamera();
-        final map = jsonDecode(raw) as Map<String, dynamic>;
-        await _confirmAndConnect(map['ip'], map['port'], map['nance']);
+        final s = raw.split(':');
+        if (s.first != 'FCS') {
+          throw Exception('他のQRコードです');
+        }
+        final ip = s[1].trim();
+        final port = int.tryParse(s[2]) ?? 0;
+        final nance = int.tryParse(s[3]) ?? 0;
+        await _confirmAndConnect(ip, port, nance);
       } catch (_) {
         _isProcessingScan = false;
         await safeStartCamera();

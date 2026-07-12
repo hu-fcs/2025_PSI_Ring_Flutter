@@ -708,11 +708,9 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
     );
   }
-
-  String get _qrPayload => jsonEncode({
-    'ip': _serverIp ?? '',
-    'port': _serverPort,
-  });
+  // QRコードのサイズを小さくしたいのでJSONからコロン区切りに．_onDetectと一緒に変更
+  String get _qrPayload =>
+      'FCS:${(_serverIp ?? '').padRight(15)}:$_serverPort:$_serverOobCode';
 
   @override
   Widget build(BuildContext context) {

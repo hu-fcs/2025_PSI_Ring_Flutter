@@ -2,22 +2,34 @@
 
 import 'dart:typed_data';
 import 'package:grpc/grpc.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /// gRPC の共通設定・ユーティリティ。
 class GrpcCommon {
-  // ----- Singleton -----
-
+  /// シングルトン
   static final GrpcCommon _instance = GrpcCommon._internal();
   factory GrpcCommon() => _instance;
-  GrpcCommon._internal();
+  GrpcCommon._internal() {
+    isInitialized = _intialize(); // await GrpcCommon()._isLoaded で初期化完了を待つ
+  }
+
+  /// 自己証明書
+  late final Uint8List _crtBytes;
+  /// 自己証明書の鍵
+  late final Uint8List _keyBytes;
+
+  /// 自己証明書を読み込みを await _isLoaded で待つ
+  late final Future<void> isInitialized;
+  Future<void> _intialize() async {
+    final crtData = await rootBundle.load('assets/grpc/server.crt');
+    _crtBytes = crtData.buffer.asUint8List();
+
+    final keyData = await rootBundle.load('assets/grpc/server.key');
+    _keyBytes = keyData.buffer.asUint8List();
+  }
 
   /// 圧縮（gzip）の有効化フラグ
   bool enableGzip = false;
-
-  // ----- TLS -----
-
-  /// TLS を使用しないため何もしない（互換のため残す）。
-  Future<void> ensureTlsAssetsLoaded() async {}
 
   // ----- Codec / Options -----
 
@@ -27,17 +39,23 @@ class GrpcCommon {
         : const [IdentityCodec()],
   );
 
+  // 呼び出し元は await GrpcCommon()._isInitialized; で初期化を待つこと
   ChannelOptions buildClientOptions({Duration? idleTimeout}) {
+    final channelCredentials = ChannelCredentials.secure(
+        certificates: _crtBytes,
+        authority: 'application.local'
+    );
     return ChannelOptions(
-      credentials: ChannelCredentials.insecure(),
-      codecRegistry: codecRegistry,
-      idleTimeout: idleTimeout,
+        credentials: channelCredentials, // ChannelCredentials.insecure(),
+        codecRegistry: codecRegistry,
+        idleTimeout: idleTimeout,
     );
   }
 
-  ServerTlsCredentials? buildServerSecurity() {
-    return null;
-  }
+  ServerTlsCredentials get serverTlsCredentials => ServerTlsCredentials(
+    certificate: _crtBytes,
+    privateKey: _keyBytes,
+  ); // 読み出し元で await GrpcCommon()._isInitialized; で初期化を待つこと
 
   // ----- Utils -----
 

@@ -44,6 +44,7 @@ class GrpcClient {
   /// gRPCサーバに接続し，OOB (Out-of-band) 認証もする
   Future<void> connect(String host, int port, int oobNance) async {
     await _ensureReady();
+    await _grpcCommon.isInitialized;
 
     if (kDebugMode) {
       debugPrint('[GRPC CLIENT] connect: $host:$port');
@@ -52,17 +53,25 @@ class GrpcClient {
     try {
       await disconnect();
 
+      final options = _grpcCommon.buildClientOptions(
+        idleTimeout: const Duration(seconds: 30),
+      );
       _channel = ClientChannel(
         host,
         port: port,
-        options: _grpcCommon.buildClientOptions(
-          idleTimeout: const Duration(seconds: 30),
-        ),
+        options: options,
       );
 
       _stub = GrpcServiceClient(_channel!);
-
-      if (kDebugMode) debugPrint('[GRPC CLIENT] connected');
+      /* 証明書が合わない場合はここでは例外は発生しない．
+         この後 outOfBandAuth() 呼び出しの時点で
+         StatusCode.unavailable の GrpcError
+       　message 中に CERTIFICATE_VERIFYE_FAILED: self signed certificate
+      */
+      if (kDebugMode) {
+        debugPrint('[GRPC CLIENT] connected '
+            '${options.credentials.isSecure ? '(secure)' : '(insecure)'}');
+      }
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('[GRPC CLIENT] connect failed: $e');
