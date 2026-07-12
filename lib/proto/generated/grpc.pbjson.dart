@@ -192,3 +192,24 @@ const NicknameScheduleAckResp$json = {
 /// Descriptor for `NicknameScheduleAckResp`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List nicknameScheduleAckRespDescriptor =
     $convert.base64Decode('ChdOaWNrbmFtZVNjaGVkdWxlQWNrUmVzcA==');
+
+@$core.Deprecated('Use outOfBandAuthReqDescriptor instead')
+const OutOfBandAuthReq$json = {
+  '1': 'OutOfBandAuthReq',
+  '2': [
+    {'1': 'oob_nance', '3': 1, '4': 1, '5': 3, '10': 'oobNance'},
+  ],
+};
+
+/// Descriptor for `OutOfBandAuthReq`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List outOfBandAuthReqDescriptor = $convert.base64Decode(
+    'ChBPdXRPZkJhbmRBdXRoUmVxEhsKCW9vYl9uYW5jZRgBIAEoA1IIb29iTmFuY2U=');
+
+@$core.Deprecated('Use emptyDescriptor instead')
+const Empty$json = {
+  '1': 'Empty',
+};
+
+/// Descriptor for `Empty`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List emptyDescriptor =
+    $convert.base64Decode('CgVFbXB0eQ==');

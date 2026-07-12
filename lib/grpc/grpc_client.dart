@@ -41,7 +41,8 @@ class GrpcClient {
 
   // ----- Connection -----
 
-  Future<void> connect(String host, int port) async {
+  /// gRPCサーバに接続し，OOB (Out-of-band) 認証もする
+  Future<void> connect(String host, int port, int oobNance) async {
     await _ensureReady();
 
     if (kDebugMode) {
@@ -61,9 +62,7 @@ class GrpcClient {
 
       _stub = GrpcServiceClient(_channel!);
 
-      if (kDebugMode) {
-        debugPrint('[GRPC CLIENT] connected');
-      }
+      if (kDebugMode) debugPrint('[GRPC CLIENT] connected');
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('[GRPC CLIENT] connect failed: $e');
@@ -71,6 +70,14 @@ class GrpcClient {
       }
       rethrow;
     }
+    // OOB (Out-of-band) 認証
+    try {
+      await outOfBandAuth(oobNance);
+    } catch (e) { // 認証失敗
+      disconnect();
+      rethrow;
+    }
+    if (kDebugMode) debugPrint('[GRPC CLIENT] authenticated');
   }
 
   Future<void> disconnect() async {
@@ -422,5 +429,14 @@ class GrpcClient {
           ..ownerName = ownerName
           ..ackLength = $fixnum.Int64(remoteNicknameList.length)
     );
+  }
+
+  Future<void> outOfBandAuth(int oobNance) async {
+    final stub = _stub;
+    if (stub == null) throw StateError('[GRPC CLIENT] not connected (OutOfBandAuth)');
+    await stub.outOfBandAuth( // responseはEmptyなので確認しない
+        OutOfBandAuthReq()
+          ..oobNance = $fixnum.Int64(oobNance));
+    // 認証失敗時：GgrpServer.outOfBandAuthから GrpcError.unauthenticated が throw される
   }
 }

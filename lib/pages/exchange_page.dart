@@ -51,10 +51,11 @@ class _ExchangePageState extends State<ExchangePage> {
   final _ble = BleNickname();
   bool get _bleRunning => _ble.isRunning;
 
-  PsiGrpcServer? _grpcServer;
+  GrpcServer? _grpcServer;
   bool get _grpcRunning => _grpcServer?.isRunning == true;
   String? _serverIp;
   int _serverPort = 50051;
+  int _serverOobCode = 0;
 
   final _db = DatabaseHelper();
 
@@ -63,6 +64,7 @@ class _ExchangePageState extends State<ExchangePage> {
   final _ownerNameController = TextEditingController(text: '自分の端末');
   final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
   final _portController = TextEditingController(text: '50051');
+  final _nanceController = TextEditingController();
 
   NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
 
@@ -223,8 +225,10 @@ class _ExchangePageState extends State<ExchangePage> {
       return;
     }
 
-    final server = PsiGrpcServer();
+    final server = GrpcServer();
+    server.addListener(_onGprpServerStateChanged);
     final port = await server.start(port: _serverPort);
+    final oobNance = server.oobNance;
 
     server.service.onPsiFinished.listen((psi) {
       if (!psi.isFamiliar) {
@@ -240,14 +244,27 @@ class _ExchangePageState extends State<ExchangePage> {
       _grpcServer = server;
       _serverIp = ip;
       _serverPort = port;
+      _serverOobCode = oobNance;
     });
   }
 
   Future<void> _stopQr() async {
     final s = _grpcServer;
-    _grpcServer = null;
-    setState(() {});
+    setState(() {
+      _grpcServer = null; // stop前にnullにする
+    });
     await s?.stop();
+  }
+
+  void _onGprpServerStateChanged() { // GrpcServerのnotifyListeners()のコールバック
+    if (_grpcServer?.server == null) { // サーバが停止している
+      final msg = _grpcServer?.reason;
+      if (msg != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('gRPCサーバ終了：$msg')));
+      }
+      _stopQr();
+    }
   }
 
   Future<void> _scanQr() async {
@@ -305,12 +322,12 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<void> _generateAndShare() async {
     final owner = _ownerNameController.text.trim();
     final host = _hostController.text.trim();
-    final port = int.tryParse(_portController.text.trim());
+    final port = int.tryParse(_portController.text);
+    final nance = int.tryParse(_nanceController.text);
 
-    if (owner.isEmpty || host.isEmpty || port == null) {
+    if (owner.isEmpty || host.isEmpty || port == null || nance == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('名前 / ホスト / ポートを正しく入力してください')),
-      );
+        const SnackBar(content: Text('名前 / ホスト / ポート / 確認コードを正しく入力してください')));
       return;
     }
 
@@ -319,7 +336,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
     try {
       // 1) gRPC 送信（nickname_schedule JSON）
-      await _grpcClient.connect(host,port); // 既存実装に合わせて
+      await _grpcClient.connect(host, port, nance);
       await _grpcClient.exchangeNicknameSchedule(
         ownerName: owner,
         period: period,
@@ -887,6 +904,13 @@ class _ExchangePageState extends State<ExchangePage> {
             decoration: const InputDecoration(labelText: 'ポート'),
           ),
           const SizedBox(height: 12),
+
+          TextField(
+            controller: _nanceController,
+            decoration: const InputDecoration(labelText: '確認コード'),
+          ),
+          const SizedBox(height: 8),
+
           InputDecorator(
             decoration: InputDecoration(
               labelText: '共有期間',
@@ -955,6 +979,8 @@ class _ExchangePageState extends State<ExchangePage> {
         Text('IPアドレス：${_serverIp!}',
             style: _textThemeBodySmallGreyShade600),
         Text('ポート番号：${_serverPort.toString()}',
+            style: _textThemeBodySmallGreyShade600),
+        Text('確認コード：${_serverOobCode.toString()}',
             style: _textThemeBodySmallGreyShade600),
         const SizedBox(height: 10),
         Center(

@@ -32,7 +32,7 @@ class GrpcServiceClient extends $grpc.Client {
 
   GrpcServiceClient(super.channel, {super.options, super.interceptors});
 
-  /// Phase 1
+  /// PSI
   $grpc.ResponseFuture<$0.KeyExchangeResp> exchangeKeys(
     $0.KeyExchangeReq request, {
     $grpc.CallOptions? options,
@@ -40,7 +40,6 @@ class GrpcServiceClient extends $grpc.Client {
     return $createUnaryCall(_$exchangeKeys, request, options: options);
   }
 
-  /// Phase 2
   $grpc.ResponseFuture<$0.PsiDone> finalizePsi(
     $0.ClientFinalReq request, {
     $grpc.CallOptions? options,
@@ -48,7 +47,6 @@ class GrpcServiceClient extends $grpc.Client {
     return $createUnaryCall(_$finalizePsi, request, options: options);
   }
 
-  /// Phase 3A : チャレンジ交換
   $grpc.ResponseFuture<$0.ServerChallenge> exchangeChallenges(
     $0.ClientChallenge request, {
     $grpc.CallOptions? options,
@@ -56,7 +54,6 @@ class GrpcServiceClient extends $grpc.Client {
     return $createUnaryCall(_$exchangeChallenges, request, options: options);
   }
 
-  /// Phase 3B : リング署名交換
   $grpc.ResponseFuture<$0.RingSignatureResp> exchangeRingSignatures(
     $0.RingSignatureReq request, {
     $grpc.CallOptions? options,
@@ -65,6 +62,7 @@ class GrpcServiceClient extends $grpc.Client {
         options: options);
   }
 
+  /// 将来ニックネームの共有
   $grpc.ResponseFuture<$0.NicknameScheduleReqResp> exchangeNicknameSchedule(
     $0.NicknameScheduleReqResp request, {
     $grpc.CallOptions? options,
@@ -79,6 +77,14 @@ class GrpcServiceClient extends $grpc.Client {
   }) {
     return $createUnaryCall(_$exchangeNicknameScheduleAck, request,
         options: options);
+  }
+
+  /// OOB (Out-of-band) 認証
+  $grpc.ResponseFuture<$0.Empty> outOfBandAuth(
+    $0.OutOfBandAuthReq request, {
+    $grpc.CallOptions? options,
+  }) {
+    return $createUnaryCall(_$outOfBandAuth, request, options: options);
   }
 
   // method descriptors
@@ -113,6 +119,11 @@ class GrpcServiceClient extends $grpc.Client {
           '/grpc.GrpcService/ExchangeNicknameScheduleAck',
           ($0.NicknameScheduleAckReq value) => value.writeToBuffer(),
           $0.NicknameScheduleAckResp.fromBuffer);
+  static final _$outOfBandAuth =
+      $grpc.ClientMethod<$0.OutOfBandAuthReq, $0.Empty>(
+          '/grpc.GrpcService/OutOfBandAuth',
+          ($0.OutOfBandAuthReq value) => value.writeToBuffer(),
+          $0.Empty.fromBuffer);
 }
 
 @$pb.GrpcServiceName('grpc.GrpcService')
@@ -166,6 +177,13 @@ abstract class GrpcServiceBase extends $grpc.Service {
         ($core.List<$core.int> value) =>
             $0.NicknameScheduleAckReq.fromBuffer(value),
         ($0.NicknameScheduleAckResp value) => value.writeToBuffer()));
+    $addMethod($grpc.ServiceMethod<$0.OutOfBandAuthReq, $0.Empty>(
+        'OutOfBandAuth',
+        outOfBandAuth_Pre,
+        false,
+        false,
+        ($core.List<$core.int> value) => $0.OutOfBandAuthReq.fromBuffer(value),
+        ($0.Empty value) => value.writeToBuffer()));
   }
 
   $async.Future<$0.KeyExchangeResp> exchangeKeys_Pre($grpc.ServiceCall $call,
@@ -219,4 +237,12 @@ abstract class GrpcServiceBase extends $grpc.Service {
 
   $async.Future<$0.NicknameScheduleAckResp> exchangeNicknameScheduleAck(
       $grpc.ServiceCall call, $0.NicknameScheduleAckReq request);
+
+  $async.Future<$0.Empty> outOfBandAuth_Pre($grpc.ServiceCall $call,
+      $async.Future<$0.OutOfBandAuthReq> $request) async {
+    return outOfBandAuth($call, await $request);
+  }
+
+  $async.Future<$0.Empty> outOfBandAuth(
+      $grpc.ServiceCall call, $0.OutOfBandAuthReq request);
 }

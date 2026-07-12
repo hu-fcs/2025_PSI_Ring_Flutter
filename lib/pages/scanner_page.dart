@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:grpc/grpc.dart' as grpc;
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../grpc/grpc_client.dart';
@@ -33,6 +34,7 @@ class _ScannerPageState extends State<ScannerPage> {
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController =
   TextEditingController(text: '50051');
+  final TextEditingController nanceController = TextEditingController();
 
   Future<void> safeStopCamera() async {
     if (_cameraLock) return;
@@ -57,10 +59,11 @@ class _ScannerPageState extends State<ScannerPage> {
     _scannerController.dispose();
     ipController.dispose();
     portController.dispose();
+    nanceController.dispose();
     super.dispose();
   }
 
-  Future<void> _confirmAndConnect(String ip, int port) async {
+  Future<void> _confirmAndConnect(String ip, int port, int nance) async {
     await safeStopCamera();
 
     if (!mounted) return;
@@ -83,7 +86,7 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
     );
 
-    if (ok != true) {
+    if (ok != true) { // キャンセルした時
       _isProcessingScan = false;
       await safeStartCamera();
       return;
@@ -98,17 +101,31 @@ class _ScannerPageState extends State<ScannerPage> {
     );
 
     try {
-      await _client.connect(ip, port);
+      await _client.connect(ip, port, nance);
       final psiResult = await _client.executePsi();
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         Navigator.pop(context, psiResult);
       }
+    } on grpc.GrpcError catch (e) {
+      var text = 'gRPC接続に失敗しました：\n$e';
+      if (e.code == grpc.StatusCode.unavailable) {
+        text = 'IPアドレスとポート番号を確認してください：\n$e';
+      } else if (e.code == grpc.StatusCode.unauthenticated) {
+        text = '確認コードが正しくありません';
+      }
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(text)),
+        );
+      }
+      return; // 接続失敗で中断
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('接続に失敗しました: $e')),
+          SnackBar(content: Text('接続に失敗しました: \n$e')),
         );
       }
       _isProcessingScan = false;
@@ -127,7 +144,7 @@ class _ScannerPageState extends State<ScannerPage> {
       try {
         await safeStopCamera();
         final map = jsonDecode(raw) as Map<String, dynamic>;
-        await _confirmAndConnect(map['ip'], map['port']);
+        await _confirmAndConnect(map['ip'], map['port'], map['nance']);
       } catch (_) {
         _isProcessingScan = false;
         await safeStartCamera();
@@ -325,12 +342,23 @@ class _ScannerPageState extends State<ScannerPage> {
                 ),
               ),
               const SizedBox(height: 16),
+              TextField(
+                controller: nanceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '確認コード',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: () => _confirmAndConnect(
                     ipController.text.trim(),
                     int.tryParse(portController.text) ?? 50051,
+                    int.tryParse(nanceController.text) ?? 0,
                   ),
                   icon: const Icon(Icons.link),
                   label: const Text('接続'),

@@ -24,6 +24,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
   late final Future<void> _ready;
 
+  // OOB (out-of-band) クライアント認証ためのナンス
+  late final int _oobNance;
+  int get oobNance => _oobNance;
+  bool _oobDone = false;
+  int _oobFailedCount = 0; // サーバ
+  static final _oobFailedMax = 3; // 3回失敗したらサーバ終了
+
   // PSI 状態
   late Uint8List _mySecret;
   List<Uint8List> _myKeys = [];
@@ -50,7 +57,9 @@ class GrpcServiceImpl extends GrpcServiceBase {
   final _ringAuthController = StreamController<PsiResult>.broadcast();
   Stream<PsiResult> get onRingAuthenticated => _ringAuthController.stream;
 
-  GrpcServiceImpl() {
+  final void Function({String reason}) onShutdownRequested;
+
+  GrpcServiceImpl({required this.onShutdownRequested}) {
     _ready = _initialize();
 
     // 鍵更新を検知したら PSI 用の鍵セットを再構築する
@@ -70,6 +79,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
     }
     _mySecret = _keyService.generateRandomSecret();
     await _reloadKeys();
+
+    _oobNance = _keyService.generateOutOfBandNance(min: 100, max: 999); // QRコード
   }
 
   Future<void> _reloadKeys() async {
@@ -97,6 +108,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ServiceCall call,
       KeyExchangeReq request,
       ) async {
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
     await _ensureReady();
 
     // クライアント側集合サイズ（|S_A|）
@@ -117,6 +129,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ServiceCall call,
       ClientFinalReq req,
       ) async {
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
     await _ensureReady();
 
     final clientAbP = req.clientReencServerKeys.map(Uint8List.fromList).toList();
@@ -166,8 +179,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ServiceCall call,
       ClientChallenge req,
       ) async {
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
     await _ensureReady();
-
     if (_lastIntersection.isEmpty) {
       throw GrpcError.failedPrecondition('PSI intersection empty');
     }
@@ -271,6 +284,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
       ServiceCall call,
       RingSignatureReq request,
       ) async {
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
     await _ensureReady();
 
     final sigFromClient = Uint8List.fromList(request.signatureForServer);
@@ -279,6 +293,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final sigForClient = await _serverSignatureFuture!;
 
     unawaited(_verifyClientSignatureLater(sigFromClient));
+
+    // サーバ終了
+    Future.delayed(const Duration(milliseconds: 100), () {
+      onShutdownRequested();
+    });
 
     return RingSignatureResp()..signatureForClient = sigForClient;
   }
@@ -364,6 +383,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
   @override
   Future<NicknameScheduleReqResp> exchangeNicknameSchedule(
       ServiceCall call, NicknameScheduleReqResp request) async {
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
+
     // 相手（GRPCサーバ）に表示させたい自分（GRPCクライアント）の名前（ニックネーム）
     final ownerName = request.ownerName;   // String
     // 何日先までのニックネームか（日単位）
@@ -418,7 +439,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
   @override
   Future<NicknameScheduleAckResp> exchangeNicknameScheduleAck(
       ServiceCall call, NicknameScheduleAckReq request) async {
-    // TODO: 送ったニックネームがすべて届けられたか確認していない
+    if (! _oobDone) throw GrpcError.failedPrecondition('確認コード未送信');
+
     // 相手（GRPCサーバ）に表示させたい自分（GRPCクライアント）の名前（ニックネーム）
     final ownerName = request.ownerName;   // String
     // クライアントに届いたニックネーム数の確認
@@ -426,8 +448,29 @@ class GrpcServiceImpl extends GrpcServiceBase {
     if (kDebugMode) {
       debugPrint('[GRPC SERVER] exchangeNicknameSchedule: ACK client_name $ownerName, length $ackLength slots');
     }
+
     return NicknameScheduleAckResp();
     //throw UnimplementedError();
+  }
+
+  @override
+  Future<Empty> outOfBandAuth(ServiceCall call, OutOfBandAuthReq request) async {
+    final receivedOobNance = request.oobNance.toInt();
+    if (_oobNance != receivedOobNance) {
+      // 確認コードを _oobFailedMax 回間違ったらサーバを終了
+      _oobFailedCount += 1;
+      if (_oobFailedCount >= _oobFailedMax) {
+        Future.delayed(const Duration(milliseconds: 100), () {
+          onShutdownRequested(reason: '$_oobFailedCount failed attempts');
+        });
+        if (kDebugMode) {
+          debugPrint('[GRPC SERVER] Shutdonw server after $_oobFailedCount failed attempts');
+        }
+      }
+      throw GrpcError.unauthenticated('正しい確認コードを入力してください');
+    }
+    _oobDone = true;
+    return Empty();
   }
 }
 
@@ -442,20 +485,29 @@ class _RingSelection {
 }
 
 /// gRPC サーバ管理。
-class PsiGrpcServer {
+class GrpcServer extends ChangeNotifier {
   Server? _server;
+  Server? get server => _server;
   int? _port;
+  String? _reason;
+  String? get reason => _reason;
 
   late GrpcServiceImpl service;
 
   final GrpcCommon _grpcCommon = GrpcCommon();
 
   bool get isRunning => _server != null;
+  int get oobNance => service.oobNance;
 
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;
 
-    service = GrpcServiceImpl();
+    service = GrpcServiceImpl(
+      onShutdownRequested: ({String? reason}) {
+        _reason = reason;
+        stop();
+      }
+    );
     await service._ready;
 
     final s = Server.create(
@@ -475,13 +527,14 @@ class PsiGrpcServer {
     if (kDebugMode) {
       debugPrint('[SERVER] started: $_port');
     }
-    return _port!;
+    return _port!; // notifyListeners()にはしてない
   }
 
   Future<void> stop() async {
     final s = _server;
-    _server = null;
+    _server = null; // shutdown前にnullにする
     _port = null;
     if (s != null) await s.shutdown();
+    notifyListeners();
   }
 }
