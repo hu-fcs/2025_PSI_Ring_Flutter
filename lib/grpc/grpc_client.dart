@@ -44,7 +44,6 @@ class GrpcClient {
   /// gRPCサーバに接続し，OOB (Out-of-band) 認証もする
   Future<void> connect(String host, int port, int oobNance) async {
     await _ensureReady();
-    await _grpcCommon.isInitialized;
 
     if (kDebugMode) {
       debugPrint('[GRPC CLIENT] connect: $host:$port');

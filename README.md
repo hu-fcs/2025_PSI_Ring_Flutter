@@ -35,17 +35,6 @@ flutter run
 protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/grpc.proto
 ```
 
-## gRPC自己証明書
-アルゴリズム ECDSA（P-256）
-
-注意：安全ではない一時的な対応． Gitリポジトリに server.key と server.crt を含めないこと。
-```
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -sha256 -days 365 \
--keyout assets/grpc/server.key \
--out assets/grpc/server.crt \
--subj "/CN=application.local"
-```
-
 ## OpenSSL のダミー鍵生成
 
 アプリ内で使用する共通したダミー鍵のソースは以下コマンドで生成後、`asset/dummy_keys.txt` に追加します。

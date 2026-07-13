@@ -515,11 +515,10 @@ class GrpcServer extends ChangeNotifier {
       codecRegistry: _grpcCommon.codecRegistry,
     );
 
-    await _grpcCommon.isInitialized;
     await s.serve(
       address: InternetAddress.anyIPv4,
       port: port,
-      security: _grpcCommon.serverTlsCredentials,
+      security: _grpcCommon.buildServerSecurity(),
     );
 
     _server = s;
