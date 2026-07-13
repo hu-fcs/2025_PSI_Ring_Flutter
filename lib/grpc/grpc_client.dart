@@ -66,7 +66,7 @@ class GrpcClient {
       /* 証明書が合わない場合はここでは例外は発生しない．
          この後 outOfBandAuth() 呼び出しの時点で
          StatusCode.unavailable の GrpcError
-       　message 中に CERTIFICATE_VERIFYE_FAILED: self signed certificate
+       　message 中に CERTIFICATE_VERIFY_FAILED: self signed certificate
       */
       if (kDebugMode) {
         debugPrint('[GRPC CLIENT] connected '
@@ -83,7 +83,7 @@ class GrpcClient {
     try {
       await outOfBandAuth(oobNance);
     } catch (e) { // 認証失敗
-      disconnect();
+      await disconnect();
       rethrow;
     }
     if (kDebugMode) debugPrint('[GRPC CLIENT] authenticated');

@@ -118,6 +118,7 @@ class _ExchangePageState extends State<ExchangePage> {
     _ownerNameController.dispose();
     _hostController.dispose();
     _portController.dispose();
+    _nanceController.dispose();
     super.dispose();
   }
 
@@ -226,7 +227,7 @@ class _ExchangePageState extends State<ExchangePage> {
     }
 
     final server = GrpcServer();
-    server.addListener(_onGprpServerStateChanged);
+    server.addListener(_onGrpcServerStateChanged);
     final port = await server.start(port: _serverPort);
     final oobNance = server.oobNance;
 
@@ -256,14 +257,16 @@ class _ExchangePageState extends State<ExchangePage> {
     await s?.stop();
   }
 
-  void _onGprpServerStateChanged() { // GrpcServerのnotifyListeners()のコールバック
+  void _onGrpcServerStateChanged() { // GrpcServerのnotifyListeners()のコールバック
     if (_grpcServer?.server == null) { // サーバが停止している
       final msg = _grpcServer?.reason;
       if (msg != null) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('gRPCサーバ終了：$msg')));
       }
-      _stopQr();
+      setState(() {
+        _grpcServer = null; // stop前にnullにする
+      });
     }
   }
 

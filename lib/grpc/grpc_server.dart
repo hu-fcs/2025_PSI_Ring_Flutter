@@ -296,7 +296,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
     // サーバ終了
     Future.delayed(const Duration(milliseconds: 100), () {
-      onShutdownRequested();
+      onShutdownRequested(reason: '正常終了');
     });
 
     return RingSignatureResp()..signatureForClient = sigForClient;
@@ -464,7 +464,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
           onShutdownRequested(reason: '$_oobFailedCount failed attempts');
         });
         if (kDebugMode) {
-          debugPrint('[GRPC SERVER] Shutdonw server after $_oobFailedCount failed attempts');
+          debugPrint('[GRPC SERVER] Shutdown server after $_oobFailedCount failed attempts');
         }
       }
       throw GrpcError.unauthenticated('正しい確認コードを入力してください');
@@ -503,9 +503,9 @@ class GrpcServer extends ChangeNotifier {
     if (_server != null) return _port!;
 
     service = GrpcServiceImpl(
-      onShutdownRequested: ({String? reason}) {
+      onShutdownRequested: ({String? reason}) async {
         _reason = reason;
-        stop();
+        await stop();
       }
     );
     await service._ready;

@@ -35,10 +35,10 @@ flutter run
 protoc --proto_path=lib/proto --dart_out=grpc:lib/proto/generated lib/proto/grpc.proto
 ```
 
-## gPRC自己証明書
+## gRPC自己証明書
 アルゴリズム ECDSA（P-256）
 
-注意：Gitリポジトリに server.key と server.crt を含めないこと。
+注意：安全ではない一時的な対応． Gitリポジトリに server.key と server.crt を含めないこと。
 ```
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -sha256 -days 365 \
 -keyout assets/grpc/server.key \
@@ -59,7 +59,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 実行（1000鍵生成）
 
 ```powershell
-generate_dummy_keys.ps1 -Count 1000
+.\generate_dummy_keys.ps1 -Count 1000
 ```
 
 ## 主要ファイル構成

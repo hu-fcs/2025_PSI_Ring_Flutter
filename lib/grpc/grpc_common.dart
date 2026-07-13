@@ -10,7 +10,7 @@ class GrpcCommon {
   static final GrpcCommon _instance = GrpcCommon._internal();
   factory GrpcCommon() => _instance;
   GrpcCommon._internal() {
-    isInitialized = _intialize(); // await GrpcCommon()._isLoaded で初期化完了を待つ
+    isInitialized = _initialize(); // await GrpcCommon().isInitialized で初期化完了を待つ
   }
 
   /// 自己証明書
@@ -20,7 +20,7 @@ class GrpcCommon {
 
   /// 自己証明書を読み込みを await _isLoaded で待つ
   late final Future<void> isInitialized;
-  Future<void> _intialize() async {
+  Future<void> _initialize() async {
     final crtData = await rootBundle.load('assets/grpc/server.crt');
     _crtBytes = crtData.buffer.asUint8List();
 
@@ -39,7 +39,7 @@ class GrpcCommon {
         : const [IdentityCodec()],
   );
 
-  // 呼び出し元は await GrpcCommon()._isInitialized; で初期化を待つこと
+  // 呼び出し元は await GrpcCommon().isInitialized; で初期化を待つこと
   ChannelOptions buildClientOptions({Duration? idleTimeout}) {
     final channelCredentials = ChannelCredentials.secure(
         certificates: _crtBytes,
@@ -55,7 +55,7 @@ class GrpcCommon {
   ServerTlsCredentials get serverTlsCredentials => ServerTlsCredentials(
     certificate: _crtBytes,
     privateKey: _keyBytes,
-  ); // 読み出し元で await GrpcCommon()._isInitialized; で初期化を待つこと
+  ); // 読み出し元で await GrpcCommon().isInitialized; で初期化を待つこと
 
   // ----- Utils -----
 
