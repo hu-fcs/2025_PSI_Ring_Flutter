@@ -51,10 +51,11 @@ class _ExchangePageState extends State<ExchangePage> {
   final _ble = BleNickname();
   bool get _bleRunning => _ble.isRunning;
 
-  PsiGrpcServer? _grpcServer;
+  GrpcServer? _grpcServer;
   bool get _grpcRunning => _grpcServer?.isRunning == true;
   String? _serverIp;
   int _serverPort = 50051;
+  int _serverOobCode = 0;
 
   final _db = DatabaseHelper();
 
@@ -63,6 +64,7 @@ class _ExchangePageState extends State<ExchangePage> {
   final _ownerNameController = TextEditingController(text: '自分の端末');
   final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
   final _portController = TextEditingController(text: '50051');
+  final _nonceController = TextEditingController();
 
   NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
 
@@ -116,6 +118,7 @@ class _ExchangePageState extends State<ExchangePage> {
     _ownerNameController.dispose();
     _hostController.dispose();
     _portController.dispose();
+    _nonceController.dispose();
     super.dispose();
   }
 
@@ -223,8 +226,10 @@ class _ExchangePageState extends State<ExchangePage> {
       return;
     }
 
-    final server = PsiGrpcServer();
+    final server = GrpcServer();
+    server.addListener(_onGrpcServerStateChanged);
     final port = await server.start(port: _serverPort);
+    final oobNonce = server.oobNonce;
 
     server.service.onPsiFinished.listen((psi) {
       if (!psi.isFamiliar) {
@@ -240,14 +245,29 @@ class _ExchangePageState extends State<ExchangePage> {
       _grpcServer = server;
       _serverIp = ip;
       _serverPort = port;
+      _serverOobCode = oobNonce;
     });
   }
 
   Future<void> _stopQr() async {
     final s = _grpcServer;
-    _grpcServer = null;
-    setState(() {});
+    setState(() {
+      _grpcServer = null; // stop前にnullにする
+    });
     await s?.stop();
+  }
+
+  void _onGrpcServerStateChanged() { // GrpcServerのnotifyListeners()のコールバック
+    if (_grpcServer?.server == null) { // サーバが停止している
+      final msg = _grpcServer?.reason;
+      if (msg != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('gRPCサーバ終了：$msg')));
+      }
+      setState(() {
+        _grpcServer = null; // stop前にnullにする
+      });
+    }
   }
 
   Future<void> _scanQr() async {
@@ -305,12 +325,12 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<void> _generateAndShare() async {
     final owner = _ownerNameController.text.trim();
     final host = _hostController.text.trim();
-    final port = int.tryParse(_portController.text.trim());
+    final port = int.tryParse(_portController.text);
+    final nonce = int.tryParse(_nonceController.text);
 
-    if (owner.isEmpty || host.isEmpty || port == null) {
+    if (owner.isEmpty || host.isEmpty || port == null || nonce == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('名前 / ホスト / ポートを正しく入力してください')),
-      );
+        const SnackBar(content: Text('名前 / ホスト / ポート / 確認コードを正しく入力してください')));
       return;
     }
 
@@ -319,7 +339,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
     try {
       // 1) gRPC 送信（nickname_schedule JSON）
-      await _grpcClient.connect(host,port); // 既存実装に合わせて
+      await _grpcClient.connect(host, port, nonce);
       await _grpcClient.exchangeNicknameSchedule(
         ownerName: owner,
         period: period,
@@ -691,11 +711,9 @@ class _ExchangePageState extends State<ExchangePage> {
       ),
     );
   }
-
-  String get _qrPayload => jsonEncode({
-    'ip': _serverIp ?? '',
-    'port': _serverPort,
-  });
+  // QRコードのサイズを小さくしたいのでJSONからコロン区切りに．_onDetectと一緒に変更
+  String get _qrPayload =>
+      'FCS:${(_serverIp ?? '').padRight(15)}:$_serverPort:$_serverOobCode';
 
   @override
   Widget build(BuildContext context) {
@@ -887,6 +905,13 @@ class _ExchangePageState extends State<ExchangePage> {
             decoration: const InputDecoration(labelText: 'ポート'),
           ),
           const SizedBox(height: 12),
+
+          TextField(
+            controller: _nonceController,
+            decoration: const InputDecoration(labelText: '確認コード'),
+          ),
+          const SizedBox(height: 8),
+
           InputDecorator(
             decoration: InputDecoration(
               labelText: '共有期間',
@@ -955,6 +980,8 @@ class _ExchangePageState extends State<ExchangePage> {
         Text('IPアドレス：${_serverIp!}',
             style: _textThemeBodySmallGreyShade600),
         Text('ポート番号：${_serverPort.toString()}',
+            style: _textThemeBodySmallGreyShade600),
+        Text('確認コード：${_serverOobCode.toString()}',
             style: _textThemeBodySmallGreyShade600),
         const SizedBox(height: 10),
         Center(

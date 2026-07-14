@@ -24,6 +24,7 @@ class KeyPair {
 class NativeKeyService {
   static final NativeKeyService _instance = NativeKeyService._internal();
   factory NativeKeyService() => _instance;
+  final _rand = Random.secure();
 
   late final NativeKeyBindings _bindings;
 
@@ -110,8 +111,7 @@ class NativeKeyService {
 
   /// PSI の秘密スカラーを生成する。
   Uint8List generateRandomSecret() {
-    final rand = Random.secure();
-    final bytes = List<int>.generate(privateKeyLen, (_) => rand.nextInt(256));
+    final bytes = List<int>.generate(privateKeyLen, (_) => _rand.nextInt(256));
     return Uint8List.fromList(bytes);
   }
 
@@ -337,4 +337,10 @@ class NativeKeyService {
       calloc.free(sigPtr);
     }
   }
+
+  /// OOB通信用のナンスの生成（Random.Secure()を使いまわしたいからここに追加）
+  int generateOutOfBandNonce({min = 0, max = 0xffffffff}) {
+    return min + _rand.nextInt(max - min + 1);
+  }
+
 }

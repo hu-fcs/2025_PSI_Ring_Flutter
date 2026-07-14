@@ -47,7 +47,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 実行（1000鍵生成）
 
-```agsl
+```powershell
 .\generate_dummy_keys.ps1 -Count 1000
 ```
 

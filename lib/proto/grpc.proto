@@ -3,9 +3,7 @@ syntax = "proto3";
 package grpc;
 
 // PSI の3段階（鍵交換 → PSI確定 → 匿名認証）のための gRPC 定義。
-
-// ----- Phase 1: PSI 鍵交換 -----
-
+// PSI Phase 1: PSI 鍵交換
 message KeyExchangeReq {
   repeated bytes enc_keys = 1; // クライアントの暗号化鍵列
 }
@@ -15,38 +13,38 @@ message KeyExchangeResp {
   repeated bytes client_reenc_keys = 2; // サーバが再暗号化したクライアント鍵列
 }
 
-// ----- Phase 2: PSI 確定 -----
-
+// PSI Phase 2: PSI 確定
 message ClientFinalReq {
   repeated bytes client_reenc_server_keys = 1; // クライアントが再暗号化したサーバ鍵列
 }
 
 message PsiDone {}
 
-// ----- Phase 3A: チャレンジ交換 -----
-
+// PSI Phase 3A: チャレンジ交換
+// クライアント → サーバ
 message ClientChallenge {
   bytes challenge_c = 1; // クライアント生成のチャレンジ(32B)
 }
 
+// サーバ → クライアント
 message ServerChallenge {
   bytes challenge_s = 1; // サーバ生成のチャレンジ(32B)
 }
 
-// ----- Phase 3B: リング署名交換 -----
-
+// PSI Phase 3B: リング署名交換
+// クライアント → サーバ
 message RingSignatureReq {
   bytes signature_for_server = 1; // challenge_s に対する署名
 }
 
+// サーバ → クライアント
 message RingSignatureResp {
   bytes signature_for_client = 1; // challenge_c に対する署名
 }
 
-// ----- 将来ニックネームの共有．Phase 1:
+// 将来ニックネームの共有 Phase 1
 // request (ack_length なし）
 // response (ack_length あり）
-
 message NicknameScheduleReqResp {
   string owner_name = 1;   // 相手に表示させたい自分の名前（ニックネーム）
   int64 period_days = 2;   // 何日先までのニックネームか（日単位）
@@ -56,23 +54,37 @@ message NicknameScheduleReqResp {
   optional int64 ack_length = 6;    // 受信確認：受け取った長さ
 }
 
-// ----- 将来ニックネームの共有．Phase 2: 受信確認
-
+// 将来ニックネームの共有 Phase 2: 受信確認
 message NicknameScheduleAckReq {
   string owner_name = 1;   // 相手に表示させたい自分の名前（ニックネーム）
   int64 ack_length = 6;    // 受信確認：受け取った長さ
 }
 
-message NicknameScheduleAckResp {
+message NicknameScheduleAckResp {}
+
+// ----- OOB (Out-of-band) 認証
+// サーバがナンス（確認コード）を生成し，QRコードやBLEでクライアントに送信
+// クライアントはgRPC接続の最初にナンスを送信することを
+// サーバはナンスの一致していれば，クライアント認証に成功．その後PSIやNicknameScheduleの要求を受け付ける．
+// 不一致なら切断し，サーバ側のユーザに通知
+// QRコードやBLEがgRPC外のOOB通信．QRコードでのナンスは10進表現で3桁の整数．100から999までの900通り
+message OutOfBandAuthReq {
+  int64 oob_nonce = 1;    // ナンス
 }
+
+message Empty {}
 
 // ----- gRPC service -----
 
 service GrpcService {
+  // PSI
   rpc ExchangeKeys (KeyExchangeReq) returns (KeyExchangeResp);
   rpc FinalizePsi (ClientFinalReq) returns (PsiDone);
   rpc ExchangeChallenges (ClientChallenge) returns (ServerChallenge);
   rpc ExchangeRingSignatures (RingSignatureReq) returns (RingSignatureResp);
+  // 将来ニックネームの共有
   rpc ExchangeNicknameSchedule (NicknameScheduleReqResp) returns (NicknameScheduleReqResp);
   rpc ExchangeNicknameScheduleAck (NicknameScheduleAckReq) returns (NicknameScheduleAckResp);
+  // OOB (Out-of-band) 認証
+  rpc OutOfBandAuth (OutOfBandAuthReq) returns (Empty);
 }

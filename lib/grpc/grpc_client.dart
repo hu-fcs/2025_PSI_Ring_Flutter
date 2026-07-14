@@ -41,7 +41,8 @@ class GrpcClient {
 
   // ----- Connection -----
 
-  Future<void> connect(String host, int port) async {
+  /// gRPCサーバに接続し，OOB (Out-of-band) 認証もする
+  Future<void> connect(String host, int port, int oobNonce) async {
     await _ensureReady();
 
     if (kDebugMode) {
@@ -51,18 +52,24 @@ class GrpcClient {
     try {
       await disconnect();
 
+      final options = _grpcCommon.buildClientOptions(
+        idleTimeout: const Duration(seconds: 30),
+      );
       _channel = ClientChannel(
         host,
         port: port,
-        options: _grpcCommon.buildClientOptions(
-          idleTimeout: const Duration(seconds: 30),
-        ),
+        options: options,
       );
 
       _stub = GrpcServiceClient(_channel!);
-
+      /* 証明書が合わない場合はここでは例外は発生しない．
+         この後 outOfBandAuth() 呼び出しの時点で
+         StatusCode.unavailable の GrpcError
+       　message 中に CERTIFICATE_VERIFY_FAILED: self signed certificate
+      */
       if (kDebugMode) {
-        debugPrint('[GRPC CLIENT] connected');
+        debugPrint('[GRPC CLIENT] connected '
+            '${options.credentials.isSecure ? '(secure)' : '(insecure)'}');
       }
     } catch (e, st) {
       if (kDebugMode) {
@@ -71,6 +78,14 @@ class GrpcClient {
       }
       rethrow;
     }
+    // OOB (Out-of-band) 認証
+    try {
+      await outOfBandAuth(oobNonce);
+    } catch (e) { // 認証失敗
+      await disconnect();
+      rethrow;
+    }
+    if (kDebugMode) debugPrint('[GRPC CLIENT] authenticated');
   }
 
   Future<void> disconnect() async {
@@ -422,5 +437,14 @@ class GrpcClient {
           ..ownerName = ownerName
           ..ackLength = $fixnum.Int64(remoteNicknameList.length)
     );
+  }
+
+  Future<void> outOfBandAuth(int oobNonce) async {
+    final stub = _stub;
+    if (stub == null) throw StateError('[GRPC CLIENT] not connected (OutOfBandAuth)');
+    await stub.outOfBandAuth( // responseはEmptyなので確認しない
+        OutOfBandAuthReq()
+          ..oobNonce = $fixnum.Int64(oobNonce));
+    // 認証失敗時：GgrpServer.outOfBandAuthから GrpcError.unauthenticated が throw される
   }
 }

@@ -17,6 +17,8 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
+/// PSI の3段階（鍵交換 → PSI確定 → 匿名認証）のための gRPC 定義。
+/// PSI Phase 1: PSI 鍵交換
 class KeyExchangeReq extends $pb.GeneratedMessage {
   factory KeyExchangeReq({
     $core.Iterable<$core.List<$core.int>>? encKeys,
@@ -122,6 +124,7 @@ class KeyExchangeResp extends $pb.GeneratedMessage {
   $pb.PbList<$core.List<$core.int>> get clientReencKeys => $_getList(1);
 }
 
+/// PSI Phase 2: PSI 確定
 class ClientFinalReq extends $pb.GeneratedMessage {
   factory ClientFinalReq({
     $core.Iterable<$core.List<$core.int>>? clientReencServerKeys,
@@ -209,6 +212,7 @@ class PsiDone extends $pb.GeneratedMessage {
   static PsiDone? _defaultInstance;
 }
 
+/// PSI Phase 3A: チャレンジ交換
 /// クライアント → サーバ
 class ClientChallenge extends $pb.GeneratedMessage {
   factory ClientChallenge({
@@ -321,6 +325,7 @@ class ServerChallenge extends $pb.GeneratedMessage {
   void clearChallengeS() => $_clearField(1);
 }
 
+/// PSI Phase 3B: リング署名交換
 /// クライアント → サーバ
 class RingSignatureReq extends $pb.GeneratedMessage {
   factory RingSignatureReq({
@@ -435,6 +440,9 @@ class RingSignatureResp extends $pb.GeneratedMessage {
   void clearSignatureForClient() => $_clearField(1);
 }
 
+/// 将来ニックネームの共有 Phase 1
+/// request (ack_length なし）
+/// response (ack_length あり）
 class NicknameScheduleReqResp extends $pb.GeneratedMessage {
   factory NicknameScheduleReqResp({
     $core.String? ownerName,
@@ -545,6 +553,7 @@ class NicknameScheduleReqResp extends $pb.GeneratedMessage {
   void clearAckLength() => $_clearField(6);
 }
 
+/// 将来ニックネームの共有 Phase 2: 受信確認
 class NicknameScheduleAckReq extends $pb.GeneratedMessage {
   factory NicknameScheduleAckReq({
     $core.String? ownerName,
@@ -649,6 +658,103 @@ class NicknameScheduleAckResp extends $pb.GeneratedMessage {
   static NicknameScheduleAckResp getDefault() => _defaultInstance ??=
       $pb.GeneratedMessage.$_defaultFor<NicknameScheduleAckResp>(create);
   static NicknameScheduleAckResp? _defaultInstance;
+}
+
+/// ----- OOB (Out-of-band) 認証
+/// サーバがナンス（確認コード）を生成し，QRコードやBLEでクライアントに送信
+/// クライアントはgRPC接続の最初にナンスを送信することを
+/// サーバはナンスの一致していれば，クライアント認証に成功．その後PSIやNicknameScheduleの要求を受け付ける．
+/// 不一致なら切断し，サーバ側のユーザに通知
+/// QRコードやBLEがgRPC外のOOB通信．QRコードでのナンスは10進表現で3桁の整数．100から999までの900通り
+class OutOfBandAuthReq extends $pb.GeneratedMessage {
+  factory OutOfBandAuthReq({
+    $fixnum.Int64? oobNonce,
+  }) {
+    final result = create();
+    if (oobNonce != null) result.oobNonce = oobNonce;
+    return result;
+  }
+
+  OutOfBandAuthReq._();
+
+  factory OutOfBandAuthReq.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory OutOfBandAuthReq.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'OutOfBandAuthReq',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..aInt64(1, _omitFieldNames ? '' : 'oobNonce')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  OutOfBandAuthReq clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  OutOfBandAuthReq copyWith(void Function(OutOfBandAuthReq) updates) =>
+      super.copyWith((message) => updates(message as OutOfBandAuthReq))
+          as OutOfBandAuthReq;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static OutOfBandAuthReq create() => OutOfBandAuthReq._();
+  @$core.override
+  OutOfBandAuthReq createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static OutOfBandAuthReq getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<OutOfBandAuthReq>(create);
+  static OutOfBandAuthReq? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get oobNonce => $_getI64(0);
+  @$pb.TagNumber(1)
+  set oobNonce($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasOobNonce() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearOobNonce() => $_clearField(1);
+}
+
+class Empty extends $pb.GeneratedMessage {
+  factory Empty() => create();
+
+  Empty._();
+
+  factory Empty.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromBuffer(data, registry);
+  factory Empty.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      create()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Empty',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
+      createEmptyInstance: create)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Empty clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Empty copyWith(void Function(Empty) updates) =>
+      super.copyWith((message) => updates(message as Empty)) as Empty;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static Empty create() => Empty._();
+  @$core.override
+  Empty createEmptyInstance() => create();
+  @$core.pragma('dart2js:noInline')
+  static Empty getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Empty>(create);
+  static Empty? _defaultInstance;
 }
 
 const $core.bool _omitFieldNames =
