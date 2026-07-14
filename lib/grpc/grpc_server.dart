@@ -25,8 +25,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
   late final Future<void> _ready;
 
   // OOB (out-of-band) クライアント認証ためのナンス
-  late final int _oobNance;
-  int get oobNance => _oobNance;
+  late final int _oobNonce;
+  int get oobNonce => _oobNonce;
   bool _oobDone = false;
   int _oobFailedCount = 0; // サーバ
   static final _oobFailedMax = 3; // 3回失敗したらサーバ終了
@@ -80,7 +80,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
     _mySecret = _keyService.generateRandomSecret();
     await _reloadKeys();
 
-    _oobNance = _keyService.generateOutOfBandNance(min: 100, max: 999); // QRコード
+    _oobNonce = _keyService.generateOutOfBandNonce(min: 100, max: 999); // QRコード
   }
 
   Future<void> _reloadKeys() async {
@@ -455,8 +455,8 @@ class GrpcServiceImpl extends GrpcServiceBase {
 
   @override
   Future<Empty> outOfBandAuth(ServiceCall call, OutOfBandAuthReq request) async {
-    final receivedOobNance = request.oobNance.toInt();
-    if (_oobNance != receivedOobNance) {
+    final receivedOobNonce = request.oobNonce.toInt();
+    if (_oobNonce != receivedOobNonce) {
       // 確認コードを _oobFailedMax 回間違ったらサーバを終了
       _oobFailedCount += 1;
       if (_oobFailedCount >= _oobFailedMax) {
@@ -497,7 +497,7 @@ class GrpcServer extends ChangeNotifier {
   final GrpcCommon _grpcCommon = GrpcCommon();
 
   bool get isRunning => _server != null;
-  int get oobNance => service.oobNance;
+  int get oobNonce => service.oobNonce;
 
   Future<int> start({int port = 50051}) async {
     if (_server != null) return _port!;

@@ -64,7 +64,7 @@ class _ExchangePageState extends State<ExchangePage> {
   final _ownerNameController = TextEditingController(text: '自分の端末');
   final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
   final _portController = TextEditingController(text: '50051');
-  final _nanceController = TextEditingController();
+  final _nonceController = TextEditingController();
 
   NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
 
@@ -118,7 +118,7 @@ class _ExchangePageState extends State<ExchangePage> {
     _ownerNameController.dispose();
     _hostController.dispose();
     _portController.dispose();
-    _nanceController.dispose();
+    _nonceController.dispose();
     super.dispose();
   }
 
@@ -229,7 +229,7 @@ class _ExchangePageState extends State<ExchangePage> {
     final server = GrpcServer();
     server.addListener(_onGrpcServerStateChanged);
     final port = await server.start(port: _serverPort);
-    final oobNance = server.oobNance;
+    final oobNonce = server.oobNonce;
 
     server.service.onPsiFinished.listen((psi) {
       if (!psi.isFamiliar) {
@@ -245,7 +245,7 @@ class _ExchangePageState extends State<ExchangePage> {
       _grpcServer = server;
       _serverIp = ip;
       _serverPort = port;
-      _serverOobCode = oobNance;
+      _serverOobCode = oobNonce;
     });
   }
 
@@ -326,9 +326,9 @@ class _ExchangePageState extends State<ExchangePage> {
     final owner = _ownerNameController.text.trim();
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text);
-    final nance = int.tryParse(_nanceController.text);
+    final nonce = int.tryParse(_nonceController.text);
 
-    if (owner.isEmpty || host.isEmpty || port == null || nance == null) {
+    if (owner.isEmpty || host.isEmpty || port == null || nonce == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('名前 / ホスト / ポート / 確認コードを正しく入力してください')));
       return;
@@ -339,7 +339,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
     try {
       // 1) gRPC 送信（nickname_schedule JSON）
-      await _grpcClient.connect(host, port, nance);
+      await _grpcClient.connect(host, port, nonce);
       await _grpcClient.exchangeNicknameSchedule(
         ownerName: owner,
         period: period,
@@ -907,7 +907,7 @@ class _ExchangePageState extends State<ExchangePage> {
           const SizedBox(height: 12),
 
           TextField(
-            controller: _nanceController,
+            controller: _nonceController,
             decoration: const InputDecoration(labelText: '確認コード'),
           ),
           const SizedBox(height: 8),

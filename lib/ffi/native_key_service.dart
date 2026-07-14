@@ -339,7 +339,7 @@ class NativeKeyService {
   }
 
   /// OOB通信用のナンスの生成（Random.Secure()を使いまわしたいからここに追加）
-  int generateOutOfBandNance({min = 0, max = 0xffffffff}) {
+  int generateOutOfBandNonce({min = 0, max = 0xffffffff}) {
     return min + _rand.nextInt(max - min + 1);
   }
 

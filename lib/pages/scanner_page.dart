@@ -34,7 +34,7 @@ class _ScannerPageState extends State<ScannerPage> {
   final TextEditingController ipController = TextEditingController();
   final TextEditingController portController =
   TextEditingController(text: '50051');
-  final TextEditingController nanceController = TextEditingController();
+  final TextEditingController nonceController = TextEditingController();
 
   Future<void> safeStopCamera() async {
     if (_cameraLock) return;
@@ -59,11 +59,11 @@ class _ScannerPageState extends State<ScannerPage> {
     _scannerController.dispose();
     ipController.dispose();
     portController.dispose();
-    nanceController.dispose();
+    nonceController.dispose();
     super.dispose();
   }
 
-  Future<void> _confirmAndConnect(String ip, int port, int nance) async {
+  Future<void> _confirmAndConnect(String ip, int port, int nonce) async {
     await safeStopCamera();
 
     if (!mounted) return;
@@ -101,7 +101,7 @@ class _ScannerPageState extends State<ScannerPage> {
     );
 
     try {
-      await _client.connect(ip, port, nance);
+      await _client.connect(ip, port, nonce);
       final psiResult = await _client.executePsi();
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -149,8 +149,8 @@ class _ScannerPageState extends State<ScannerPage> {
         }
         final ip = s[1].trim();
         final port = int.tryParse(s[2]) ?? 0;
-        final nance = int.tryParse(s[3]) ?? 0;
-        await _confirmAndConnect(ip, port, nance);
+        final nonce = int.tryParse(s[3]) ?? 0;
+        await _confirmAndConnect(ip, port, nonce);
       } catch (_) {
         _isProcessingScan = false;
         await safeStartCamera();
@@ -349,7 +349,7 @@ class _ScannerPageState extends State<ScannerPage> {
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: nanceController,
+                controller: nonceController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: '確認コード',
@@ -364,7 +364,7 @@ class _ScannerPageState extends State<ScannerPage> {
                   onPressed: () => _confirmAndConnect(
                     ipController.text.trim(),
                     int.tryParse(portController.text) ?? 50051,
-                    int.tryParse(nanceController.text) ?? 0,
+                    int.tryParse(nonceController.text) ?? 0,
                   ),
                   icon: const Icon(Icons.link),
                   label: const Text('接続'),

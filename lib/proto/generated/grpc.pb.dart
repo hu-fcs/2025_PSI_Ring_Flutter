@@ -668,10 +668,10 @@ class NicknameScheduleAckResp extends $pb.GeneratedMessage {
 /// QRコードやBLEがgRPC外のOOB通信．QRコードでのナンスは10進表現で3桁の整数．100から999までの900通り
 class OutOfBandAuthReq extends $pb.GeneratedMessage {
   factory OutOfBandAuthReq({
-    $fixnum.Int64? oobNance,
+    $fixnum.Int64? oobNonce,
   }) {
     final result = create();
-    if (oobNance != null) result.oobNance = oobNance;
+    if (oobNonce != null) result.oobNonce = oobNonce;
     return result;
   }
 
@@ -688,7 +688,7 @@ class OutOfBandAuthReq extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'OutOfBandAuthReq',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'grpc'),
       createEmptyInstance: create)
-    ..aInt64(1, _omitFieldNames ? '' : 'oobNance')
+    ..aInt64(1, _omitFieldNames ? '' : 'oobNonce')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -711,13 +711,13 @@ class OutOfBandAuthReq extends $pb.GeneratedMessage {
   static OutOfBandAuthReq? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $fixnum.Int64 get oobNance => $_getI64(0);
+  $fixnum.Int64 get oobNonce => $_getI64(0);
   @$pb.TagNumber(1)
-  set oobNance($fixnum.Int64 value) => $_setInt64(0, value);
+  set oobNonce($fixnum.Int64 value) => $_setInt64(0, value);
   @$pb.TagNumber(1)
-  $core.bool hasOobNance() => $_has(0);
+  $core.bool hasOobNonce() => $_has(0);
   @$pb.TagNumber(1)
-  void clearOobNance() => $_clearField(1);
+  void clearOobNonce() => $_clearField(1);
 }
 
 class Empty extends $pb.GeneratedMessage {
