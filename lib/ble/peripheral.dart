@@ -92,21 +92,24 @@ class BlePeripheral extends ChangeNotifier {
 
   /// CentralがPeripheraのニックネームを読み取り（Read）たいと要求している．特性（Characteristic）
   Future<void> _onReadRequest(GATTCharacteristicReadRequestedEventArgs event) async {
+    final peripheralManager = PeripheralManager();
+
     // 対象の特性（Nicknameの読み取り特性など）であるかチェック
     if (event.characteristic == BleNickname.nicknameCharacteristic) {
       try {
         // セントラルにデータを応答．33バイトのニックネーム
         final localNickname = BleNickname().localNickname;
-        if (kDebugMode) print("_onReadRequest. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${event.central.uuid}");
-        await PeripheralManager().respondReadRequestWithValue(
+        if (kDebugMode) print("_onReadRequest. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${event.central.uuid}"
+            ", event.request.offset ${event.request.offset}");
+        await peripheralManager.respondReadRequestWithValue(
           event.request,
-          value: localNickname,
+          value: localNickname.sublist(event.request.offset),
         );
       } catch (e) {
         if (kDebugMode) print("Failed to respond read request: $e");
       }
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
-      BleMutualAuthentication().onReadRequest(event);
+      await BleMutualAuthentication().onReadRequest(event);
     }
   }
 
@@ -117,12 +120,13 @@ class BlePeripheral extends ChangeNotifier {
       // セントラルから書き込まれたデータ (Uint8List) を取得
       final Uint8List remoteNickname = event.request.value;
       if (kDebugMode) print("_onWriteRequest remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${event.central.uuid}");
-      BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
+      await PeripheralManager().respondWriteRequest(event.request);
+      await BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
 
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       // 将来ニックネームリストにremoteNicknameが含まれているときには認証に進む（山口 賢紘, 2026年2月，卒業論文）
       // Central側から認証に進むはずなので，Peripheral側からは認証を始めないでいいだろう．
-      BleMutualAuthentication().onWriteRequest(event);
+      await BleMutualAuthentication().onWriteRequest(event);
     }
   }
 

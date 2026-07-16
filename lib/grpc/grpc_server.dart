@@ -515,11 +515,20 @@ class GrpcServer extends ChangeNotifier {
       codecRegistry: _grpcCommon.codecRegistry,
     );
 
-    await s.serve(
-      address: InternetAddress.anyIPv4,
-      port: port,
-      security: _grpcCommon.buildServerSecurity(),
-    );
+
+    try {
+      await s.serve(
+        address: InternetAddress.anyIPv4,
+        port: port,
+        security: _grpcCommon.buildServerSecurity(),
+      );
+    } catch (e) {
+      // ToDo: ポートが使用中の場合，SocketException: Failed to create server socket (OS Error: Address already in use, errno = 98), address = 0.0.0.0, port = 50051
+      if (kDebugMode) {
+        debugPrint('[SERVER] Error starting server: $e');
+      }
+      rethrow;
+    }
 
     _server = s;
     _port = s.port;

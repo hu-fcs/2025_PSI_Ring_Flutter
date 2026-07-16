@@ -65,7 +65,7 @@ class BleNickname extends ChangeNotifier {
     uuid: BleNickname.nicknameCharacteristicUuid,
     properties: [
       GATTCharacteristicProperty.read,
-      GATTCharacteristicProperty.writeWithoutResponse,
+      GATTCharacteristicProperty.write, // writeWithoutResponse だと33バイトは書き込めない
     ],
     permissions: [
       GATTCharacteristicPermission.read,

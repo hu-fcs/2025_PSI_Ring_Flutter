@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io'; // Platform
+import 'dart:math' show min;
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
@@ -154,6 +155,9 @@ class BleCentralManager extends ChangeNotifier {
 
   /// 接続した（同じPeripheralへの接続に対して2，3回呼ばれることがある）
   Future<void> _onDeviceConnected(Peripheral peripheral) async {
+    final centralManager = CentralManager();
+    final bleNickname = BleNickname();
+
     // 同一Peripheralに対して重複して呼び出された場合は何もしない
     if (_connectedPeripherals.contains(peripheral.uuid))
       return;
@@ -163,7 +167,7 @@ class BleCentralManager extends ChangeNotifier {
     GATTCharacteristic? authenticationCharacteristic;
     try {
       // 特性（Characteristic）を探す
-      final services = await CentralManager().discoverGATT(peripheral);
+      final services = await centralManager.discoverGATT(peripheral);
       for (var service in services) {
         if (service.uuid == BleNickname.serviceUuid) {
           for (var characteristic in service.characteristics) {
@@ -180,35 +184,35 @@ class BleCentralManager extends ChangeNotifier {
       // 特定が見つからないので，読み書きせずに切断する
       if (nicknameCharacteristic == null || authenticationCharacteristic == null) {
         if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected no characteristics n: $nicknameCharacteristic a: $authenticationCharacteristic');
-        await CentralManager().disconnect(peripheral);
+        await centralManager.disconnect(peripheral);
         return; // finallyは実行される
       }
 
       // MTUの確認（Androidでは20バイトを33バイトに増やす．iOSでは自動的に増やすらしいので不要）
-      final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      if (Platform.isAndroid && len1 < 33) {
-        final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
+      final len1 = await centralManager.getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
+      if (Platform.isAndroid && len1 < 1 + 64) {
+        final len2 = await centralManager.requestMTU(peripheral, mtu: 1 + 64); // 相互認証のヘッダ1+レスポンス64バイト
         if (kDebugMode && _verbose) debugPrint('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
       } else {
         if (kDebugMode && _verbose) debugPrint('MTU write: $len1 (Peripheral ${peripheral.uuid})');
       }
 
-      // Peripheraのニックネームを読み込み
+      // Peripheralのニックネームを読み込み
       final now = DateTime.now();
-      final remoteNickname = await CentralManager().readCharacteristic(
+      final remoteNickname = await centralManager.readCharacteristic(
           peripheral, nicknameCharacteristic);
       if (kDebugMode) debugPrint('_onDeviceConnected read. remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${peripheral.uuid}, $now');
-      BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
-
-      // int len = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      // if (kDebugMode) debugPrint('getMaximumWriteLength $len');
+      await bleNickname.addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid);
 
       // CentralのニックネームをPeripheralに書き込み
-      final Uint8List localNickname = BleNickname().localNickname;
-      await CentralManager().writeCharacteristic(
+      final Uint8List localNickname = bleNickname.localNickname;
+      // 書き込み可能なMTUを取得．33バイトに満たない場合は先頭から一部の不完全なニックネームを送信．
+      final len = await centralManager.getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);
+      if (kDebugMode && len < localNickname.length) debugPrint('WARNING: MTU is too short.  getMaximumWriteLength $len');
+      await centralManager.writeCharacteristic(
         peripheral, nicknameCharacteristic,
-        value: localNickname,
-        type: GATTCharacteristicWriteType.withoutResponse,
+        value: localNickname.sublist(0, min(len, localNickname.length)),
+        type: GATTCharacteristicWriteType.withResponse,
       );
       if (kDebugMode) debugPrint('_onDeviceConnected write. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${peripheral.uuid}');
 
@@ -217,7 +221,7 @@ class BleCentralManager extends ChangeNotifier {
       final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
       // ToDo: 複数のlabel（名前）が見つかるのは不自然では？同じニックネームを複数人が使っているということになる？
       // 最初に見つかったlabelのみ使うように変更した．
-      if (labels.isNotEmpty) { // 相互認証
+      if (labels.isNotEmpty && len >= 1 + 64) { // 相互認証．Write MTUが十分でなければ相互認証は省略
         // 候補として通知（authenticated=false）
         final friendLabel = labels.first;
         // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
