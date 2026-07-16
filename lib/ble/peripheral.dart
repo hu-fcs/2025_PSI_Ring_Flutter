@@ -121,8 +121,12 @@ class BlePeripheral extends ChangeNotifier {
       final Uint8List remoteNickname = event.request.value;
       if (kDebugMode) print("_onWriteRequest remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${event.central.uuid}");
       await PeripheralManager().respondWriteRequest(event.request);
-      await BleNickname().addRemote(remoteNickname, DateTime.now(), centralUuid: event.central.uuid, );
 
+      final bleNickname = BleNickname();
+      if (remoteNickname.length == bleNickname.localNickname.length) { // MTUが33バイト未満の時は追加しない．
+        await bleNickname.addRemote(
+          remoteNickname, DateTime.now(), centralUuid: event.central.uuid,);
+      }
     } else if (event.characteristic == BleMutualAuthentication.authenticationCharacteristic) {
       // 将来ニックネームリストにremoteNicknameが含まれているときには認証に進む（山口 賢紘, 2026年2月，卒業論文）
       // Central側から認証に進むはずなので，Peripheral側からは認証を始めないでいいだろう．
@@ -150,7 +154,7 @@ class BlePeripheral extends ChangeNotifier {
       // manufacturerSpecificData: [data, data2],
     );
     await PeripheralManager().startAdvertising(advertisement);
-    if (kDebugMode) print("Advertising restarted...");
+    if (kDebugMode) print("Advertising restarted... ${DateTime.now()}");
   }
 
   /// ペリフェラルの停止．リソースの解放

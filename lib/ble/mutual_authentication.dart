@@ -275,7 +275,7 @@ class BleMutualAuthentication {
       ...challenge2]); // ...でリストを展開（Spread 演算子）
     await PeripheralManager().respondReadRequestWithValue(
       event.request,
-      value: payload,
+      value: payload.sublist(event.request.offset),
     );
 
     authPeripheral.state = _State.second;

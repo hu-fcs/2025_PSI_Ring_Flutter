@@ -16,6 +16,11 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A2E2B6D3656BC0D97303ABCA /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DD9175DC4312C0EAD3BF509B /* Pods_RunnerTests.framework */; };
+		CCCE43413008941800E32095 /* libcrypto.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CCCE43403008941800E32095 /* libcrypto.a */; };
+		CCCE43463008944300E32095 /* psi.c in Sources */ = {isa = PBXBuildFile; fileRef = CCCE43423008944300E32095 /* psi.c */; };
+		CCCE43473008944300E32095 /* ecdsa.c in Sources */ = {isa = PBXBuildFile; fileRef = CCCE43433008944300E32095 /* ecdsa.c */; };
+		CCCE43493008944300E32095 /* key_derivation.c in Sources */ = {isa = PBXBuildFile; fileRef = CCCE43453008944300E32095 /* key_derivation.c */; };
+		CCCE434B300895EF00E32095 /* ring_signature.c in Sources */ = {isa = PBXBuildFile; fileRef = CCCE434A300895EF00E32095 /* ring_signature.c */; };
 		CE0DCF6B09AB76971F3C2FB6 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2A441035A2119B8E7DA8E783 /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
@@ -65,6 +70,12 @@
 		97C146FD1CF9000F007C117D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CCCE43403008941800E32095 /* libcrypto.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libcrypto.a; path = BoringSSL/lib/libcrypto.a; sourceTree = "<group>"; };
+		CCCE43423008944300E32095 /* psi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = psi.c; path = ../src/native/psi.c; sourceTree = "<group>"; };
+		CCCE43433008944300E32095 /* ecdsa.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = ecdsa.c; path = ../src/native/ecdsa.c; sourceTree = "<group>"; };
+		CCCE43443008944300E32095 /* ring_signature.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = ring_signature.h; path = ../src/native/ring_signature.h; sourceTree = "<group>"; };
+		CCCE43453008944300E32095 /* key_derivation.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = key_derivation.c; path = ../src/native/key_derivation.c; sourceTree = "<group>"; };
+		CCCE434A300895EF00E32095 /* ring_signature.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; name = ring_signature.c; path = ../src/native/ring_signature.c; sourceTree = "<group>"; };
 		DD9175DC4312C0EAD3BF509B /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		E62002AA6E943C8C1FA40DB8 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -82,6 +93,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CCCE43413008941800E32095 /* libcrypto.a in Frameworks */,
 				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
 				CE0DCF6B09AB76971F3C2FB6 /* Pods_Runner.framework in Frameworks */,
 			);
@@ -114,6 +126,7 @@
 		77ACEAC8BA62934573B632DF /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CCCE43403008941800E32095 /* libcrypto.a */,
 				2A441035A2119B8E7DA8E783 /* Pods_Runner.framework */,
 				DD9175DC4312C0EAD3BF509B /* Pods_RunnerTests.framework */,
 			);
@@ -135,6 +148,11 @@
 		97C146E51CF9000F007C117D = {
 			isa = PBXGroup;
 			children = (
+				CCCE434A300895EF00E32095 /* ring_signature.c */,
+				CCCE43433008944300E32095 /* ecdsa.c */,
+				CCCE43453008944300E32095 /* key_derivation.c */,
+				CCCE43423008944300E32095 /* psi.c */,
+				CCCE43443008944300E32095 /* ring_signature.h */,
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
 				97C146EF1CF9000F007C117D /* Products */,
@@ -404,6 +422,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CCCE434B300895EF00E32095 /* ring_signature.c in Sources */,
+				CCCE43463008944300E32095 /* psi.c in Sources */,
+				CCCE43473008944300E32095 /* ecdsa.c in Sources */,
+				CCCE43493008944300E32095 /* key_derivation.c in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
@@ -498,11 +520,36 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 48LL37347R;
 				ENABLE_BITCODE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GTMSessionFetcher/GTMSessionFetcher.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleDataTransport/GoogleDataTransport.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac/GoogleToolboxForMac.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilities/GoogleUtilities.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilitiesComponents/GoogleUtilitiesComponents.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC/FBLPromises.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_foreground_task/flutter_foreground_task.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_secure_storage/flutter_secure_storage.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/mobile_scanner/mobile_scanner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/nanopb/nanopb.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/permission_handler_apple/permission_handler_apple.framework/Headers\"",
+					"\"${PODS_ROOT}/Headers/Public\"",
+					"\"${PODS_ROOT}/Headers/Public/GoogleMLKit\"",
+					"$(inherited)",
+					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
+					../src/native,
+					BoringSSL/include,
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/BoringSSL/lib",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.fluttersample2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -680,11 +727,36 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 48LL37347R;
 				ENABLE_BITCODE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GTMSessionFetcher/GTMSessionFetcher.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleDataTransport/GoogleDataTransport.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac/GoogleToolboxForMac.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilities/GoogleUtilities.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilitiesComponents/GoogleUtilitiesComponents.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC/FBLPromises.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_foreground_task/flutter_foreground_task.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_secure_storage/flutter_secure_storage.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/mobile_scanner/mobile_scanner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/nanopb/nanopb.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/permission_handler_apple/permission_handler_apple.framework/Headers\"",
+					"\"${PODS_ROOT}/Headers/Public\"",
+					"\"${PODS_ROOT}/Headers/Public/GoogleMLKit\"",
+					"$(inherited)",
+					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
+					../src/native,
+					BoringSSL/include,
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/BoringSSL/lib",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.fluttersample2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -702,11 +774,36 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 48LL37347R;
 				ENABLE_BITCODE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GTMSessionFetcher/GTMSessionFetcher.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleDataTransport/GoogleDataTransport.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleToolboxForMac/GoogleToolboxForMac.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilities/GoogleUtilities.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/GoogleUtilitiesComponents/GoogleUtilitiesComponents.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC/FBLPromises.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_foreground_task/flutter_foreground_task.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/flutter_secure_storage/flutter_secure_storage.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/mobile_scanner/mobile_scanner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/nanopb/nanopb.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/permission_handler_apple/permission_handler_apple.framework/Headers\"",
+					"\"${PODS_ROOT}/Headers/Public\"",
+					"\"${PODS_ROOT}/Headers/Public/GoogleMLKit\"",
+					"$(inherited)",
+					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
+					../src/native,
+					BoringSSL/include,
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/BoringSSL/lib",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.fluttersample2025;
 				PRODUCT_NAME = "$(TARGET_NAME)";

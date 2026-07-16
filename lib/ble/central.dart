@@ -58,9 +58,8 @@ class BleCentralManager extends ChangeNotifier {
   ///
   /// 購読をやめる．
   @override
-  void dispose() async {
-    await stopScan();
-    // await _localNicknameStreamSubscription?.cancel();
+  void dispose() {
+    CentralManager().stopDiscovery(); // await stopScan();
 
     _stateSubscription?.cancel();
     _discoveredSubscription?.cancel();
@@ -72,16 +71,22 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> startScan() async {
     if (_isScanning) return;
 
+    final centralManager = CentralManager();
     _discoveredPeripherals.clear(); // ToDo: clearするタイミングはここだけでいいのか．
-    _discoveredSubscription = CentralManager().discovered.listen(_onDeviceDiscovered);
-    _connectionStateSubscription = CentralManager().connectionStateChanged.listen((eventArgs) async {
+    _discoveredSubscription = centralManager.discovered.listen(_onDeviceDiscovered);
+    _connectionStateSubscription = centralManager.connectionStateChanged.listen((eventArgs) async {
       if (eventArgs.state == ConnectionState.connected) {
         await _onDeviceConnected(eventArgs.peripheral);
       } else { // ConnectionState.disconnected
         await _onDeviceDisconnected(eventArgs.peripheral);
       }
     });
-    await CentralManager().startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
+
+    if (Platform.isIOS) { // iOSはdiscovered.listenとstartDiscoveryの間で少し待つ
+      await Future.delayed(Duration(milliseconds: 100));
+    }
+
+    await centralManager.startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
     _isScanning = true;
     notifyListeners();
   }
@@ -93,6 +98,9 @@ class BleCentralManager extends ChangeNotifier {
     if (kDebugMode) debugPrint('BLE stopScan');
     await CentralManager().stopDiscovery();
     await _discoveredSubscription?.cancel();
+    _discoveredSubscription = null;
+    await _connectionStateSubscription?.cancel();
+    _connectionStateSubscription = null;
     _discoveredPeripherals.clear();
 
     _isScanning = false;
@@ -105,7 +113,7 @@ class BleCentralManager extends ChangeNotifier {
   Future<void> _onDeviceDiscovered(DiscoveredEventArgs eventArg) async {
     final Peripheral peripheral = eventArg.peripheral;
     if (_discoveredPeripherals.any((arg) => peripheral.uuid == arg.arg.peripheral.uuid)) {
-      // if (kDebugMode) debugPrint("already added ${DateTime.now()}");
+      // if (Platform.isIOS) if (kDebugMode) debugPrint("_onDeviceDiscovered already added ${DateTime.now()} ${peripheral.uuid}");
       return; // 以前に発見している
     }
     if (_connectingPeripherals.contains(peripheral.uuid)) {
