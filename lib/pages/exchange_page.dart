@@ -12,7 +12,7 @@ import '../db/database_helper.dart';
 import 'debug_page.dart';
 import '../grpc/psi_client.dart'; // ★追加
 import 'dart:async';
-
+import 'package:shared_preferences/shared_preferences.dart'; //shared preferences追加
 
 enum NicknameSchedulePeriod { oneDay, oneWeek, oneMonth }
 
@@ -200,14 +200,74 @@ class _ExchangePageState extends State<ExchangePage> {
     await s?.stop();
   }
 
-  // ==========================================================
+  Future<void> _saveSettings() async { //shared preferences使用のため追加
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString(
+      'owner_name',
+      _ownerNameController.text,
+    );
+
+    await prefs.setInt(
+      'period',
+      _selectedPeriod.index,
+    );
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    _ownerNameController.text =
+        prefs.getString('owner_name') ?? '自分の端末';
+
+    final period = prefs.getInt('period');
+
+    if (period != null) {
+      _selectedPeriod =
+      NicknameSchedulePeriod.values[period];
+    }
+
+    setState(() {});
+  }
+
+// ==========================================================
   // ★ ScannerPage 起動前にも鍵チェック
   // ==========================================================
   void _openScannerPage() async {
     if (!await _requireKeyWarning()) return;
-    Navigator.pushNamed(context, '/scanner');
-  }
 
+    // 1. スキャナー画面からの戻り値（QRコードの中身のJSON文字列）を待つ
+    final result = await Navigator.pushNamed(context, '/scanner');
+
+    // 2. もしデータがちゃんと返ってきたら、既存の入力欄にセットする
+    if (result != null && result is String) {
+      try {
+        // 返ってきた純粋なJSON文字列をパース（解析）する
+        final Map<String, dynamic> data = jsonDecode(result);
+
+        setState(() {
+          if (data['ip'] != null) {
+            // 既に存在している「相手のIP」のテキストフィールドに書き込む
+            _hostController.text = data['ip'].toString();
+          }
+          if (data['port'] != null) {
+            // 既に存在している「ポート」のテキストフィールドに書き込む
+            _portController.text = data['port'].toString();
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('接続先情報を読み取りました')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('QRコードの解析に失敗しました: $e')),
+        );
+      }
+    }
+  } // <-- _openScannerPage の終わり
+
+  // ーーー ★ここに以下の3行を新しく追加してください★ ーーー
   String get _qrPayload => jsonEncode({
     'ip': _serverIp ?? '',
     'port': _serverPort,
@@ -435,6 +495,8 @@ class _ExchangePageState extends State<ExchangePage> {
   @override
   void initState() {
     super.initState();
+
+    _loadSettings(); //この1行を追加した
     _ble.onFriendDetected = _onFriendDetected;
 
     _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -507,6 +569,8 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Future<void> _generateAndShare() async {
+
+    await _saveSettings(); //1行追加した
     final owner = _ownerNameController.text.trim();
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text.trim());
