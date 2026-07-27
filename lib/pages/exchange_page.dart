@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart'; //import Shared Preferences
 
 import '../ble/nickname.dart';
 import '../key_management.dart';
@@ -83,6 +84,10 @@ class _ExchangePageState extends State<ExchangePage> {
   @override
   void initState() {
     super.initState();
+
+    //保存されている設定を読み込む
+    _loadSettings();
+
     _ble.onFriendDetected = _onFriendDetected;
 
     _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -110,6 +115,39 @@ class _ExchangePageState extends State<ExchangePage> {
     super.didChangeDependencies();
     _textThemeBodySmallGreyShade600 = Theme.of(context).textTheme.bodySmall
         !.copyWith(color: Colors.grey.shade600); // 説明のテキストで使われることが多い．
+  }
+
+  //設定をShared preferencesへ保存
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString(
+      'owner_name',
+      _ownerNameController.text,
+    );
+
+    await prefs.setInt(
+      'period',
+      _selectedPeriod.index,
+    );
+  }
+
+  //Shared preferencesから設定を読み込む
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    _ownerNameController.text =
+        prefs.getString('owner_name') ?? '自分の端末';
+
+    final period = prefs.getInt('period');
+
+    if (period != null) {
+      _selectedPeriod = NicknameSchedulePeriod.values[period];
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -323,6 +361,9 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Future<void> _generateAndShare() async {
+    //現在の設定を保存
+    await _saveSettings();
+
     final owner = _ownerNameController.text.trim();
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text);
