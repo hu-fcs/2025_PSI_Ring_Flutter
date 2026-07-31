@@ -8,16 +8,16 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 
-import './native_key_bindings.dart';
+import 'native_key_bindings.dart';
 
 const int pubKeyCompressedLen = 33;
 const int privateKeyLen = 32;
 
 /// Flutter 側で扱う鍵ペア。
-class KeyPair {
+class NicknameKeyPair {
   final Uint8List privateKey;
   final Uint8List publicKey;
-  KeyPair(this.privateKey, this.publicKey);
+  NicknameKeyPair(this.privateKey, this.publicKey);
 }
 
 /// 鍵導出・PSI・リング署名をまとめた FFI サービス。
@@ -73,7 +73,7 @@ class NativeKeyService {
     }
   }
 
-  KeyPair? deriveNewKeyPair(
+  NicknameKeyPair? deriveNewKeyPair(
       Uint8List masterKey,
       int timestampMs,
       int slotMs,
@@ -94,7 +94,7 @@ class NativeKeyService {
       );
 
       if (ok == 1) {
-        return KeyPair(
+        return NicknameKeyPair(
           Uint8List.fromList(privPtr.asTypedList(privateKeyLen)),
           Uint8List.fromList(pubPtr.asTypedList(pubKeyCompressedLen)),
         );

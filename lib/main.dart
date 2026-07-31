@@ -11,7 +11,6 @@ import 'key_management.dart';
 import 'pages/debug_page.dart';
 import 'pages/exchange_page.dart';
 import 'pages/scanner_page.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

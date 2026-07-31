@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
-import '../ble/central.dart';
+import '../ble/nickname.dart';
 import '../db/database_helper.dart';
 import '../key_management.dart';
 import '../grpc/grpc_common.dart';
@@ -78,7 +78,7 @@ class _DebugPageState extends State<DebugPage>
     // 収集鍵を全削除した場合はスキャン側の重複抑止キャッシュも初期化する
     if (tableName == 'collected_keys') {
       // BleScanner.clearCollectedCache();
-      BleCentralManager().discoveredPeripherals.clear();
+      BlePeerList().clear();
       if (kDebugMode) {
         debugPrint('[DebugPage] collected cache cleared');
       }
@@ -453,7 +453,7 @@ class _DebugPageState extends State<DebugPage>
     if (unixTimeMs == null) return 'N/A';
     final dt = DateTime.fromMillisecondsSinceEpoch(unixTimeMs);
     return '${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
   }
 
   String _toDMS(double decimalDegree, {required bool isLatitude}) {
@@ -566,7 +566,7 @@ class _DebugPageState extends State<DebugPage>
   }
 
   Widget _buildSlotSelector() {
-    final int current = _keyManager.slotMs;
+    final int current = _keyManager.slot.inMilliseconds ~/ 1000; // 秒
 
     Widget label(String text) {
       return SizedBox(
@@ -579,7 +579,7 @@ class _DebugPageState extends State<DebugPage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '現在のスロット時間: ${_keyManager.slotMs} ms',
+          '現在のスロット時間: ${current}秒',
           style: const TextStyle(
             fontSize: _debugFontSize,
             fontWeight: FontWeight.w600,
@@ -589,22 +589,22 @@ class _DebugPageState extends State<DebugPage>
         SegmentedButton<int>(
           segments: [
             ButtonSegment(
-              value: 10 * 60 * 1000,
+              value: 10 * 60,
               label: label('10分'),
             ),
             ButtonSegment(
-              value: 1 * 60 * 1000,
+              value: 1 * 60,
               label: label('1分'),
             ),
             ButtonSegment(
-              value: 10 * 1000,
-              label: label('10秒'),
+              value: 20,
+              label: label('20秒'),
             ),
           ],
           selected: {current},
           onSelectionChanged: (selection) {
             setState(() {
-              _keyManager.slotMs;
+              _keyManager.slot = Duration(seconds: selection.first);
             });
           },
         ),
@@ -832,12 +832,13 @@ class _DebugPageState extends State<DebugPage>
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                      // 'Pub: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                      'Pub: ${(row['pubkey_ecd'] as Uint8List).hexStr(len: 3)}',
                                     ),
                                   ),
                                   Expanded(
                                     child: Text(
-                                      'Sec: ${_shortHex(row['seckey_ecd'] as List<int>?)}',
+                                      'Sec: ${(row['seckey_ecd'] as Uint8List).hexStr(len: 2)}',
                                     ),
                                   ),
                                 ],
@@ -882,7 +883,7 @@ class _DebugPageState extends State<DebugPage>
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      'Key: ${_shortHex(row['pubkey_ecd'] as List<int>?)}',
+                                      'Key: ${(row['pubkey_ecd'] as Uint8List).hexStr(len: 3)}',
                                     ),
                                   ),
                                   Expanded(

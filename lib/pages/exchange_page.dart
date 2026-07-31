@@ -1,6 +1,5 @@
 // lib/pages/exchange_page.dart
 
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:async';
@@ -88,7 +87,7 @@ class _ExchangePageState extends State<ExchangePage> {
     //保存されている設定を読み込む
     _loadSettings();
 
-    _ble.onFriendDetected = _onFriendDetected;
+    BlePeerList().onFriendDetectedCallback = _onFriendDetected;
 
     _nearbyGcTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -103,6 +102,13 @@ class _ExchangePageState extends State<ExchangePage> {
           _nearbyLastSeenMs.remove(k);
           _nearbyAuth.remove(k);
         }
+      });
+    });
+
+    // 広告をUIの準備ができてから自動的に開始
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Timer(const Duration(seconds: 3), () async {
+        _toggleBleExchange();
       });
     });
   }
@@ -375,7 +381,7 @@ class _ExchangePageState extends State<ExchangePage> {
       return;
     }
 
-    const slot = Duration(minutes: 10);
+    final slot = KeyManagementService().slot;
     final period = _selectedPeriod.duration;
 
     try {
@@ -824,6 +830,28 @@ class _ExchangePageState extends State<ExchangePage> {
                 Text('近くの端末と匿名のニックネームを交換します',
                     style: _textThemeBodySmallGreyShade600),
                 // style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                const SizedBox(height: 8),
+                ListenableBuilder(
+                  listenable: _ble,
+                  builder: (context, child) {
+                    final stateStr = _ble.currentStateString();
+                    return Text('ニックネーム：$stateStr');
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: _ble.advertiser,
+                  builder: (context, child) {
+                    final s = _ble.advertiser.lastRequestTime?.shortStr();
+                    return Text('接続された：$s');
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: _ble.scanner,
+                  builder: (context, child) {
+                    final s = _ble.scanner.lastDiscoveredTime?.shortStr();
+                    return Text('広告を受信：$s');
+                  },
+                ),
               ],
             ),
           ),

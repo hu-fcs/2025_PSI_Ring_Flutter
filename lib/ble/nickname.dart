@@ -18,15 +18,13 @@
 /// }
 library; // 上のドキュメントコメントをファイルに対するコメントにするためにlibraryと書いている．
 
-import 'dart:async';      // Timer
-// import 'dart:js_interop';
-import 'dart:typed_data'; // Uint8List
-import 'dart:math' show Random;       // min
-// import 'dart:collection';
+import 'dart:async'; // Timer
 import 'package:flutter/foundation.dart'; // kDebugMode
 import "package:bluetooth_low_energy/bluetooth_low_energy.dart";
-import 'package:convert/convert.dart' show hex; // hex.decode(Uint8List)のため
+import 'package:intl/intl.dart' show DateFormat;
 import '../key_management.dart';
+import '../ffi/native_key_service.dart';
+import '../friend.dart';
 import 'peripheral.dart';
 import 'central.dart';
 import 'mutual_authentication.dart';
@@ -45,27 +43,35 @@ import 'mutual_authentication.dart';
 /// - キーの更新間隔を時々問い合わせる．_kms.slotMs
 class BleNickname extends ChangeNotifier {
   /// サービス識別子（UUID）
-  static final UUID serviceUuid = UUID.fromString('D353434A-C5F4-4A63-A21A-974C68459ED2');
+  static final UUID serviceUuid = UUID.fromString(
+    'D353434A-C5F4-4A63-A21A-974C68459ED2',
+  );
+
   /// Peripheral自身のニックネームをCentralが読み取り（read）
   /// CentralのニックネームをPeripheralに書き込む（write）ための特性識別子（UUID）
-  static final UUID nicknameCharacteristicUuid = UUID.fromString('D3534340-C5F4-4A63-A21A-974C68459ED2');
+  static final UUID nicknameCharacteristicUuid = UUID.fromString(
+    'D3534340-C5F4-4A63-A21A-974C68459ED2',
+  );
 
   /// Peripheralのニックネーム・サービス（Service）
   static final GATTService nicknameService = GATTService(
     uuid: BleNickname.serviceUuid,
     isPrimary: true,
-    includedServices: [], // [BleMutualAuthentication.authenticationService], // secondary serviceを追加しようとしたがうまくいかない
+    includedServices:
+        [], // [BleMutualAuthentication.authenticationService], // secondary serviceを追加しようとしたがうまくいかない
     characteristics: [
       nicknameCharacteristic,
       BleMutualAuthentication.authenticationCharacteristic,
     ],
   );
+
   /// Peripheralのニックネームを読み出す特性（Characteristic）
-  static final GATTCharacteristic nicknameCharacteristic = GATTCharacteristic.mutable(
+  static final GATTCharacteristic
+  nicknameCharacteristic = GATTCharacteristic.mutable(
     uuid: BleNickname.nicknameCharacteristicUuid,
     properties: [
       GATTCharacteristicProperty.read,
-      GATTCharacteristicProperty.writeWithoutResponse,
+      GATTCharacteristicProperty.write, // writeWithoutResponse だと33バイトは書き込めない
     ],
     permissions: [
       GATTCharacteristicPermission.read,
@@ -74,208 +80,259 @@ class BleNickname extends ChangeNotifier {
     descriptors: [],
   );
 
-  /// 単一ニックネームの使用期間．杉浦修論では10分．デバッグ画面で10分，1分，10秒で切り替えられる．
-  static var validDuration = const Duration(seconds: 30); // 標準ば10分．minutes: 10); // KeyManagementService 内の validity の値
-  /// ニックネームの更新タイマー
-  Timer? _timer;
-
   /// キーマネージャ（ニックネームを管理している）
   final _kms = KeyManagementService();
-  /// キーマネージャの（ニックネームを管理している）
-  StreamSubscription<void>? _keyUpdateSub;
 
   final _advertiser = BlePeripheral();
+  BlePeripheral get advertiser => _advertiser;
   final _scanner = BleCentralManager();
+  BleCentralManager get scanner => _scanner;
 
   bool _isRunning = false;
   bool get isRunning => _isRunning;
 
   void _onStateChanged() {
-    if (kDebugMode) print('_onStateChanged: ${_advertiser.isAdvertising} ${_scanner.isScanning}');
+    if (kDebugMode)
+      print('_onStateChanged'
+          ' peripheral: ${_advertiser.isAdvertising}'
+          ' central: ${_scanner.isScanning}',
+      );
     _isRunning = _advertiser.isAdvertising && _scanner.isScanning;
     notifyListeners();
   }
 
   // シングルトン
   static final BleNickname _instance = BleNickname._internal();
-  /// シングルトン：このクラスのオブジェクトは一つだけ．
-  factory BleNickname() {
-    return _instance;
-  }
+  factory BleNickname() => _instance;
   BleNickname._internal() {
-    _timer = Timer.periodic(validDuration, _updateNickname);
     _advertiser.addListener(_onStateChanged);
     _scanner.addListener(_onStateChanged);
-    // _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname); // 広告・スキャンONのタイミングに変更
   }
 
   /// クラスが破棄される時にストリーム・コントローラーを閉じる
   @override
   void dispose() {
     // _localNicknameStreamController.close();
-    _timer?.cancel();
-    _keyUpdateSub?.cancel();
     super.dispose();
   }
 
   /// BLE広告（アドバタイズ）とスキャンのON/OFF切り替え
   Future<void> toggleExchange() async {
-    if (isRunning) {
-      _keyUpdateSub?.cancel();
-      _timer?.cancel();
+    if (isRunning) { // BLE広告とスキャンを停止
       await _scanner.stopScan();
       await _advertiser.stop();
-    } else {
-      _keyUpdateSub = _kms.onKeyUpdated.listen(_updateNickname);
+    } else { // BLE広告とスキャンを開始
       _start();
-      if (! _advertiser.isAdvertising) await _advertiser.start();
-      if (! _scanner.isScanning) await _scanner.startScan();
+      if (!_advertiser.isAdvertising) await _advertiser.start();
+      if (!_scanner.isScanning) await _scanner.startScan();
     }
-  }
-
-  /// ニックネームの前回のスロット
-  int _lastSlotStartTime = 0;
-  /// ニックネームの前回のニックネーム
-  Uint8List _lastLocalNickname = Uint8List(33);
-  /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
-  Uint8List get localNickname => _lastLocalNickname;
-  /// ニックネームの前回のニックネーム
-  Uint8List _lastLocalPrivateKey = Uint8List(33); // ToDo: KeyPairを保持したほうがいよさそう
-  /// ニックネームの前回のスロット（変更はlocalNicknameStreamで通知するので最初だけ）
-  Uint8List get lastLocalPrivateKey => _lastLocalPrivateKey;
-
-  final _insecureRandom = Random();
-
-  /// ニックネームの更新（タイマーで呼び出す）
-  /// validDuration の半分の時間程度まで適当に広告を遅れさせて揺らぎを持たせる．
-  void _updateNickname(void _) async {
-    final currentValidDuration = Duration(milliseconds: _kms.slotMs);
-    if (validDuration != currentValidDuration) {
-      validDuration = currentValidDuration;
-      _timer?.cancel();
-      _timer = Timer.periodic(validDuration, _updateNickname);
-    }
-    if (_lastLocalNickname[0] != 0x00) {
-      // [0] == 0x00の場合，アプリ実行後の最初のニックネームでは，待ち時間なし．
-      // ニックネームの更新
-      final jitter = _insecureRandom.nextInt(validDuration.inMilliseconds ~/ 2);
-      await Future.delayed(Duration(milliseconds: jitter));
-    }
-    // 杉浦プロジェクトと同様（3行）
-    final int now = DateTime.now().millisecondsSinceEpoch;
-    final int slotMillis = validDuration.inMilliseconds;
-    final slotStartTime = (now ~/ slotMillis) * slotMillis; // (now ~/ slotMillis) は (int)(now / slotMillis) と同じ
-
-    if (_lastSlotStartTime != slotStartTime) { // 時間が経っていなら更新しない．
-      _lastSlotStartTime = slotStartTime;
-      final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
-        if (kDebugMode) {
-          debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
-        }
-        throw e;
-      });
-      _lastLocalNickname = keyPair.publicKey;
-      _lastLocalPrivateKey = keyPair.privateKey;
-
-      if (_advertiser.isAdvertising) {
-        await _advertiser.restart();
-      }
-      if (kDebugMode) print('_updateNickname: ${nickname2string(_lastLocalNickname)}, $validDuration, ${DateTime.fromMillisecondsSinceEpoch(now)}');
-    }
-    // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
-    // BleRemoteMap().addRemote(_lastNickname!, DateTime.now(), local: true);
   }
 
   Future<void> _start() async {
-    final keyPair = await _kms.getKeyPairForBleAdvertise().catchError((e, st) {
-      if (kDebugMode) {
-        debugPrint('BleNickname: getKeyPairForBleAdvertise failed: $e');
-      }
-      throw e;
-    });
-    _lastLocalNickname = keyPair.publicKey;
-    _lastLocalPrivateKey = keyPair.privateKey;
-    if (kDebugMode) print('nickname _start ${nickname2string(_lastLocalNickname)} ${_kms.slotMs}');
-    // _localNicknameStreamController.add(Uint8List.fromList(_lastNickname!)); // 通知する
+    if (kDebugMode) {
+      final localNickname = _kms.currentLocalKeyPair.publicKey;
+      print('nickname _start ${localNickname.hexStr(len: 5)} ${_kms.slot}');
+    }
   }
 
-  /// リモートのニックネームをリモートのuuidから探せるようにするMap
-  /// ペリフェラルが相互認証するときにセントラルのニックネームを調べる必要があるため
-  final Map<UUID, ({Uint8List nickname, DateTime time})> _remoteNicknameCache = {};
-  /// _remoteNicknameCache から古いエントリーを削除するためのタイマー
-  Timer? _remoteNicknameCacheTimer;
+  /// UIに表示するための現在の状態を返す．
+  String currentStateString() {
+    final df = DateFormat('E HH:mm:ss'); // 'yyyy-MM-dd HH:mm:ss'
+    final localNicknameStr = _kms.currentLocalKeyPair.publicKey.hexStr(len: 3);
+    final exireAtStr = df.format(_kms.currentKeyExpirationTime);
+    // _scanner
+    // _advertiser
+    return '$localNicknameStr $exireAtStrまで';
+  }
+}
 
-  /// リモートのニックネームを追加
-  Future<void> addRemote(Uint8List nickname, DateTime now, {UUID? peripheralUuid, UUID? centralUuid, bool local = false}) async {
-    if (! local) { // リモートのニックネームを追加
-      // 収集鍵として collected_keys テーブルに登録する
-      final inserted = await _kms.insertCollectedKeyIfAbsent(
-        pubkey33: nickname,
-        receivedAtMs: now.millisecondsSinceEpoch,
-      );
-      if (inserted) {
-        if (kDebugMode) {
-          debugPrint('BLE_SCAN: new collected key stored');
+/// 受信/送信したBLEニックネーム履歴を保持するシングルトン
+class BlePeerList extends ChangeNotifier {
+  static final BlePeerList _instance = BlePeerList._internal();
+  factory BlePeerList() => _instance;
+  BlePeerList._internal();
+
+  final List<BluetoothLowEnergyPeer> _list = [];
+  List<BluetoothLowEnergyPeer> get list => _list;
+
+  /// 友達のperipheraとcentralを取得する．
+  (Peripheral?, Central?, bool) of(DummyFriend friend) {
+    Peripheral? peripheral = null;
+    Central? central = null;
+    bool exist = false; // 友達のperipheraとcentralと最近ニックネームを交換したか
+    final slotPlus = KeyManagementService().slot * 2;
+    final expireAt = DateTime.now().subtract(slotPlus);
+
+    for (final peer in _list.reversed) {
+      if (peer.friend == friend && peer.isAuthenticated) {
+//        print('BlePeerList.of: peerInList.friend=${peerInList.friend?.name}, friend=${friend.name}');
+        if (peripheral == null && peer is Peripheral) {
+          peripheral = peer;
+          if (peer.lastExchangedAt!.isAfter(expireAt)) exist = true;
         }
+        if (central == null && peer is Central) {
+          central = peer;
+          if (peer.lastExchangedAt!.isAfter(expireAt)) exist = true;
+        }
+        if (peripheral != null && central != null) break;
       }
+    }
+    return (peripheral, central, exist);
+  }
 
-      // 相互認証のPeripheral側でCentralのニックネームを探せるように記録する
-      if (centralUuid != null) {
-        _remoteNicknameCache[centralUuid] = (nickname: nickname, time: now);
+  /// 接続相手のニックネームを記録する．
+  Future<void> addRemote(BluetoothLowEnergyPeer peer,
+      Uint8List nickname, DateTime now) async {
+    // collected_keysテーブルに追加
+    KeyManagementService().insertCollectedPubKeyIfAbsent(pubkey33: nickname, exchangedAt: now);
 
-        // _remoteNicknameCache に残っている古いエントリーを削除するために周期タイマーを動かす．
-        // もし，すでにタイマーがセットいたら，新しいタイマーは動かさない
-        _remoteNicknameCacheTimer ??= Timer.periodic(const Duration(minutes: 30), (timer) {
-          // タイマーの動作．30分経過したリモートニックネームは _remoteNicknameCache から削除する
-          final expireTime = DateTime.now().subtract(Duration(minutes: 3));
-          _remoteNicknameCache.removeWhere((key, value) =>
-              value.time.isBefore(expireTime));
-          // _remoteNicknameCache から空になったら周期タイマーを停止
-          if (_remoteNicknameCache.isEmpty) {
-            timer.cancel();
-            _remoteNicknameCacheTimer = null;
-          }
-        });
+    // _list にすでにニックネームが存在すれば更新
+    for (final peerInList in _list.reversed) {
+      if (peerInList == peer) {
+        peerInList.setNickname(nickname);
+        peerInList.setLastExchangedAt(now);
+        reorderList();
+        notifyListeners();
+        return;
       }
+    }
+    // _list に追加
+    peer.setNickname(nickname);
+    peer.setLastExchangedAt(now);
+    _list.add(peer);
+    notifyListeners();
+  }
+
+  /// lastExchangedAt が slot * 2 より新しいものより後に，
+  /// slot * 2 より古いものがあったら，古いものを一つだけリストの前の方に移動する．
+  /// 古いものがリストの前の方に少しずつ集まるようにする．
+  void reorderList() {
+    final slotPlus = KeyManagementService().slot * 2;
+    final expireAt = DateTime.now().subtract(slotPlus);
+    int fresh = -1; // リストの先頭から最初に見つかった新しい要素の位置
+    int decay = -1; // リストのfreshより後で最初に見つかった古い要素の位置
+    for (int i = 0; i < _list.length; i++) {
+      if (fresh == -1 && _list[i].lastExchangedAt!.isAfter(expireAt))
+        fresh = i;
+      if (fresh != -1 && decay == -1 && _list[i].lastExchangedAt!.isBefore(expireAt))
+        decay = i;
+      if (fresh != -1 && decay != -1) break;
+    }
+    // _list[decay]を_list[fresh]の前に移動する．逆順に表示するので_list[decay]の表示は後ろに移動
+    if (fresh != -1 && decay != -1 && fresh < decay) {
+      if (kDebugMode) debugPrint('reorderList: moving peer from $decay to $fresh');
+      final decayPeer = _list[decay];
+      for (int i = decay; i > fresh; i--) {
+        _list[i] = _list[i - 1];
+      }
+      _list[fresh] = decayPeer;
     }
   }
 
-  /// Peripheral側でCentralのニックネームを探す．
-  Uint8List? findRemoteNickname(UUID centralUuid) => _remoteNicknameCache[centralUuid]?.nickname;
+  void Function(String friendLabel, bool authenticated)? onFriendDetectedCallback;
 
-  /// 友達ニックネームにマッチした & 認証結果を UI に通知するためのコールバック
-  void Function(String friendLabel, bool authenticated)? onFriendDetected;
-
-  /// 33バイトのニックネームを16進表現の文字列にして，4バイトごとに_アンダースコアで区切る．クラスメソッド．主にデバッグ用
-  static String nickname2string(Uint8List bytes, {int len = 0}) {
-    if (len == 0) len = bytes.length;
-    final hexString = hex.encode(bytes.sublist(0, len));
-    final joined = RegExp(r'.{1,8}(?=(?:.{8})*$)').allMatches(hexString).map((m) => m.group(0)).join('_');
-    if (len < bytes.length) {
-      return '$joined...(${bytes.length})';
-    } else {
-      return joined;
+  /// 友達を検出したときに呼び出す．
+  Future<void> onFriendDetected(BluetoothLowEnergyPeer peer,
+      int friendId, [bool authenticated = true]) async {
+    final friendName = FriendList().labelOf(friendId);
+    if (kDebugMode) {
+      debugPrint('onFriendDetected nickname: ${peer.nickname?.hexStr(len: 5)}'
+          ', authenticated: $authenticated, friendName: $friendName');
     }
+    peer.setFriend(friendId);
+    peer.isAuthenticated = authenticated;
+    if (onFriendDetectedCallback != null) {
+      onFriendDetectedCallback!(friendName, authenticated);
+    }
+    notifyListeners();
+  }
+
+  void clear() {
+    _list.clear();
+    notifyListeners();
   }
 }
-/*
-/// BLEで受信したニックネームを格納するオブジェクト
-class BleRemote {
-  Uint8List remoteNickname;   // Uint8List, 33バイト．相手のニックネーム
-  DateTime time;              // ニックネームを交換した日時
-  UUID? centralUuid;          // Peripheralとして接続されたときのcentralのUUID
-  UUID? peripheralUuid;       // Centralとして接続したときに記録
-  Timer? timer;
 
-  BleRemote({
-    required this.remoteNickname,
-    this.centralUuid,
-    this.peripheralUuid,
-    this.timer,
-  })
-    : time = DateTime.now();
+final Map<BluetoothLowEnergyPeer, Uint8List> _peerNickname = {};
+final Map<BluetoothLowEnergyPeer, DateTime> _peerLastExchangedAt = {};
+final Map<BluetoothLowEnergyPeer, bool> _peerIsAuthenticated = {};
+final Map<BluetoothLowEnergyPeer, int> _peerFriend = {}; // int: friendID in friends テーブル
 
-  void dispose() {
+extension BluetoothLowEnergyPeerExtension on BluetoothLowEnergyPeer {
+  /// UUIDの末尾の文字列
+  String get shortUuid => uuid.toString().substring(uuid.toString().length - 4);
+
+  setNickname(Uint8List value) => _peerNickname[this] = value;
+  Uint8List? get nickname => _peerNickname[this];
+
+  setLastExchangedAt(DateTime value) => _peerLastExchangedAt[this] = value;
+  DateTime? get lastExchangedAt => _peerLastExchangedAt[this];
+
+  set isAuthenticated(bool value) => _peerIsAuthenticated[this] = value;
+  bool get isAuthenticated => _peerIsAuthenticated[this] ?? false;
+
+  setFriend(int friendId) => _peerFriend[this] = friendId;
+  int? get friend => _peerFriend[this];
+}
+
+/// ペリフェラルとの接続回数や最後に発見された時刻を記録するためのMap
+// ToDo: これらのMapは古いペリフェラルの要素を削除しないとメモリリークしている．
+final Map<Peripheral, DateTime> _peripheralLastDiscoveredAt = {};
+final Map<Peripheral, int> _peripheralDiscoveredCount = {};
+final Map<Peripheral, DateTime> _peripheralLastConnectAt = {};
+final Map<Peripheral, DateTime> _peripheralNextConenctAt = {};
+final Map<Peripheral, int> _peripheralLastConnectErrorCount = {};
+
+extension PeripheralExtension on Peripheral {
+
+  /// ペリフェラルが最後に発見された時刻を記録する．
+  int setDiscoveredAt(DateTime now) {
+    _peripheralLastDiscoveredAt[this] = now;
+    final count = (_peripheralDiscoveredCount[this] ?? 0) + 1;
+    _peripheralDiscoveredCount[this] = count;
+    return count;
+  }
+  DateTime? get lastDiscoveredAt => _peripheralLastDiscoveredAt[this];
+  int get discoveredCount => _peripheralDiscoveredCount[this] ?? 0;
+  DateTime? get nextConnectAt => _peripheralNextConenctAt[this];
+
+  /// ペリフェラルに接続したので，次の接続までに少なくとも1秒空ける．
+  void setConnectAt(DateTime now) {
+    _peripheralLastConnectAt[this] = now;
+    _peripheralNextConenctAt[this] = now.add(const Duration(seconds: 1));
+  }
+  DateTime? get lastConnectAt => _peripheralLastConnectAt[this];
+
+  /// ペリフェラルに接続エラーが発生したので，次の接続までに少なくとも10秒空ける．
+  void setErrorAt(DateTime now) {
+    final errorCount = (_peripheralLastConnectErrorCount[this] ?? 0) + 1;
+    _peripheralLastConnectErrorCount[this] = errorCount;
+    _peripheralNextConenctAt[this] = now.add(Duration(seconds: 10 * errorCount));
+  }
+
+  /// ニックネームの交換に成功したので，次の接続までにスロット時間を空ける．
+  void setNicknameExchangedAt(DateTime now) {
+    final slot = KeyManagementService().slot;
+    _peripheralNextConenctAt[this] = now.add(slot);
+    _peripheralLastConnectErrorCount[this] = 0; // 成功したのでエラー回数をリセット
   }
 }
-*/
+
+/// セントラルから接続された時刻を記録するためのMap
+final Map<Central, DateTime> _centralLastAccessedAt = {};
+final Map<Central, NicknameKeyPair> _centralKeyPair = {}; // centralのキーペア（centralの認証に使う）
+
+extension CentralExtension on Central {
+  /// セントラルが最後に接続された時刻を記録する．
+  setLastAccessedAt(DateTime now) => _centralLastAccessedAt[this] = now;
+  DateTime? get lastAccessedAt => _centralLastAccessedAt[this];
+
+  setLocalKeyPair(NicknameKeyPair keyPair) => _centralKeyPair[this] = keyPair;
+  NicknameKeyPair? get localKeyPair => _centralKeyPair[this];
+}
+
+final df = DateFormat('E HH:mm:ss'); // 'yyyy-MM-dd HH:mm:ss'
+
+extension NicknameDateTime on DateTime {
+  String shortStr() => df.format(this);
+}
