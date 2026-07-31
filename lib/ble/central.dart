@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io'; // Platform
-import 'package:collection/collection.dart';
+import 'dart:math' show min;
 import 'package:flutter/foundation.dart'; // ChangeNotifier
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'nickname.dart';
 import 'mutual_authentication.dart';
-import '../db/friends_dao.dart';
+import '../friend.dart';
+import '../key_management.dart';
 
 /// BLEのCentral機能．
 /// このアプリのサービスをスキャンし，
@@ -15,27 +16,42 @@ import '../db/friends_dao.dart';
 ///
 /// bluetooth_low_energy パッケージを使う．
 class BleCentralManager extends ChangeNotifier {
+  // シングルトン
+  static final BleCentralManager _instance = BleCentralManager._internal();
+  factory BleCentralManager() => _instance;
+  BleCentralManager._internal();
+
   bool _isScanning = false;
   bool _isAvailable = false;
-  bool _verbose = false; // debugPrintが多すぎるので verbose = true の時だけ出力するように
-  final QueueList<({DiscoveredEventArgs arg, DateTime t})> _discoveredPeripherals = QueueList<({DiscoveredEventArgs arg, DateTime t})>();
-  final PriorityQueue<({int rssi, Peripheral peripheral})> _waitingPeripherals = HeapPriorityQueue<({int rssi, Peripheral peripheral})>(
-      (a, b) => b.rssi.compareTo(a.rssi)
-    );
+  final bool _verbose = false; // debugPrintが多すぎるので verbose = true の時だけ出力するように
+
+  /// BLE使用可能．ChangeNotifierでUIに変化を通知
+  bool get isAvailable => _isAvailable;
 
   /// スキャン中．ChangeNotifierでUIに変化を通知
   bool get isScanning => _isScanning;
-  /// BLE使用可能．ChangeNotifierでUIに変化を通知
-  bool get isAvailable => _isAvailable;
-  /// 発見したPeripheral
-  QueueList<({DiscoveredEventArgs arg, DateTime t})> get discoveredPeripherals => _discoveredPeripherals;
+  /// 最後の発見時間
+  DateTime? _lastDiscoveredTime;
+  DateTime? get lastDiscoveredTime => _lastDiscoveredTime;
+  /// スキャンの自動停止タイマー
+  Timer? _autoStopTimer;
+
+  /// 接続ペリフェラルのリスト
+  /// CentralManager().retrieveConnectedPeripherals() で定期的に取得．
+  /// _onDeviceDiscoveredで参照して接続数をmaxConnections以下に制限するために使う．
+  /// UIに接続ペリフェラル数を表示するために使う．
+  List<Peripheral> _connectedPeripherals = [];
+  List<Peripheral> get connectedPeripherals => _connectedPeripherals;
+  /// 接続ペリフェラル数を更新するタイマー
+  Timer? _retrieveConnectedPeripheralsTimer;
 
   /// 同時最大接続peripheral数
-  static final int maxConnections = 1;
-  /// 接続中のPeripheral（connectを呼び出したがretrieveConnectedPeripheralsには反映されていないものを含む）．同時接続数の上限を決めるため．
-  Set<UUID> _connectingPeripherals = Set<UUID>();
-  /// 接続中のPeripheral（connectのコールバックがあったものだけ）
-  Set<UUID> _connectedPeripherals = Set<UUID>();
+  var maxConnections = 1;
+  /// スキャンの一時停止から回復する時のタイマー
+  Timer? _resumeTimer;
+  /// BLEで発見したペリフェラルで処理中のものを記録するためのSet
+  /// 同じペリフェラルに同時に接続しないようにするために使う
+  final Set<Peripheral> _inProcessPeripherals = {};
 
   StreamSubscription? _stateSubscription;
   StreamSubscription? _discoveredSubscription;
@@ -46,7 +62,10 @@ class BleCentralManager extends ChangeNotifier {
     // await _requestPermissions(); // exchange_page.dart: ExchangePageクラスで実施済み
 
     // BLEが利用可能かチェック・監視
-    _stateSubscription = CentralManager().stateChanged.listen((arg) {
+    final cm = CentralManager();
+    _isAvailable = (cm.state == BluetoothLowEnergyState.poweredOn);
+    notifyListeners(); // UIに通知
+    _stateSubscription = cm.stateChanged.listen((arg) {
       if (kDebugMode) print("BleCentralManager CentralManager().stateChanged.listen: ${arg.state}");
       _isAvailable = (arg.state == BluetoothLowEnergyState.poweredOn);
       notifyListeners(); // UIに通知
@@ -57,44 +76,109 @@ class BleCentralManager extends ChangeNotifier {
   ///
   /// 購読をやめる．
   @override
-  void dispose() async {
-    await stopScan();
-    // await _localNicknameStreamSubscription?.cancel();
+  void dispose() {
+    CentralManager().stopDiscovery(); // await stopScan();
 
     _stateSubscription?.cancel();
     _discoveredSubscription?.cancel();
     _connectionStateSubscription?.cancel();
+
+    _retrieveConnectedPeripheralsTimer?.cancel();
+    _resumeTimer?.cancel();
+    _autoStopTimer?.cancel();
     super.dispose(); // ChangeNotifierクラス
   }
 
   /// スキャン開始
-  Future<void> startScan() async {
+  Future<void> startScan({Duration? autoStop}) async {
     if (_isScanning) return;
 
-    _discoveredPeripherals.clear(); // ToDo: clearするタイミングはここだけでいいのか．
-    _discoveredSubscription = CentralManager().discovered.listen(_onDeviceDiscovered);
-    _connectionStateSubscription = CentralManager().connectionStateChanged.listen((eventArgs) async {
+    final kms = KeyManagementService();
+    await kms.init();
+    await kms.start(byCentral: true);
+    final cm = CentralManager();
+    _discoveredSubscription = cm.discovered.listen(_onDeviceDiscovered);
+    _connectionStateSubscription = cm.connectionStateChanged.listen((eventArgs) async {
       if (eventArgs.state == ConnectionState.connected) {
         await _onDeviceConnected(eventArgs.peripheral);
       } else { // ConnectionState.disconnected
         await _onDeviceDisconnected(eventArgs.peripheral);
       }
     });
-    await CentralManager().startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
-    _isScanning = true;
-    notifyListeners();
+    _inProcessPeripherals.clear();
+
+    _connectedPeripherals = await cm.retrieveConnectedPeripherals()
+        .onError((e, st) { return []; });
+    for (final peripheral in _connectedPeripherals) {
+      cm.disconnect(peripheral).onError((e, st) {
+        if (kDebugMode) debugPrint('BLE startScan. ERROR disconect(${peripheral.shortUuid})');
+      });
+    }
+    _connectedPeripherals = await cm.retrieveConnectedPeripherals()
+        .onError((e, st) { return []; });
+    maxConnections = _connectedPeripherals.length + 1;
+    if (kDebugMode) debugPrint('BLE startScan. cps:${_connectedPeripherals.length} max:$maxConnections');
+
+    // 接続ペリフェラルのリストを10秒ごとに更新するタイマー．主にテスト用．UIに接続ペリフェラル数を表示するために使う．
+    _retrieveConnectedPeripheralsTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
+      _connectedPeripherals = await cm.retrieveConnectedPeripherals();
+      if (kDebugMode) debugPrint('BLE central timer. cps ${_connectedPeripherals.length}');
+      notifyListeners(); // UIに通知
+    });
+
+    if (Platform.isIOS) { // iOSはdiscovered.listenとstartDiscoveryの間で少し待つ（100msは短いのかも）
+      await Future.delayed(Duration(milliseconds: 500));
+    }
+
+    try {
+      await cm.startDiscovery(serviceUUIDs: [BleNickname.serviceUuid]);
+      _isScanning = true;
+      notifyListeners();
+      if (autoStop != null) {
+        _autoStopTimer?.cancel();
+        _autoStopTimer = Timer(autoStop, () async {
+          await stopScan();
+        });
+      }
+    }  catch (e) {
+      if (kDebugMode) debugPrint('BLE Error: startScan CentralManager.startDiscovery $e');
+    }
   }
 
   /// スキャン停止
   Future<void> stopScan() async {
     if (!_isScanning) return;
 
+    final cm = CentralManager();
     if (kDebugMode) debugPrint('BLE stopScan');
-    await CentralManager().stopDiscovery();
-    await _discoveredSubscription?.cancel();
-    _discoveredPeripherals.clear();
+    try {
+      await cm.stopDiscovery();
+      _connectedPeripherals = await cm.retrieveConnectedPeripherals();
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) debugPrint('BLE Error: stopScan CentralManager $e');
+    }
+    try {
+      await KeyManagementService().stop(byCentral: true);
+    } catch (e) {
+      if (kDebugMode) debugPrint('BLE Error: stopScan KeyManagementService $e');
+    }
 
     _isScanning = false;
+
+    await _discoveredSubscription?.cancel();
+    _discoveredSubscription = null;
+    await _connectionStateSubscription?.cancel();
+    _connectionStateSubscription = null;
+
+    _retrieveConnectedPeripheralsTimer?.cancel();
+    _retrieveConnectedPeripheralsTimer = null;
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
+    _autoStopTimer?.cancel();
+    _autoStopTimer = null;
+    _lastDiscoveredTime = null;
+
     notifyListeners();
   }
 
@@ -102,68 +186,94 @@ class BleCentralManager extends ChangeNotifier {
   /// startDiscoveryでBleNickname.serviceUuidを含むperipheralのみ見つかる．
   /// 以前に発見していればスキップし，初めてならば接続．
   Future<void> _onDeviceDiscovered(DiscoveredEventArgs eventArg) async {
+    final now = DateTime.now();
     final Peripheral peripheral = eventArg.peripheral;
-    if (_discoveredPeripherals.any((arg) => peripheral.uuid == arg.arg.peripheral.uuid)) {
-      // if (kDebugMode) debugPrint("already added ${DateTime.now()}");
-      return; // 以前に発見している
-    }
-    if (_connectingPeripherals.contains(peripheral.uuid)) {
-      // 同じデバイスに対して_onDeviceDiscoveredが複数回呼ばれることがエミューレータであったので，1回目以外はスキップ．
+
+    // 発見した時刻を
+    peripheral.setDiscoveredAt(now);
+
+    // 接続を試みているperipheralはスキップする．
+    if (_inProcessPeripherals.contains(peripheral)) {
+      // if (kDebugMode) debugPrint('_onDeviceDiscovered: skipped ${peripheral.uuid} $now duration: ${duration.inSeconds}s');
       return;
     }
-    final now = DateTime.now();
-    await _printConnectedPeripherals('_onDeviceDiscovered');
-    _discoveredPeripherals.add((arg: eventArg, t: now));
+    _inProcessPeripherals.add(peripheral); // remove(peripheral)するまで同じperipheralが見つかっても接続しない
 
-    if (_connectingPeripherals.length < maxConnections) { // 同時に7台まで接続．1ならテストで1台ずつ接続
-      if (kDebugMode) debugPrint('_onDeviceDiscovered: ${peripheral.uuid} $now');
-      await _connect(peripheral);
-    } else { // 後ほど _onDeviceDisconnectedで接続するのでrssiの大きいものから並んだ優先度付きキューに追加する
-      if (kDebugMode) debugPrint('_onDeviceDiscovered: ${peripheral.uuid} wait');
-      _waitingPeripherals.add((rssi: eventArg.rssi, peripheral: eventArg.peripheral));
+    // 相手に関わらず発見した時刻をUIに通知．通知の間隔を1秒以上あける．
+    if (_lastDiscoveredTime == null || now.difference(_lastDiscoveredTime!).inSeconds > 1) {
+      _lastDiscoveredTime = now;
+      notifyListeners();
     }
+
+    // 同じ端末に接続する間隔を開ける
+    final nextConnectAt = peripheral.nextConnectAt;
+    if (nextConnectAt != null && nextConnectAt.isAfter(now)) {
+      if (kDebugMode && _verbose) debugPrint('_onDeviceDiscovered: skipped ${peripheral.shortUuid} $now'
+          ' nextConnectAt: ${nextConnectAt.difference(now).inMilliseconds} ms'
+          ' discoveredCount ${peripheral.discoveredCount}');
+      _inProcessPeripherals.remove(peripheral);
+      return;
+    }
+
+    // 同時接続する数を抑える．
+    if (_connectedPeripherals.length >= maxConnections) { // 同時に7台まで接続．1ならテストで1台ずつ接続
+      if (kDebugMode && _verbose) debugPrint('_onDeviceDiscovered: skipped ${peripheral.shortUuid} $now'
+          ' cps ${_connectedPeripherals.length}'
+          ' discoveredCount ${peripheral.discoveredCount}');
+      _inProcessPeripherals.remove(peripheral);
+      return;
+    }
+    // この後 _connect()で_connectedPeripheralsを更新する間，接続数を仮に増やして同時接続数を抑える．
+    if (! _connectedPeripherals.contains(peripheral)) {
+      _connectedPeripherals.add(peripheral);
+    }
+
+    if (kDebugMode) debugPrint('_onDeviceDiscovered: connecting ${peripheral.shortUuid} $now'
+        ' nextConnectAt: ${nextConnectAt?.difference(now).inMilliseconds} ms'
+        ' discoveredCount ${peripheral.discoveredCount}');
+    peripheral.setConnectAt(now);
+    await _connect(peripheral);
   }
 
   /// ペリフェラルに接続する．_onDeviceDiscoveredと_onDeviceDisconnectedから呼ばれる．
   Future<void> _connect(Peripheral peripheral) async {
-    _connectingPeripherals.add(peripheral.uuid);
+    final cm = CentralManager();
     try {
-      await CentralManager().connect(peripheral);
-      if (kDebugMode) debugPrint("_connect: ${peripheral.uuid}");
+      await cm.connect(peripheral);
+      _connectedPeripherals = await cm.retrieveConnectedPeripherals();
+      if (kDebugMode) {
+        debugPrint("_connect: ${peripheral.uuid} cps: ${_connectedPeripherals.length}");
+      }
     } catch (e) {
-      if (kDebugMode) debugPrint('BLE Error: _connect $e');
+      peripheral.setErrorAt(DateTime.now());
+      await cm.disconnect(peripheral).onError((e, st) {});
+      _inProcessPeripherals.remove(peripheral);
+      if (kDebugMode) debugPrint('BLE Error: _connect ${peripheral.shortUuid} $e');
     }
   }
 
-  /// 切断した（同じPeripheralへの接続に対して2，3回呼ばれることがある）
+  /// 切断した
   Future<void> _onDeviceDisconnected(Peripheral peripheral) async {
-    _connectingPeripherals.remove(peripheral.uuid);
-    bool f = _connectedPeripherals.contains(peripheral.uuid);
-    _connectedPeripherals.remove(peripheral.uuid);
+    _inProcessPeripherals.remove(peripheral);
+
+    _connectedPeripherals = await CentralManager().retrieveConnectedPeripherals();
+    notifyListeners();
     if (kDebugMode) {
-      await _printConnectedPeripherals('_onDeviceDisconnected:');
-      debugPrint('_onDeviceDisconnected: _connectedPeripherals.contains(${peripheral.uuid}) -> $f, waited: ${_waitingPeripherals.length}');
-    }
-    // 接続を待たせているPeripheralがあれば接続する
-    if (f && _waitingPeripherals.length > 0) {
-      final element = _waitingPeripherals.removeFirst();
-      if (kDebugMode) debugPrint('_onDeviceDisconnected: connect next peripheral: ${element.peripheral.uuid}');
-      await _connect(element.peripheral);
+      final f = _connectedPeripherals.contains(peripheral);
+      debugPrint('_onDeviceDisconnected: _connectedPeripherals.contains(${peripheral.shortUuid}) -> $f');
     }
   }
 
-  /// 接続した（同じPeripheralへの接続に対して2，3回呼ばれることがある）
+  /// 接続した．ニックネームを交換し，友達なら相互認証する．
   Future<void> _onDeviceConnected(Peripheral peripheral) async {
-    // 同一Peripheralに対して重複して呼び出された場合は何もしない
-    if (_connectedPeripherals.contains(peripheral.uuid))
-      return;
-    _connectedPeripherals.add(peripheral.uuid);
+    final cm = CentralManager();
+    final blePeerList = BlePeerList();
 
     GATTCharacteristic? nicknameCharacteristic;
     GATTCharacteristic? authenticationCharacteristic;
     try {
       // 特性（Characteristic）を探す
-      final services = await CentralManager().discoverGATT(peripheral);
+      final services = await cm.discoverGATT(peripheral);
       for (var service in services) {
         if (service.uuid == BleNickname.serviceUuid) {
           for (var characteristic in service.characteristics) {
@@ -180,98 +290,79 @@ class BleCentralManager extends ChangeNotifier {
       // 特定が見つからないので，読み書きせずに切断する
       if (nicknameCharacteristic == null || authenticationCharacteristic == null) {
         if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected no characteristics n: $nicknameCharacteristic a: $authenticationCharacteristic');
-        await CentralManager().disconnect(peripheral);
+        await cm.disconnect(peripheral);
         return; // finallyは実行される
       }
 
       // MTUの確認（Androidでは20バイトを33バイトに増やす．iOSでは自動的に増やすらしいので不要）
-      final len1 = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      if (Platform.isAndroid && len1 < 33) {
-        final len2 = await CentralManager().requestMTU(peripheral, mtu: 33);
-        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 -> $len2 (Peripheral ${peripheral.uuid})');
+      final len1 = await cm.getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);
+      if (Platform.isAndroid && len1 < BleMutualAuthentication.maxPayloadSize) {
+        final len2 = await cm.requestMTU(peripheral, mtu: BleMutualAuthentication.maxPayloadSize + 5); // 相互認証のヘッダ1+レスポンス64バイト + ヘッダ5バイト?（iPhoneでは3バイト?）
+        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 -> $len2 (Peripheral ${peripheral.shortUuid})');
       } else {
-        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 (Peripheral ${peripheral.uuid})');
+        if (kDebugMode && _verbose) debugPrint('MTU write: $len1 (Peripheral ${peripheral.shortUuid})');
       }
 
-      // Peripheraのニックネームを読み込み
+      // Peripheralのニックネームを読み込み
       final now = DateTime.now();
-      final remoteNickname = await CentralManager().readCharacteristic(
-          peripheral, nicknameCharacteristic);
-      if (kDebugMode) debugPrint('_onDeviceConnected read. remote nickname: ${BleNickname.nickname2string(remoteNickname, len: 9)}, peripheral: ${peripheral.uuid}, $now');
-      BleNickname().addRemote(remoteNickname, now, peripheralUuid: peripheral.uuid, );
+      final remoteNickname = await cm.readCharacteristic(peripheral, nicknameCharacteristic);
+      if (kDebugMode) {
+        final shortNicknameStr = remoteNickname.hexStr(len: 5);
+        debugPrint('_onDeviceConnected read. remote nickname: $shortNicknameStr'
+            ', peripheral: ${peripheral.shortUuid}, $now');
+      }
+      await blePeerList.addRemote(peripheral, remoteNickname, now);
 
-      // int len = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withoutResponse);
-      // if (kDebugMode) debugPrint('getMaximumWriteLength $len');
+      // 書き込み可能なMTUを取得．33バイトに満たない場合は先頭から一部の不完全なニックネームを送信．
+      final len = await cm.getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);
+      if (kDebugMode) debugPrint('_onDeviceConnected MaximumWriteLength $len $now');
 
       // CentralのニックネームをPeripheralに書き込み
-      final Uint8List localNickname = BleNickname().localNickname;
-      await CentralManager().writeCharacteristic(
+      final localKeyPair = KeyManagementService().currentLocalKeyPair; // キーの更新を開始していないとnullになるので，start()しておくこと
+      final localNickname = localKeyPair.publicKey; // キーの更新を開始していないとnullになるので，start()しておくこと
+      await cm.writeCharacteristic(
         peripheral, nicknameCharacteristic,
-        value: localNickname,
-        type: GATTCharacteristicWriteType.withoutResponse,
+        value: localNickname.sublist(0, min(len, localNickname.length)),
+        type: GATTCharacteristicWriteType.withResponse,
       );
-      if (kDebugMode) debugPrint('_onDeviceConnected write. local nickname: ${BleNickname.nickname2string(localNickname, len: 9)}, peripheral: ${peripheral.uuid}');
+      if (kDebugMode) {
+        final shortNicknameStr = localNickname.hexStr(len: 5);
+        debugPrint('_onDeviceConnected write. local nickname: $shortNicknameStr'
+            ', peripheral: ${peripheral.shortUuid}');
+      }
+      peripheral.setNicknameExchangedAt(now);
 
       // 将来ニックネームリストにremoteNicknameが含まれているときは認証に進む（山口 賢紘, 2026年2月，卒業論文）
       // まずは，将来ニックネームリストにremoteNicknameが含まれているか探す
-      final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
-      // ToDo: 複数のlabel（名前）が見つかるのは不自然では？同じニックネームを複数人が使っているということになる？
-      // 最初に見つかったlabelのみ使うように変更した．
-      if (labels.isNotEmpty) { // 相互認証
+      //final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
+      final friendId = await FriendList().getFriendByNickname(remoteNickname);
+      if (friendId != null &&
+          len >= BleMutualAuthentication.maxPayloadSize) { // 相互認証．Write MTUが十分でなければ相互認証は省略
         // 候補として通知（authenticated=false）
-        final friendLabel = labels.first;
         // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
-        BleNickname().onFriendDetected?.call(friendLabel, false); // ToDo: central側しか表示していない
-         // 相互認証
-        final success = await BleMutualAuthentication().startAuthentication(
+        await blePeerList.onFriendDetected(peripheral, friendId, false);
+
+        if (peripheral.isAuthenticated) { // ToDo: すでに認証済みでも再認証している．再認証をしない方法を考えること．
+          if (kDebugMode) debugPrint('_onDeviceConnected: reauthenticate ${peripheral.shortUuid}');
+        }
+
+        // 相互認証
+        await BleMutualAuthentication().startAuthentication(
             peripheral, authenticationCharacteristic,
-            centralPriKey: BleNickname().lastLocalPrivateKey,
-            peripheralPubKey: remoteNickname, peripheralName: friendLabel);
+            centralKeyPair: localKeyPair,
+            peripheralPubKey: remoteNickname, friendId: friendId);
       }
     } catch (e) {
+      peripheral.setErrorAt(DateTime.now());
       if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected $e');
     } finally {
-      try {
-        await CentralManager().disconnect(peripheral);
-      } catch (e) {
-        if (kDebugMode) debugPrint('BLE Error: _onDeviceConnected disconnect $e');
-      }
+      await cm.disconnect(peripheral).onError((e, st) {});
+      // disconnectより後，addRemoteより後に_discoveredPeripheralsから削除
+      _inProcessPeripherals.remove(peripheral);
+
+      _connectedPeripherals = await cm.retrieveConnectedPeripherals()
+          .onError((e, st) { return []; });
+      notifyListeners();
     }
   }
-
-  /// 動作確認用に
-  Future<void> _printConnectedPeripherals(String funcname) async {
-    if (kDebugMode && _verbose) {
-      List<Peripheral> list = await CentralManager().retrieveConnectedPeripherals();
-      debugPrint('$funcname _printConnectedPeripherals c:${_connectingPeripherals.length} w:${_waitingPeripherals.length} r:${list.length}');
-      for (Peripheral peripheral in list) {
-        debugPrint('_printConnectedPeripherals ${peripheral.uuid}');
-      }
-    }
-  }
-
-/// OSやユーザにBLEを使う許可をもらう．同等のものがExchangePageクラスに実装されている．
-/* Future<void> _requestPermissions() async {
-    if (Platform.isAndroid) {
-      // Android 12 (API 31) 以降とそれ未満で必要な権限をまとめてリクエスト
-      Map<Permission, PermissionStatus> statuses = await [
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.location, // Android 11以前の端末や念のための位置情報
-      ].request();
-
-      // デバッグ確認用（すべての権限が許可されたか）
-      final isGranted = statuses.values.every((status) => status.isGranted);
-      if (kDebugMode) debugPrint("Bluetooth 許可 (Android): $isGranted");
-
-    } else if (Platform.isIOS) {
-      // iOS用のBluetooth権限リクエスト
-      PermissionStatus status = await Permission.bluetooth.request();
-      if (status.isPermanentlyDenied) {
-        // 設定画面を開いてユーザーに許可を促す
-        openAppSettings();
-      }
-      if (kDebugMode) debugPrint("Bluetooth 許可 (iOS Central): ${status}");
-    }
-  }*/
 }

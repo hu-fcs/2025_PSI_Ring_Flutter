@@ -28,6 +28,35 @@ class FriendEntry {
   }
 }
 
+/// friends テーブル1行分
+class FriendNicknameEntry {
+  final int id;
+  final String label; // ユーザーの名前
+  final Uint8List pubkeyEcd; // ニックネーム
+  final DateTime slotStart;
+  final DateTime slotEnd;
+
+  FriendNicknameEntry({
+    required this.id,
+    required this.label,
+    required this.pubkeyEcd,
+    required this.slotStart,
+    required this.slotEnd,
+  });
+
+  factory FriendNicknameEntry.fromMap(Map<String, Object?> map) {
+    return FriendNicknameEntry(
+      id: map['id'] as int,
+      label: map['label'] as String,
+      pubkeyEcd: map['pubkey_ecd'] as Uint8List,
+      slotStart: DateTime.fromMillisecondsSinceEpoch(
+        (map['slot_start'] as int) * 1000),
+      slotEnd: DateTime.fromMillisecondsSinceEpoch(
+          (map['slot_end'] as int) * 1000),
+    );
+  }
+}
+
 class FriendsDao {
   FriendsDao._();
   static final instance = FriendsDao._();
@@ -162,6 +191,27 @@ class FriendsDao {
     ''', [pubkey33, nowSec, nowSec]);
 
     return rows.map((e) => e['label'] as String).toList(growable: false);
+  }
+
+  /// 指定した時間に有効な friend_nicknames をまとめて返す。
+  /// fromとtoの間に少しでも重なるニックネームを探す。
+  /// 呼び出し元でキャッシュする。
+  Future<List<FriendNicknameEntry>> findFriendsDuringPeriod(DateTime from, DateTime to) async {
+    final db = await _db();
+    final fromSec = from.millisecondsSinceEpoch ~/ 1000;
+    final toSec = to.millisecondsSinceEpoch ~/ 1000;
+
+    final rows = await db.rawQuery('''
+      SELECT *
+      FROM friend_nicknames fn
+      JOIN friends f ON fn.friend_id = f.id
+      WHERE fn.slot_start <= ?
+        AND fn.slot_end   >= ?
+      ORDER BY f.id DESC
+    ''', [toSec, fromSec]);
+
+    final friendNicknameEntries = rows.map(FriendNicknameEntry.fromMap).toList();
+    return friendNicknameEntries;
   }
 
   /// Debug用：friends 一覧 + friend_nicknames の総数

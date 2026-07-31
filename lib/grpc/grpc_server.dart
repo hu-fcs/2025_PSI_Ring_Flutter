@@ -4,7 +4,6 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:async';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +15,7 @@ import '../ffi/native_key_service.dart';
 import '../key_management.dart';
 import '../db/friends_dao.dart';
 import 'grpc_common.dart';
+import 'package:shared_preferences/shared_preferences.dart'; //import Shared Preferences
 
 /// gRPC サーバ実装（PSI + リング署名）。
 class GrpcServiceImpl extends GrpcServiceBase {
@@ -58,12 +58,13 @@ class GrpcServiceImpl extends GrpcServiceBase {
   Stream<PsiResult> get onRingAuthenticated => _ringAuthController.stream;
 
   final void Function({String reason}) onShutdownRequested;
+  late final StreamSubscription _keyUpdateSubscription;
 
   GrpcServiceImpl({required this.onShutdownRequested}) {
     _ready = _initialize();
 
     // 鍵更新を検知したら PSI 用の鍵セットを再構築する
-    _kms.onKeyUpdated.listen((_) async {
+    _keyUpdateSubscription = _kms.onKeyUpdated.listen((_) async {
       if (kDebugMode) {
         debugPrint('[GRPC SERVER] keys updated; reload PSI set');
       }
@@ -71,6 +72,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
     });
   }
 
+  Future<void> dispose() async {
+    await _keyUpdateSubscription.cancel();
+    await _psiEventController.close();
+    await _ringAuthController.close();
+  }
   // ----- Init -----
 
   Future<void> _initialize() async {
@@ -426,8 +432,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
     final (localNicknameList, _) = await _kms.generateFutureNicknameList(
         firstSlotStartIn: firstSlot, period: period);
 
+    final prefs = await SharedPreferences.getInstance();
+    final localOwnerName = prefs.getString('owner_name') ?? '仮の名前 GPRC';
+
     return NicknameScheduleReqResp()
-        ..ownerName = '仮の名前 GPRC' // ToDo: 自分の名前を取得する
+        ..ownerName = localOwnerName
         ..periodDays = periodDays
         ..slotMs = slotMs
         ..firstSlotMs = firstSlotMs
@@ -475,7 +484,7 @@ class GrpcServiceImpl extends GrpcServiceBase {
 }
 
 class _RingSelection {
-  final KeyPair signer;
+  final NicknameKeyPair signer;
   final List<Uint8List> ring;
 
   const _RingSelection({
@@ -534,6 +543,8 @@ class GrpcServer extends ChangeNotifier {
     final s = _server;
     _server = null; // shutdown前にnullにする
     _port = null;
+
+    await service.dispose();
     if (s != null) await s.shutdown();
     notifyListeners();
   }
