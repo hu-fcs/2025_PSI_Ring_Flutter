@@ -335,12 +335,12 @@ class BleCentralManager extends ChangeNotifier {
       // 将来ニックネームリストにremoteNicknameが含まれているときは認証に進む（山口 賢紘, 2026年2月，卒業論文）
       // まずは，将来ニックネームリストにremoteNicknameが含まれているか探す
       //final labels = await FriendsDao.instance.findFriendLabelsByPubkey(remoteNickname);
-      final friendId = await FriendList().getFriendByNickname(remoteNickname);
-      if (friendId != null &&
+      final friend = await FriendList().getFriendByNickname(remoteNickname);
+      if (friend != null &&
           len >= BleMutualAuthentication.maxPayloadSize) { // 相互認証．Write MTUが十分でなければ相互認証は省略
         // 候補として通知（authenticated=false）
         // ToDo: 認証が終わってから表示したら十分では？稲葉くんの意見
-        await blePeerList.onFriendDetected(peripheral, friendId, false);
+        await blePeerList.onFriendDetected(peripheral, friend, false);
 
         if (peripheral.isAuthenticated) { // ToDo: すでに認証済みでも再認証している．再認証をしない方法を考えること．
           if (kDebugMode) debugPrint('_onDeviceConnected: reauthenticate ${peripheral.shortUuid}');
@@ -350,7 +350,7 @@ class BleCentralManager extends ChangeNotifier {
         await BleMutualAuthentication().startAuthentication(
             peripheral, authenticationCharacteristic,
             centralKeyPair: localKeyPair,
-            peripheralPubKey: remoteNickname, friendId: friendId);
+            peripheralPubKey: remoteNickname, friend: friend);
       }
     } catch (e) {
       peripheral.setErrorAt(DateTime.now());

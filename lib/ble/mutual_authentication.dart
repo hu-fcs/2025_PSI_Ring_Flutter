@@ -85,7 +85,7 @@ class BleMutualAuthentication {
       GATTCharacteristic authenticationCharacteristic, // discoverGATT(peripheral) で得たもの．static finalと同じ型だが中身が違う
       { required NicknameKeyPair centralKeyPair,    // centralのニックネームに対応する秘密鍵
         required Uint8List peripheralPubKey, // peripheralのニックネームのこと
-        required int friendId,      // 友達ID in friends テーブル
+        required Friend friend,      // 友達ID in friends テーブル
       }) async {
     assert(centralKeyPair.privateKey.length == 32 && peripheralPubKey.length == 33);
     // final mtu = await CentralManager().getMaximumWriteLength(peripheral, type: GATTCharacteristicWriteType.withResponse);  -> 512だった．
@@ -128,7 +128,7 @@ class BleMutualAuthentication {
 
       // 相互認証に成功して，両者ともに友達と認識しているので，ユーザに通知する
       if (verified1 == 3 && verified2 == 3) {
-        await BlePeerList().onFriendDetected(peripheral, friendId);
+        await BlePeerList().onFriendDetected(peripheral, friend);
       }
 
       if (kDebugMode) {
@@ -360,8 +360,8 @@ class BleMutualAuthentication {
     final result = _native.verifyChallenge(centralNickname, challenge2, response2);
     if (result) verified2 |= 1;
 
-    final matchedFriendId = await FriendList().getFriendByNickname(centralNickname);
-    if (matchedFriendId != null) {
+    final matchedFriend = await FriendList().getFriendByNickname(centralNickname);
+    if (matchedFriend != null) {
       verified2 |= 2;
     }
 
@@ -382,7 +382,7 @@ class BleMutualAuthentication {
     } else {
       central.state = _State.thirdVerificationFail;
     }
-    central.matchedFriendId = matchedFriendId;
+    central.matchedFriend = matchedFriend;
   }
 
   /// セントラル側
@@ -427,9 +427,9 @@ class BleMutualAuthentication {
 
     // 認証が終わった
     if (state == _State.third) {
-      final matchedFriendId = central.matchedFriendId;
-      if (matchedFriendId != null) {
-        BlePeerList().onFriendDetected(central, matchedFriendId);
+      final matchedFriend = central.matchedFriend;
+      if (matchedFriend != null) {
+        BlePeerList().onFriendDetected(central, matchedFriend);
       }
     }
     central.state = _State.fourth;
@@ -440,7 +440,7 @@ class BleMutualAuthentication {
     _centralMAuthResponse1.remove(central);
     _centralMAuthChallenge2.remove(central);
     _centralMAuthVerified2.remove(central);
-    _centralMAuthFriendId.remove(central);
+    _centralMAuthFriend.remove(central);
   }
 }
 
@@ -472,7 +472,7 @@ final Map<Central, Uint8List> _centralMAuthChallenge1 = {};      // centralか�
 final Map<Central, Uint8List> _centralMAuthResponse1 = {};  // peripheralからcentralへ
 final Map<Central, Uint8List> _centralMAuthChallenge2 = {}; // peripheralからcentralへ
 final Map<Central, int> _centralMAuthVerified2 = {}; // _onThirdPeripheral で記録し _onFourthPeripheralで使う
-final Map<Central, int> _centralMAuthFriendId = {}; // 一時的なデータを格納するためのMap
+final Map<Central, Friend> _centralMAuthFriend = {}; // 一時的なデータを格納するためのMap
 
 extension CentralMutualAuthenticationExtension on Central {
   set state(_State state) => _centralMAuthState[this] = state;
@@ -490,10 +490,10 @@ extension CentralMutualAuthenticationExtension on Central {
   set verified2(int verified2) => _centralMAuthVerified2[this] = verified2;
   int get verified2 => _centralMAuthVerified2[this] ?? 0;
 
-  set matchedFriendId(int? friendId) {
-    if (friendId != null) {
-      _centralMAuthFriendId[this] = friendId;
+  set matchedFriend(Friend? friend) {
+    if (friend != null) {
+      _centralMAuthFriend[this] = friend;
     }
   }
-  int? get matchedFriendId => _centralMAuthFriendId[this];
+  Friend? get matchedFriend => _centralMAuthFriend[this];
 }

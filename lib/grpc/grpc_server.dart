@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
 import 'package:fixnum/fixnum.dart' as $fixnum show Int64;
 
+import '../friend.dart';
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management.dart';
@@ -412,11 +413,11 @@ class GrpcServiceImpl extends GrpcServiceBase {
           '${nicknameList.length} slots, period.inDays=${period.inDays} slot.inMS=${slot.inMilliseconds}');
     }
 
-    // 1. friends テーブルに登録
+    // 1. friends テーブルに友達のラベル（名前）を登録
     final friendsDao = FriendsDao.instance;
     final friendId = await friendsDao.insertFriend(label: ownerName, note: null);
 
-    // 2. friend_nicknames テーブルにまとめて保存
+    // 2-1. friend_nicknames テーブルにまとめて保存
     await friendsDao.insertFriendNicknames(
       friendId: friendId,
       firstSlot: firstSlot,
@@ -424,11 +425,14 @@ class GrpcServiceImpl extends GrpcServiceBase {
       nicknameList: nicknameList,
     );
 
+    // 3. FriendListのキャッシュを更新する
+    await FriendList().updateCacheOfFriends(force: true);
+
     // ToDo: クラアント側と同じように．ユーザに通知する．
     // クライアント側は SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
     // SnackBarにこだわる必要はないと思う．
 
-    // 3. 返送する将来ニックネームを計算する
+    // 4. 返送する将来ニックネームを計算する
     final (localNicknameList, _) = await _kms.generateFutureNicknameList(
         firstSlotStartIn: firstSlot, period: period);
 

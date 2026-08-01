@@ -1,32 +1,7 @@
 import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart';
 import 'database_helper.dart';
-
-/// friends テーブル1行分
-class FriendEntry {
-  final int id;
-  final String label;
-  final String? note;
-  final DateTime createdAt;
-
-  FriendEntry({
-    required this.id,
-    required this.label,
-    this.note,
-    required this.createdAt,
-  });
-
-  factory FriendEntry.fromMap(Map<String, Object?> map) {
-    return FriendEntry(
-      id: map['id'] as int,
-      label: map['label'] as String,
-      note: map['note'] as String?,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(
-        (map['created_at'] as int) * 1000,
-      ),
-    );
-  }
-}
+import '../friend.dart';
 
 /// friends テーブル1行分
 class FriendNicknameEntry {
@@ -78,6 +53,16 @@ class FriendsDao {
       conflictAlgorithm: ConflictAlgorithm.abort,
     );
     return id;
+  }
+
+  /// 友達のリストを返す．
+  Future<List<Friend>> getFriends() async {
+    final db = await _db();
+    final rows = await db.query(
+      'friends',
+      orderBy: 'id DESC',
+    );
+    return rows.map(Friend.fromMap).toList();
   }
 
   /// 将来ニックネームリストを friend_nicknames にまとめて保存
@@ -150,7 +135,6 @@ class FriendsDao {
         .toList(growable: false);
   }
 
-  /// friend とそのニックネームをまとめて削除
   /// friend とそのニックネームをまとめて削除
   Future<void> deleteFriend(int friendId) async {
     final db = await _db();
