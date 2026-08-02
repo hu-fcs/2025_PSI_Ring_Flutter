@@ -139,10 +139,10 @@ class BleNickname extends ChangeNotifier {
   String currentStateString() {
     final df = DateFormat('E HH:mm:ss'); // 'yyyy-MM-dd HH:mm:ss'
     final localNicknameStr = _kms.currentLocalKeyPair.publicKey.hexStr(len: 3);
-    final exireAtStr = df.format(_kms.currentKeyExpirationTime);
+    final expireAtStr = df.format(_kms.currentKeyExpirationTime);
     // _scanner
     // _advertiser
-    return '$localNicknameStr $exireAtStrまで';
+    return '$localNicknameStr $expireAtStrまで';
   }
 }
 
@@ -233,13 +233,13 @@ class BlePeerList extends ChangeNotifier {
 
   /// 友達を検出したときに呼び出す．
   Future<void> onFriendDetected(BluetoothLowEnergyPeer peer,
-      int friendId, [bool authenticated = true]) async {
-    final friendName = FriendList().labelOf(friendId);
+      Friend friend, [bool authenticated = true]) async {
+    final friendName = friend.label;
     if (kDebugMode) {
       debugPrint('onFriendDetected nickname: ${peer.nickname?.hexStr(len: 5)}'
           ', authenticated: $authenticated, friendName: $friendName');
     }
-    peer.setFriend(friendId);
+    peer.setFriend(friend);
     peer.isAuthenticated = authenticated;
     if (onFriendDetectedCallback != null) {
       onFriendDetectedCallback!(friendName, authenticated);
@@ -256,7 +256,7 @@ class BlePeerList extends ChangeNotifier {
 final Map<BluetoothLowEnergyPeer, Uint8List> _peerNickname = {};
 final Map<BluetoothLowEnergyPeer, DateTime> _peerLastExchangedAt = {};
 final Map<BluetoothLowEnergyPeer, bool> _peerIsAuthenticated = {};
-final Map<BluetoothLowEnergyPeer, int> _peerFriend = {}; // int: friendID in friends テーブル
+final Map<BluetoothLowEnergyPeer, Friend> _peerFriend = {}; // int: friendID in friends テーブル
 
 extension BluetoothLowEnergyPeerExtension on BluetoothLowEnergyPeer {
   /// UUIDの末尾の文字列
@@ -271,8 +271,15 @@ extension BluetoothLowEnergyPeerExtension on BluetoothLowEnergyPeer {
   set isAuthenticated(bool value) => _peerIsAuthenticated[this] = value;
   bool get isAuthenticated => _peerIsAuthenticated[this] ?? false;
 
-  setFriend(int friendId) => _peerFriend[this] = friendId;
-  int? get friend => _peerFriend[this];
+  setFriend(Friend friend) {
+    _peerFriend[this] = friend;
+    if (this is Peripheral) {
+      friend.peripheral = this as Peripheral;
+    } else if (this is Central) {
+      friend.central = this as Central;
+    }
+  }
+  Friend? get friend => _peerFriend[this];
 }
 
 /// ペリフェラルとの接続回数や最後に発見された時刻を記録するためのMap

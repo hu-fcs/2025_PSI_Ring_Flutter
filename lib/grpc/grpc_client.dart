@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
 import 'package:fixnum/fixnum.dart' as $fixnum show Int64;
 
+import '../friend.dart';
 import '../proto/generated/grpc.pbgrpc.dart';
 import '../ffi/native_key_service.dart';
 import '../key_management.dart';
@@ -426,7 +427,10 @@ class GrpcClient {
       nicknameList: remoteNicknameList,
     );
 
-    // 5. 返送された名前とニックネームに対する ACK
+    // 5. FriendListのキャッシュを更新する
+    await FriendList().updateCacheOfFriends(force: true);
+
+    // 6. 返送された名前とニックネームに対する ACK
     if (kDebugMode) {
       debugPrint('[GRPC CLIENT] exchangeNicknameSchedule: ACK back to server_name $remoteOwnerName, '
           '${remoteNicknameList.length} slots, period.inDays=${remotePeriodDuration.inDays} slot.inMS=${remoteSlot.inMilliseconds}');

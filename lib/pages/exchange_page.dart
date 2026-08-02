@@ -20,6 +20,7 @@ import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
 import '../grpc/grpc_client.dart';
 import 'debug_page.dart';
+import '../friend.dart';
 
 enum NicknameSchedulePeriod { oneDay, oneWeek, oneMonth }
 
@@ -106,11 +107,24 @@ class _ExchangePageState extends State<ExchangePage> {
     });
 
     // 広告をUIの準備ができてから自動的に開始
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _requestPermissions();
+      await FriendList().updateCacheOfFriends();
+      /*
       Timer(const Duration(seconds: 3), () async {
         _toggleBleExchange();
       });
+       */
     });
+  }
+
+  /// Bluetoothと位置情報の権限を要求する
+  Future<void> _requestPermissions() async {
+    if (Platform.isAndroid) {
+      await [Permission.bluetoothAdvertise, Permission.bluetoothScan, Permission.bluetoothConnect, Permission.locationWhenInUse].request();
+    } else {
+      await [Permission.bluetooth, Permission.locationWhenInUse].request();
+    }
   }
 
   // よく使うTextStyle．カスタマイズした Theme.of(context).textTheme
@@ -362,7 +376,8 @@ class _ExchangePageState extends State<ExchangePage> {
       final msg = authenticated
           ? '近くで $friendLabel さんを検出しました ✅'
           : '近くで $friendLabel さん候補を検出しました';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 
@@ -530,8 +545,8 @@ class _ExchangePageState extends State<ExchangePage> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: familiar
-                      ? Colors.green.withOpacity(0.08)
-                      : Colors.grey.withOpacity(0.08),
+                      ? Colors.green.withValues(alpha: 0.08)
+                      : Colors.grey.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
@@ -786,6 +801,8 @@ class _ExchangePageState extends State<ExchangePage> {
           const SizedBox(height: 20),
           _friendCard(),
           const SizedBox(height: 20),
+          _friendListCard(),
+          const SizedBox(height: 20),
           _familiarCheckCard(),
           const SizedBox(height: 20),
           _futureNicknameShareCard(),
@@ -808,7 +825,7 @@ class _ExchangePageState extends State<ExchangePage> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -874,7 +891,7 @@ class _ExchangePageState extends State<ExchangePage> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -903,7 +920,7 @@ class _ExchangePageState extends State<ExchangePage> {
                     Expanded(child: Text(name)),
                     Text(ok ? 'OK' : '未認証',
                         style: Theme.of(context).textTheme.bodySmall),
-                        // style: const TextStyle(fontSize: 12)),
+                            // style: const TextStyle(fontSize: 12)),
                   ],
                 ),
               );
@@ -912,6 +929,92 @@ class _ExchangePageState extends State<ExchangePage> {
         ],
       ),
     );
+  }
+
+  Widget _friendListCard() {
+    return Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
+        decoration: BoxDecoration(
+          color: Theme
+              .of(context)
+              .colorScheme
+              .surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: ListenableBuilder(
+            listenable: FriendList(),
+            builder: (context, child) {
+              final friendList = FriendList().friendList;
+
+              return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(friendList.isEmpty
+                        ? '友達：なし'
+                        : '友達：${friendList.length}人',
+                        style: _textThemeBodySmallGreyShade600),
+                    if (friendList.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      ...friendList.map((friend) {
+                        final textList = <Text>[];
+                        var icon = Icons.person_outlined;
+                        DateTime? lastExchangedAt;
+                        if (friend.central != null) {
+                          final central = friend.central;
+                          lastExchangedAt = central?.lastExchangedAt;
+                          textList.add(Text(
+                              '${central?.lastExchangedAt?.shortStr()} (W:${central?.shortUuid})',
+                              style: _textThemeBodySmallGreyShade600));
+                        }
+                        if (friend.peripheral != null) {
+                          final peripheral = friend.peripheral;
+                          // lastExchangedAtに遅い方を残す
+                          if (lastExchangedAt == null) {
+                            lastExchangedAt = peripheral?.lastExchangedAt;
+                          } else if (peripheral?.lastExchangedAt != null &&
+                              peripheral!.lastExchangedAt!.isAfter(lastExchangedAt)) {
+                            lastExchangedAt = peripheral.lastExchangedAt;
+                          }
+                          textList.add(Text(
+                              '${peripheral?.lastExchangedAt?.shortStr()} (R:${peripheral?.shortUuid})',
+                              style: _textThemeBodySmallGreyShade600));
+                          /* 更新があまりされないので発見時刻は削除
+                          textList.add(Text(
+                              '${peripheral?.lastDiscoveredAt?.shortStr()} (D:${peripheral?.shortUuid})',
+                              style: _textThemeBodySmallGreyShade600));
+                           */
+                        }
+                        // 最後に交換した時刻がslot時間以内ならアイコンを変える
+                        if (lastExchangedAt != null) {
+                          final expireAt = lastExchangedAt.add(KeyManagementService().slot);
+                          if (expireAt.isAfter(DateTime.now()))
+                            icon = Icons.person;
+                        }
+                        return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: InkWell(
+                                borderRadius: BorderRadius.circular(12.0),
+                                onTap: () {
+                                  debugPrint("Tapped on ${friend.label}"); // ToDo: 友達に関する詳細ダイアログを表示する
+                                },
+                                child: Row(
+                                    children: [
+                                      Icon(icon, size: 22),
+                                      const SizedBox(width: 8),
+                                      Expanded(child: Text(friend.label,
+                                          style: Theme.of(context).textTheme.titleMedium)),
+                                      Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: textList),
+                                    ])));
+                      }),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      Text('友達を登録してください',
+                          style: _textThemeBodySmallGreyShade600),
+                    ],
+                  ]);
+            }));
   }
 
   Widget _familiarCheckCard() {
@@ -942,7 +1045,7 @@ class _ExchangePageState extends State<ExchangePage> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -952,13 +1055,19 @@ class _ExchangePageState extends State<ExchangePage> {
             children: [
               Icon(Icons.handshake, size: 22), // Icons.sync
               const SizedBox(width: 8),
-              Text('将来ニックネームの共有（送信側）',
+              Text('友達の登録',
                   style: Theme.of(context).textTheme.titleMedium),
             ],
           ),
+          Text('友達のIPアドレス，ポート，確認コードを入力して「生成して共有」ボタンを押すと登録できます．\n'
+              '友達のIPアドレスなどは「QRコードを表示」すると表示されます\n'
+              '将来，QRコードを読み取ると登録できるようになる予定です',
+              style: _textThemeBodySmallGreyShade600),
+          const SizedBox(height: 8),
+
           TextField(
             controller: _ownerNameController,
-            decoration: const InputDecoration(labelText: '相手に表示される自分の名前'),
+            decoration: const InputDecoration(labelText: '自分の名前（相手に表示されます）'),
           ),
           const SizedBox(height: 8),
 
@@ -1074,7 +1183,7 @@ class _ExchangePageState extends State<ExchangePage> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -1103,7 +1212,7 @@ class _ExchangePageState extends State<ExchangePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: active ? Colors.green.shade100 : Colors.grey.withOpacity(0.12),
+        color: active ? Colors.green.shade100 : Colors.grey.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
