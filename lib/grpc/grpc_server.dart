@@ -528,11 +528,21 @@ class GrpcServer extends ChangeNotifier {
       codecRegistry: _grpcCommon.codecRegistry,
     );
 
-    await s.serve(
-      address: InternetAddress.anyIPv4,
-      port: port,
-      security: _grpcCommon.buildServerSecurity(),
-    );
+    try {
+      await s.serve(
+        address: InternetAddress.anyIPv4,
+        port: port,
+        security: _grpcCommon.buildServerSecurity(),
+      );
+    } on SocketException catch (e) {
+      if (kDebugMode) debugPrint('[SERVER] failed to start with port ${port} $e');
+      await s.serve(
+        address: InternetAddress.anyIPv4,
+        port: 0, // 空いているポートを自動割り当て
+        security: _grpcCommon.buildServerSecurity(),
+      );
+      print(s);
+    }
 
     _server = s;
     _port = s.port;
