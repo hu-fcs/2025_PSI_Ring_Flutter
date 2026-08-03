@@ -203,13 +203,18 @@ class _ExchangePageState extends State<ExchangePage> {
   }
 
   Future<bool> _ensureBlePermissions() async {
-    final perms = [
-      Permission.bluetoothAdvertise,
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-    ];
-    final statuses = await perms.request();
-    return perms.every((p) => statuses[p]?.isGranted ?? false);
+    if (Platform.isAndroid) {
+      final perms = [
+        Permission.bluetoothAdvertise,
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+      ];
+      final statuses = await perms.request();
+      return perms.every((p) => statuses[p]?.isGranted ?? false);
+    } else if (Platform.isIOS) {
+      return await Permission.bluetooth.request().isGranted;
+    }
+    return false;
   }
 
   Future<bool> _ensureBluetoothEnabled() async {
