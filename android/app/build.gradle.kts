@@ -21,7 +21,7 @@ android {
     // }
 
     defaultConfig {
-        applicationId = "com.example.fluttersample_2025"
+        applicationId = "jp.ac.hiroshima_u.fcs.psi_ring_match_2025"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
