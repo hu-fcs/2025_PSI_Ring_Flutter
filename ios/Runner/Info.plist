@@ -26,22 +26,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-    <key>NSBluetoothAlwaysUsageDescription</key>
+	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>BLEデバイスとしてデータを送信するためにBluetoothを使用します。</string>
-	<key>NSBluetoothPeripheralUsageDescription</key> <!-- iOS 13 以下 -->
-	<string>BLEデバイスとしてデータを送信するためにBluetoothを使用します。</string>
-	<key>NSBluetoothPeripheralUsageDescription</key> <!-- iOS 12 以下 -->
+	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>周辺のBLEデバイスとペアリング・通信するためにBluetoothを使用します。</string>
-	<key>BGTaskSchedulerPermittedIdentifiers</key> <!-- flutter_foreground_task -->
-    <array>
-        <string>com.pravera.flutter_foreground_task.refresh</string>
-    </array>
-	<key>UIBackgroundModes</key>    <!-- アプリがバックグラウンドに回ってもBLE通信を維持したい -->
-	<array>
-	     <string>bluetooth-central</string>
-         <string>bluetooth-peripheral</string>
-         <string>fetch</string> <!-- flutter_foreground_task -->
-	</array>
+	<key>NSBluetoothWhileInUseUsageDescription</key>
+	<string>BLEデバイスとしてデータを送信するためにBluetoothを使用します。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>QRコードの読み込みに使う。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>BLE広告をした場所を記録します。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -65,6 +59,12 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

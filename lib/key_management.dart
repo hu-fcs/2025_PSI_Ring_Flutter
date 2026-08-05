@@ -99,7 +99,13 @@ class KeyManagementService {
     await _secureStorage.write(
       key: _masterKeyAlias,
       value: base64Encode(mk),
-    );
+    ).onError((e, st) async { //
+      if (kDebugMode) debugPrint('_ensureMasterKey: write failed.  retry after deleteing $e $st');
+      await _secureStorage.delete(key: _masterKeyAlias);
+      await _secureStorage.write(
+          key: _masterKeyAlias,
+          value: base64Encode(mk));
+    });
 
     if (kDebugMode) {
       debugPrint('KMS: master key generated');

@@ -6,8 +6,8 @@
 
 #if defined(_WIN32)
 #define EXPORT __declspec(dllexport)
-#else
-#define EXPORT
+#else // iOS（stripで削除されないように）
+#define EXPORT __attribute__((visibility("default"))) __attribute__((used))
 #endif
 
 /* 定数 */

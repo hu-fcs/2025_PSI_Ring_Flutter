@@ -37,8 +37,6 @@ class NativeKeyService {
         dylib = DynamicLibrary.open('lib$libName.so');
       } else if (Platform.isWindows) {
         dylib = DynamicLibrary.open('$libName.dll');
-      } else if (Platform.isMacOS || Platform.isIOS) {
-        dylib = DynamicLibrary.open('lib$libName.dylib');
       } else {
         dylib = DynamicLibrary.process();
       }

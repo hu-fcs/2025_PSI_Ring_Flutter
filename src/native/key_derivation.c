@@ -7,6 +7,17 @@
 #include <openssl/ec.h>
 #include <openssl/bn.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "KeyDerivationJNI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#include <stdio.h>
+#define LOGI(...) printf("[INFO] " __VA_ARGS__); printf("\n")
+#define LOGE(...) printf("[ERROR] " __VA_ARGS__); printf("\n")
+#endif
+
 #define HASH_LEN 32
 
 /**
