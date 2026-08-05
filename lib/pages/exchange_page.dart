@@ -378,9 +378,10 @@ class _ExchangePageState extends State<ExchangePage> {
 
     // 昇格のときに出す
     if (isNew || isUpgrade) {
-      final msg = authenticated
+      final msg = (authenticated
           ? '近くで $friendLabel さんを検出しました ✅'
-          : '近くで $friendLabel さん候補を検出しました';
+          : '近くで $friendLabel さん候補を検出しました')
+          + '\n${DateTime.fromMillisecondsSinceEpoch(now)}';
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
