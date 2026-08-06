@@ -132,12 +132,13 @@ class BlePeripheral extends ChangeNotifier {
   /// ペリフェラルの停止．リソースの解放
   Future<void> stop() async {
     await _characteristicNotifyStateChangedSubscription?.cancel();
-    await _characteristicReadRequestedSubscription?.cancel();
-    await _characteristicWriteRequestedSubscription?.cancel();
     await _keyUpdateSub?.cancel();
     // await _localNicknameStreamSubscription?.cancel();
 
     await PeripheralManager().stopAdvertising();
+    await _characteristicReadRequestedSubscription?.cancel();
+    await _characteristicWriteRequestedSubscription?.cancel();
+
     await KeyManagementService().stop(byPeripheral: true);
     _setAdvertisingState(false);
   }
