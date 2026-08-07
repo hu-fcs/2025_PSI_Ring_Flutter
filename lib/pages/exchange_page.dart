@@ -121,10 +121,11 @@ class _ExchangePageState extends State<ExchangePage> {
   /// Bluetoothと位置情報の権限を要求する
   Future<void> _requestPermissions() async {
     if (Platform.isAndroid) {
-      await [Permission.bluetoothAdvertise, Permission.bluetoothScan, Permission.bluetoothConnect, Permission.locationWhenInUse].request();
+      await [Permission.bluetoothAdvertise, Permission.bluetoothScan, Permission.bluetoothConnect].request();
     } else {
-      await [Permission.bluetooth, Permission.locationWhenInUse].request();
+      await [Permission.bluetooth].request();
     }
+    await [Permission.locationWhenInUse, Permission.locationAlways].request();
   }
 
   // よく使うTextStyle．カスタマイズした Theme.of(context).textTheme
