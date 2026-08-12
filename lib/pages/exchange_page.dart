@@ -1080,6 +1080,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
           TextField(
             controller: _hostController,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
           ),
           const SizedBox(height: 8),
@@ -1093,6 +1094,7 @@ class _ExchangePageState extends State<ExchangePage> {
 
           TextField(
             controller: _nonceController,
+            keyboardType: TextInputType.number,
             decoration: const InputDecoration(labelText: '確認コード'),
           ),
           const SizedBox(height: 8),
