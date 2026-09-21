@@ -385,7 +385,7 @@ class _ExchangePageState extends State<ExchangePage> {
         final msg = (authenticated
             ? '近くで $friendLabel さんを検出しました ✅'
             : '近くで $friendLabel さん候補を検出しました')
-            + '\n$now\n$lastAuthenticatedAt';
+            + '\n$now'; // テスト用 \n$lastAuthenticatedAt';
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(msg)));
