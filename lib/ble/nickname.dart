@@ -229,12 +229,13 @@ class BlePeerList extends ChangeNotifier {
     }
   }
 
-  void Function(String friendLabel, bool authenticated)? onFriendDetectedCallback;
+  void Function(String friendLabel, bool authenticated, DateTime?)? onFriendDetectedCallback;
 
   /// 友達を検出したときに呼び出す．
   Future<void> onFriendDetected(BluetoothLowEnergyPeer peer,
       Friend friend, [bool authenticated = true]) async {
     final friendName = friend.label;
+    DateTime now = DateTime.now();
     if (kDebugMode) {
       debugPrint('onFriendDetected nickname: ${peer.nickname?.hexStr(len: 5)}'
           ', authenticated: $authenticated, friendName: $friendName');
@@ -242,7 +243,10 @@ class BlePeerList extends ChangeNotifier {
     peer.setFriend(friend);
     peer.isAuthenticated = authenticated;
     if (onFriendDetectedCallback != null) {
-      onFriendDetectedCallback!(friendName, authenticated);
+      onFriendDetectedCallback!(friendName, authenticated, peer.isAuthenticatedAt);
+    }
+    if (authenticated) {
+      peer.setIsAuthenticatedAt(now);
     }
     notifyListeners();
   }
@@ -256,6 +260,7 @@ class BlePeerList extends ChangeNotifier {
 final Map<BluetoothLowEnergyPeer, Uint8List> _peerNickname = {};
 final Map<BluetoothLowEnergyPeer, DateTime> _peerLastExchangedAt = {};
 final Map<BluetoothLowEnergyPeer, bool> _peerIsAuthenticated = {};
+final Map<BluetoothLowEnergyPeer, DateTime> _peerIsAuthenticatedAt = {}; // 最後に認証に成功した時刻（繰り返し通知しないように）
 final Map<BluetoothLowEnergyPeer, Friend> _peerFriend = {}; // int: friendID in friends テーブル
 
 extension BluetoothLowEnergyPeerExtension on BluetoothLowEnergyPeer {
@@ -268,14 +273,26 @@ extension BluetoothLowEnergyPeerExtension on BluetoothLowEnergyPeer {
   setLastExchangedAt(DateTime value) => _peerLastExchangedAt[this] = value;
   DateTime? get lastExchangedAt => _peerLastExchangedAt[this];
 
+  setIsAuthenticatedAt(DateTime value) => _peerIsAuthenticatedAt[this] = value;
+  DateTime? get isAuthenticatedAt => _peerIsAuthenticatedAt[this];
+
   set isAuthenticated(bool value) => _peerIsAuthenticated[this] = value;
   bool get isAuthenticated => _peerIsAuthenticated[this] ?? false;
 
   setFriend(Friend friend) {
     _peerFriend[this] = friend;
     if (this is Peripheral) {
+      // BLEのMACアドレスが変わったときに認証状態をコピーする
+      if (friend.peripheral != null && friend.peripheral != this) {
+        this.isAuthenticated = friend.peripheral!.isAuthenticated;
+        this.setIsAuthenticatedAt(friend.peripheral!.isAuthenticatedAt!);
+      }
       friend.peripheral = this as Peripheral;
     } else if (this is Central) {
+      if (friend.central != null && friend.central != this) {
+        this.isAuthenticated = friend.central!.isAuthenticated;
+        this.setIsAuthenticatedAt(friend.central!.isAuthenticatedAt!);
+      }
       friend.central = this as Central;
     }
   }
