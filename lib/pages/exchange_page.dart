@@ -343,12 +343,13 @@ class _ExchangePageState extends State<ExchangePage> {
     }
   }
 
-  void _onFriendDetected(String friendLabel, bool authenticated) {
+  void _onFriendDetected(String friendLabel, bool authenticated, DateTime? lastAuthenticatedAt) {
     if (!mounted) return;
 
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = DateTime.now();
+    final nowMs = now.millisecondsSinceEpoch;
 
-    // 初回だけSnackBar（連発防止）
+    // 初回だけSnackBar（連発防止）あとで追加したlastAuthenticatedAtと目的が重複している
     final isNew = !_nearbyLastSeenMs.containsKey(friendLabel);
 
     // 以前の認証状態
@@ -356,12 +357,12 @@ class _ExchangePageState extends State<ExchangePage> {
 
     // 署名検証が通った“本当のOK”が来たら、OK時刻を更新
     if (authenticated) {
-      _authOkLastMs[friendLabel] = now;
+      _authOkLastMs[friendLabel] = nowMs;
     }
 
     // OK保持中かどうか（保持中は false が来てもOK扱いにする）
     final lastOk = _authOkLastMs[friendLabel] ?? 0;
-    final keepOk = (now - lastOk) < _authHold.inMilliseconds;
+    final keepOk = (nowMs - lastOk) < _authHold.inMilliseconds;
 
     // 表示上の認証状態
     final effectiveAuth = authenticated || keepOk;
@@ -371,7 +372,7 @@ class _ExchangePageState extends State<ExchangePage> {
     final isUpgrade = !prevAuth && authenticated;
 
     setState(() {
-      _nearbyLastSeenMs[friendLabel] = now;
+      _nearbyLastSeenMs[friendLabel] = nowMs;
 
       // 降格は「保持時間が切れた時」だけ許可
       _nearbyAuth[friendLabel] = effectiveAuth;
@@ -379,12 +380,16 @@ class _ExchangePageState extends State<ExchangePage> {
 
     // 昇格のときに出す
     if (isNew || isUpgrade) {
-      final msg = (authenticated
-          ? '近くで $friendLabel さんを検出しました ✅'
-          : '近くで $friendLabel さん候補を検出しました')
-          + '\n${DateTime.fromMillisecondsSinceEpoch(now)}';
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      if (lastAuthenticatedAt?.isBefore(now.subtract(const Duration(hours: 1))) ?? true) {
+        // 前回の認証成功の通知が1時間以上前だったら，通知する．
+        final msg = (authenticated
+            ? '近くで $friendLabel さんを検出しました ✅'
+            : '近くで $friendLabel さん候補を検出しました')
+            + '\n$now'; // テスト用 \n$lastAuthenticatedAt';
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(msg)));
+      }
     }
   }
 
