@@ -32,6 +32,9 @@ dependencies:
   network_info_plus: ^6.1.0
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  firebase_analytics: ^12.6.0
   # flutter_foreground_task: ^9.2.2
 
 dev_dependencies:
