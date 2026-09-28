@@ -1,7 +1,7 @@
 name: fluttersample_2025
 description: "A new Flutter project."
 publish_to: 'none'
-version: 1.1.1+1
+version: 1.2.0
 
 environment:
   sdk: ^3.7.2
@@ -32,6 +32,9 @@ dependencies:
   network_info_plus: ^6.1.0
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  firebase_analytics: ^12.6.0
   # flutter_foreground_task: ^9.2.2
 
 dev_dependencies:

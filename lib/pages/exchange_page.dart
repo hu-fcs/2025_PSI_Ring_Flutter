@@ -19,6 +19,7 @@ import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
 import '../grpc/grpc_client.dart';
+import '../log/firebase_service.dart';
 import 'debug_page.dart';
 import '../friend.dart';
 
@@ -411,19 +412,40 @@ class _ExchangePageState extends State<ExchangePage> {
     final slot = KeyManagementService().slot;
     final period = _selectedPeriod.duration;
 
+    String phase = 'grpc_connect';
     try {
       // 1) gRPC 送信（nickname_schedule JSON）
       await _grpcClient.connect(host, port, nonce);
+
+      phase = 'nickname_schedule_exchange';
+
       await _grpcClient.exchangeNicknameSchedule(
         ownerName: owner,
         period: period,
         slot: slot,
       );
 
+      await FirebaseService.logEvent(
+        name: 'friend_register',
+        parameters: {
+          'status': 'success',
+          'period_days': period.inDays,
+        },
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
       );
     } catch (e) {
+      await FirebaseService.logEvent(
+        name: 'friend_register',
+        parameters: {
+          'status': 'failure',
+          'reason': '${phase}_failed',
+          'period_days': period.inDays,
+        },
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('共有に失敗: $e')),
       );

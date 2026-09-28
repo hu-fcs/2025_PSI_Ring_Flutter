@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'db/database_helper.dart';
 import 'key_management.dart';
+import 'log/firebase_service.dart';
 import 'pages/debug_page.dart';
 import 'pages/exchange_page.dart';
 import 'pages/scanner_page.dart';
@@ -30,6 +31,12 @@ void main() async {
 
   // Android フォアグラウンド サービスを使う（flutter_foreground_task パッケージ）
   // FlutterForegroundTask.initCommunicationPort();
+
+  // Firebase の初期化を行う
+  await FirebaseService.initialize();
+
+  final user = await FirebaseService.signInAnonymously();
+  await FirebaseService.setUserId(user?.uid);
 
   runApp(const MyApp());
 }

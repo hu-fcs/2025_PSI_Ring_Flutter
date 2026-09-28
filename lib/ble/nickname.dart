@@ -25,6 +25,7 @@ import 'package:intl/intl.dart' show DateFormat;
 import '../key_management.dart';
 import '../ffi/native_key_service.dart';
 import '../friend.dart';
+import '../log/firebase_service.dart';
 import 'peripheral.dart';
 import 'central.dart';
 import 'mutual_authentication.dart';
@@ -186,6 +187,14 @@ class BlePeerList extends ChangeNotifier {
     // collected_keysテーブルに追加
     KeyManagementService().insertCollectedPubKeyIfAbsent(pubkey33: nickname, exchangedAt: now);
 
+    await FirebaseService.logEvent(
+      name: 'nickname_received',
+      parameters: {
+        'status': 'success',
+        'nickname': nickname.hexStr(),
+      },
+    );
+
     // _list にすでにニックネームが存在すれば更新
     for (final peerInList in _list.reversed) {
       if (peerInList == peer) {
@@ -235,6 +244,7 @@ class BlePeerList extends ChangeNotifier {
   Future<void> onFriendDetected(BluetoothLowEnergyPeer peer,
       Friend friend, [bool authenticated = true]) async {
     final friendName = friend.label;
+    final nickname = peer.nickname;
     DateTime now = DateTime.now();
     if (kDebugMode) {
       debugPrint('onFriendDetected nickname: ${peer.nickname?.hexStr(len: 5)}'
@@ -242,6 +252,17 @@ class BlePeerList extends ChangeNotifier {
     }
     peer.setFriend(friend);
     peer.isAuthenticated = authenticated;
+
+    if (nickname != null) {
+      await FirebaseService.logEvent(
+        name: 'friend_detected',
+        parameters: {
+          'authenticated': authenticated ? 'true' : 'false',
+          'nickname': nickname.hexStr(),
+        },
+      );
+    }
+
     if (onFriendDetectedCallback != null) {
       onFriendDetectedCallback!(friendName, authenticated, peer.isAuthenticatedAt);
     }
