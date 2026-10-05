@@ -18,8 +18,8 @@ import '../key_management.dart';
 import '../db/database_helper.dart';
 import '../grpc/grpc_common.dart';
 import '../grpc/grpc_server.dart';
-import '../grpc/grpc_client.dart';
-import '../log/firebase_service.dart';
+import '../grpc/exchange_qr.dart';
+import 'scanner_page.dart';
 import 'debug_page.dart';
 import '../friend.dart';
 
@@ -58,19 +58,16 @@ class _ExchangePageState extends State<ExchangePage> {
   String? _serverIp;
   int _serverPort = 50051;
   int _serverOobCode = 0;
+  ExchangeQrPurpose _qrPurpose = ExchangeQrPurpose.psi;
 
   final _db = DatabaseHelper();
 
   Future<bool> _hasAnyKey() async => (await _db.getTotalKeyCount()) > 0;
 
   final _ownerNameController = TextEditingController(text: '自分の端末');
-  final _hostController = TextEditingController(text: '192.168.0.10'); // 相手IP
-  final _portController = TextEditingController(text: '50051');
-  final _nonceController = TextEditingController();
 
   NicknameSchedulePeriod _selectedPeriod = NicknameSchedulePeriod.oneDay;
 
-  final _grpcClient = GrpcClient();
   // 近くにいる友達一覧（最後に見えた時刻も保持）
   final Map<String, int> _nearbyLastSeenMs = {};
   final Map<String, bool> _nearbyAuth = {};
@@ -176,9 +173,6 @@ class _ExchangePageState extends State<ExchangePage> {
   void dispose() {
     _nearbyGcTimer?.cancel();
     _ownerNameController.dispose();
-    _hostController.dispose();
-    _portController.dispose();
-    _nonceController.dispose();
     super.dispose();
   }
 
@@ -270,8 +264,9 @@ class _ExchangePageState extends State<ExchangePage> {
     return null;
   }
 
-  Future<void> _showQr() async {
-    if (!await _requireKeyWarning()) return;
+  Future<void> _showQr([ExchangeQrPurpose purpose = ExchangeQrPurpose.psi]) async {
+    if (purpose == ExchangeQrPurpose.psi && !await _requireKeyWarning()) return;
+    if (purpose == ExchangeQrPurpose.friend && !await _prepareFriendQr()) return;
     if (_grpcRunning) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -311,6 +306,7 @@ class _ExchangePageState extends State<ExchangePage> {
       _serverIp = ip;
       _serverPort = port;
       _serverOobCode = oobNonce;
+      _qrPurpose = purpose;
     });
   }
 
@@ -337,10 +333,39 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Future<void> _scanQr() async {
     if (!await _requireKeyWarning()) return;
+    if (!mounted) return;
 
     final result = await Navigator.pushNamed(context, '/scanner');
     if (result is PsiResult) {
       _showUnifiedPsiDialog(result, isServerSide: false);
+    }
+  }
+
+  Future<bool> _prepareFriendQr() async {
+    if (_ownerNameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('自分の名前を入力してください')),
+      );
+      return false;
+    }
+    await _saveSettings();
+    return mounted;
+  }
+
+  Future<void> _scanFriendQr() async {
+    if (!await _prepareFriendQr()) return;
+    if (!mounted) return;
+    final result = await Navigator.push<Object>(context, MaterialPageRoute(
+      builder: (_) => ScannerPage(
+        purpose: ExchangeQrPurpose.friend,
+        ownerName: _ownerNameController.text.trim(),
+        period: _selectedPeriod.duration,
+      ),
+    ));
+    if (mounted && result == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('友達を登録しました')),
+      );
     }
   }
 
@@ -391,64 +416,6 @@ class _ExchangePageState extends State<ExchangePage> {
           ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(msg)));
       }
-    }
-  }
-
-  Future<void> _generateAndShare() async {
-    //現在の設定を保存
-    await _saveSettings();
-
-    final owner = _ownerNameController.text.trim();
-    final host = _hostController.text.trim();
-    final port = int.tryParse(_portController.text);
-    final nonce = int.tryParse(_nonceController.text);
-
-    if (owner.isEmpty || host.isEmpty || port == null || nonce == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('名前 / ホスト / ポート / 確認コードを正しく入力してください')));
-      return;
-    }
-
-    final slot = KeyManagementService().slot;
-    final period = _selectedPeriod.duration;
-
-    String phase = 'grpc_connect';
-    try {
-      // 1) gRPC 送信（nickname_schedule JSON）
-      await _grpcClient.connect(host, port, nonce);
-
-      phase = 'nickname_schedule_exchange';
-
-      await _grpcClient.exchangeNicknameSchedule(
-        ownerName: owner,
-        period: period,
-        slot: slot,
-      );
-
-      await FirebaseService.logEvent(
-        name: 'friend_register',
-        parameters: {
-          'status': 'success',
-          'period_days': period.inDays,
-        },
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('共有しました：${_selectedPeriod.label}（${period.inDays}日）')),
-      );
-    } catch (e) {
-      await FirebaseService.logEvent(
-        name: 'friend_register',
-        parameters: {
-          'status': 'failure',
-          'reason': '${phase}_failed',
-          'period_days': period.inDays,
-        },
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('共有に失敗: $e')),
-      );
     }
   }
 
@@ -808,8 +775,12 @@ class _ExchangePageState extends State<ExchangePage> {
     );
   }
   // QRコードのサイズを小さくしたいのでJSONからコロン区切りに．_onDetectと一緒に変更
-  String get _qrPayload =>
-      'FCS:${(_serverIp ?? '').padRight(15)}:$_serverPort:$_serverOobCode';
+  String get _qrPayload => ExchangeQr(
+    purpose: _qrPurpose,
+    host: _serverIp ?? '',
+    port: _serverPort,
+    nonce: _serverOobCode,
+  ).encode();
 
   @override
   Widget build(BuildContext context) {
@@ -1069,7 +1040,8 @@ class _ExchangePageState extends State<ExchangePage> {
               style: _textThemeBodySmallGreyShade600),
                   // ?.copyWith(color: Colors.grey.shade700)),
           const SizedBox(height: 14),
-          _grpcRunning ? _qrDisplaySection() : _qrActionButtons(),
+          _grpcRunning && _qrPurpose == ExchangeQrPurpose.psi
+              ? _qrDisplaySection() : _qrActionButtons(),
         ],
       ),
     );
@@ -1093,36 +1065,11 @@ class _ExchangePageState extends State<ExchangePage> {
                   style: Theme.of(context).textTheme.titleMedium),
             ],
           ),
-          Text('友達のIPアドレス，ポート，確認コードを入力して「生成して共有」ボタンを押すと登録できます．\n'
-              '友達のIPアドレスなどは「QRコードを表示」すると表示されます\n'
-              '将来，QRコードを読み取ると登録できるようになる予定です',
-              style: _textThemeBodySmallGreyShade600),
           const SizedBox(height: 8),
 
           TextField(
             controller: _ownerNameController,
             decoration: const InputDecoration(labelText: '自分の名前（相手に表示されます）'),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _hostController,
-            keyboardType: TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: '相手のIP（gRPCサーバ）'),
-          ),
-          const SizedBox(height: 8),
-
-          TextField(
-            controller: _portController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'ポート'),
-          ),
-          const SizedBox(height: 12),
-
-          TextField(
-            controller: _nonceController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: '確認コード'),
           ),
           const SizedBox(height: 8),
 
@@ -1146,23 +1093,22 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
           ),
           const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: _generateAndShare,
-            child: const Text('生成して共有'),
-          ),
+          _grpcRunning && _qrPurpose == ExchangeQrPurpose.friend
+              ? _qrDisplaySection()
+              : _qrActionButtons(ExchangeQrPurpose.friend),
         ],
       ),
     );
   }
 
-  Widget _qrActionButtons() {
+  Widget _qrActionButtons([ExchangeQrPurpose purpose = ExchangeQrPurpose.psi]) {
     return Row(
       children: [
         Expanded(
           child: FilledButton.icon(
             icon: const Icon(Icons.qr_code),
             label: const Text('QRを表示'),
-            onPressed: _showQr,
+            onPressed: _grpcRunning ? null : () => _showQr(purpose),
           ),
         ),
         const SizedBox(width: 12),
@@ -1170,7 +1116,8 @@ class _ExchangePageState extends State<ExchangePage> {
           child: OutlinedButton.icon(
             icon: const Icon(Icons.qr_code_scanner),
             label: const Text('QRを読取'),
-            onPressed: _scanQr,
+            onPressed: _grpcRunning ? null :
+                (purpose == ExchangeQrPurpose.friend ? _scanFriendQr : _scanQr),
           ),
         ),
       ],
