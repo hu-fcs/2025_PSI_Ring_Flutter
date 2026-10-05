@@ -355,16 +355,17 @@ class _ExchangePageState extends State<ExchangePage> {
   Future<void> _scanFriendQr() async {
     if (!await _prepareFriendQr()) return;
     if (!mounted) return;
+    final period = _selectedPeriod;
     final result = await Navigator.push<Object>(context, MaterialPageRoute(
       builder: (_) => ScannerPage(
         purpose: ExchangeQrPurpose.friend,
         ownerName: _ownerNameController.text.trim(),
-        period: _selectedPeriod.duration,
+        period: period.duration,
       ),
     ));
     if (mounted && result == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('友達を登録しました')),
+        SnackBar(content: Text('共有しました：${period.label}（${period.duration.inDays}日）')),
       );
     }
   }

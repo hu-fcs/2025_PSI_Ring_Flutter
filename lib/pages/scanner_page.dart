@@ -8,6 +8,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../grpc/grpc_client.dart';
 import '../grpc/exchange_qr.dart';
 import '../key_management.dart';
+import '../log/firebase_service.dart';
 
 /// QR コードから接続先(IP/Port)を取得し，gRPC で PSI を実行する画面。
 ///
@@ -122,15 +123,18 @@ class _ScannerPageState extends State<ScannerPage> {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
+    var phase = 'grpc_connect';
     try {
       await _client.connect(ip, port, nonce);
       final Object result;
       if (widget.purpose == ExchangeQrPurpose.friend) {
+        phase = 'nickname_schedule_exchange';
         await _client.exchangeNicknameSchedule(
           ownerName: widget.ownerName,
           period: widget.period,
           slot: KeyManagementService().slot,
         );
+        await _logFriendRegistration('success');
         result = true;
       } else {
         result = await _client.executePsi();
@@ -140,6 +144,7 @@ class _ScannerPageState extends State<ScannerPage> {
         Navigator.pop(context, result);
       }
     } on grpc.GrpcError catch (e) {
+      await _logFriendRegistration('failure', reason: '${phase}_failed');
       var text = 'gRPC接続に失敗しました：\n$e';
       if (e.code == grpc.StatusCode.unavailable) {
         text = 'IPアドレスとポート番号を確認してください：\n$e';
@@ -155,11 +160,18 @@ class _ScannerPageState extends State<ScannerPage> {
       _isProcessingScan = false;
       await safeStartCamera();
     } catch (e) {
+      await _logFriendRegistration('failure', reason: '${phase}_failed');
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('接続に失敗しました: \n$e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              widget.purpose == ExchangeQrPurpose.friend
+                  ? '共有に失敗: $e'
+                  : '接続に失敗しました: \n$e',
+            ),
+          ),
+        );
       }
       _isProcessingScan = false;
       await safeStartCamera();
@@ -167,6 +179,18 @@ class _ScannerPageState extends State<ScannerPage> {
       isConnecting = false;
       await _client.disconnect();
     }
+  }
+
+  Future<void> _logFriendRegistration(String status, {String? reason}) async {
+    if (widget.purpose != ExchangeQrPurpose.friend) return;
+    await FirebaseService.logEvent(
+      name: 'friend_register',
+      parameters: {
+        'status': status,
+        if (reason != null) 'reason': reason,
+        'period_days': widget.period.inDays,
+      },
+    );
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
