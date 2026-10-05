@@ -59,6 +59,7 @@ class _ExchangePageState extends State<ExchangePage> {
   int _serverPort = 50051;
   int _serverOobCode = 0;
   ExchangeQrPurpose _qrPurpose = ExchangeQrPurpose.psi;
+  DialogRoute<void>? _qrDialogRoute;
 
   final _db = DatabaseHelper();
 
@@ -171,6 +172,8 @@ class _ExchangePageState extends State<ExchangePage> {
 
   @override
   void dispose() {
+    _grpcServer?.removeListener(_onGrpcServerStateChanged);
+    _grpcServer?.stop();
     _nearbyGcTimer?.cancel();
     _ownerNameController.dispose();
     super.dispose();
@@ -289,6 +292,11 @@ class _ExchangePageState extends State<ExchangePage> {
     final server = GrpcServer();
     server.addListener(_onGrpcServerStateChanged);
     final port = await server.start(port: _serverPort);
+    if (!mounted) {
+      server.removeListener(_onGrpcServerStateChanged);
+      await server.stop();
+      return;
+    }
     final oobNonce = server.oobNonce;
 
     server.service.onPsiFinished.listen((psi) {
@@ -308,18 +316,52 @@ class _ExchangePageState extends State<ExchangePage> {
       _serverOobCode = oobNonce;
       _qrPurpose = purpose;
     });
+    final route = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(purpose == ExchangeQrPurpose.friend
+            ? '友達登録のQRコード' : '顔見知り確認のQRコード'),
+        content: SingleChildScrollView(
+          child: _qrDisplaySection(),
+        ),
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            icon: const Icon(Icons.close),
+            label: const Text('表示を終了'),
+          ),
+        ],
+      ),
+    );
+    _qrDialogRoute = route;
+    try {
+      await Navigator.of(context, rootNavigator: true).push(route);
+    } finally {
+      if (identical(_qrDialogRoute, route)) _qrDialogRoute = null;
+      if (identical(_grpcServer, server)) {
+        await _stopQr();
+      }
+    }
   }
 
   Future<void> _stopQr() async {
     final s = _grpcServer;
-    setState(() {
-      _grpcServer = null; // stop前にnullにする
-    });
+    s?.removeListener(_onGrpcServerStateChanged);
+    if (mounted) {
+      setState(() => _grpcServer = null);
+    } else {
+      _grpcServer = null;
+    }
     await s?.stop();
   }
 
   void _onGrpcServerStateChanged() { // GrpcServerのnotifyListeners()のコールバック
+    if (!mounted) return;
     if (_grpcServer?.server == null) { // サーバが停止している
+      final route = _qrDialogRoute;
+      _qrDialogRoute = null;
+      if (route?.isActive == true) route!.navigator?.removeRoute(route);
       final msg = _grpcServer?.reason;
       if (msg != null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1041,8 +1083,7 @@ class _ExchangePageState extends State<ExchangePage> {
               style: _textThemeBodySmallGreyShade600),
                   // ?.copyWith(color: Colors.grey.shade700)),
           const SizedBox(height: 14),
-          _grpcRunning && _qrPurpose == ExchangeQrPurpose.psi
-              ? _qrDisplaySection() : _qrActionButtons(),
+          _qrActionButtons(),
         ],
       ),
     );
@@ -1094,9 +1135,7 @@ class _ExchangePageState extends State<ExchangePage> {
             ),
           ),
           const SizedBox(height: 12),
-          _grpcRunning && _qrPurpose == ExchangeQrPurpose.friend
-              ? _qrDisplaySection()
-              : _qrActionButtons(ExchangeQrPurpose.friend),
+          _qrActionButtons(ExchangeQrPurpose.friend),
         ],
       ),
     );
@@ -1127,15 +1166,19 @@ class _ExchangePageState extends State<ExchangePage> {
 
   Widget _qrDisplaySection() {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('このQRコードを相手に見せてください',
-            style: Theme.of(context).textTheme.titleSmall),
+        if (_qrPurpose == ExchangeQrPurpose.friend) ...[
+          Text('名前：${_ownerNameController.text.trim()}'),
+          const SizedBox(height: 10),
+        ],
         const SizedBox(height: 10),
         Center(
-          child: QrImageView(
-            data: _qrPayload,
-            size: 200,
+          child: SizedBox(
+            width: 200,
+            height: 200,
+            child: QrImageView(data: _qrPayload, backgroundColor: Colors.white),
           ),
         ),
         const SizedBox(height: 10),
@@ -1145,14 +1188,6 @@ class _ExchangePageState extends State<ExchangePage> {
             style: _textThemeBodySmallGreyShade600),
         Text('確認コード：${_serverOobCode.toString()}',
             style: _textThemeBodySmallGreyShade600),
-        const SizedBox(height: 10),
-        Center(
-          child: OutlinedButton.icon(
-            onPressed: _stopQr,
-            icon: const Icon(Icons.close),
-            label: const Text('表示を終了'),
-          ),
-        ),
       ],
     );
   }
