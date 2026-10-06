@@ -1,19 +1,29 @@
 // lib/pages/scanner_page.dart
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:grpc/grpc.dart' as grpc;
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../grpc/grpc_client.dart';
+import '../grpc/exchange_qr.dart';
+import '../key_management.dart';
+import '../log/firebase_service.dart';
 
 /// QR コードから接続先(IP/Port)を取得し，gRPC で PSI を実行する画面。
 ///
 /// QR を読み取れない場合に備えて，手入力による接続も提供する。
 class ScannerPage extends StatefulWidget {
-  const ScannerPage({super.key});
+  const ScannerPage({
+    super.key,
+    this.purpose = ExchangeQrPurpose.psi,
+    this.ownerName = '',
+    this.period = const Duration(days: 1),
+  });
+
+  final ExchangeQrPurpose purpose;
+  final String ownerName;
+  final Duration period;
 
   @override
   State<ScannerPage> createState() => _ScannerPageState();
@@ -32,8 +42,9 @@ class _ScannerPageState extends State<ScannerPage> {
   bool _cameraLock = false;
 
   final TextEditingController ipController = TextEditingController();
-  final TextEditingController portController =
-  TextEditingController(text: '50051');
+  final TextEditingController portController = TextEditingController(
+    text: '50051',
+  );
   final TextEditingController nonceController = TextEditingController();
 
   Future<void> safeStopCamera() async {
@@ -56,6 +67,7 @@ class _ScannerPageState extends State<ScannerPage> {
 
   @override
   void dispose() {
+    _client.disconnect();
     _scannerController.dispose();
     ipController.dispose();
     portController.dispose();
@@ -64,29 +76,40 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Future<void> _confirmAndConnect(String ip, int port, int nonce) async {
+    if (isConnecting) return;
+    isConnecting = true;
     await safeStopCamera();
 
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        title: const Text('接続確認'),
-        content: Text('サーバ $ip:$port に接続しますか？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
+      builder:
+          (_) => AlertDialog(
+            title: Text(
+              widget.purpose == ExchangeQrPurpose.friend ? '友達登録の確認' : '顔見知り確認',
+            ),
+            content: Text(
+              widget.purpose == ExchangeQrPurpose.friend
+                  ? '$ip:$port と友達登録しますか？\n共有期間：${widget.period.inDays}日'
+                  : 'サーバ $ip:$port に接続しますか？',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('キャンセル'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('接続'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('接続'),
-          ),
-        ],
-      ),
     );
 
-    if (ok != true) { // キャンセルした時
+    if (ok != true) {
+      isConnecting = false;
+      // キャンセルした時
       _isProcessingScan = false;
       await safeStartCamera();
       return;
@@ -100,14 +123,28 @@ class _ScannerPageState extends State<ScannerPage> {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
+    var phase = 'grpc_connect';
     try {
       await _client.connect(ip, port, nonce);
-      final psiResult = await _client.executePsi();
+      final Object result;
+      if (widget.purpose == ExchangeQrPurpose.friend) {
+        phase = 'nickname_schedule_exchange';
+        await _client.exchangeNicknameSchedule(
+          ownerName: widget.ownerName,
+          period: widget.period,
+          slot: KeyManagementService().slot,
+        );
+        await _logFriendRegistration('success');
+        result = true;
+      } else {
+        result = await _client.executePsi();
+      }
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        Navigator.pop(context, psiResult);
+        Navigator.pop(context, result);
       }
     } on grpc.GrpcError catch (e) {
+      await _logFriendRegistration('failure', reason: '${phase}_failed');
       var text = 'gRPC接続に失敗しました：\n$e';
       if (e.code == grpc.StatusCode.unavailable) {
         text = 'IPアドレスとポート番号を確認してください：\n$e';
@@ -116,21 +153,44 @@ class _ScannerPageState extends State<ScannerPage> {
       }
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(text)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(text)));
       }
-      return; // 接続失敗で中断
+      _isProcessingScan = false;
+      await safeStartCamera();
     } catch (e) {
+      await _logFriendRegistration('failure', reason: '${phase}_failed');
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('接続に失敗しました: \n$e')),
+          SnackBar(
+            content: Text(
+              widget.purpose == ExchangeQrPurpose.friend
+                  ? '共有に失敗: $e'
+                  : '接続に失敗しました: \n$e',
+            ),
+          ),
         );
       }
       _isProcessingScan = false;
       await safeStartCamera();
+    } finally {
+      isConnecting = false;
+      await _client.disconnect();
     }
+  }
+
+  Future<void> _logFriendRegistration(String status, {String? reason}) async {
+    if (widget.purpose != ExchangeQrPurpose.friend) return;
+    await FirebaseService.logEvent(
+      name: 'friend_register',
+      parameters: {
+        'status': status,
+        if (reason != null) 'reason': reason,
+        'period_days': widget.period.inDays,
+      },
+    );
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
@@ -143,14 +203,16 @@ class _ScannerPageState extends State<ScannerPage> {
       _isProcessingScan = true;
       try {
         await safeStopCamera();
-        final s = raw.split(':');
-        if (s.first != 'FCS') {
-          throw Exception('他のQRコードです');
+        final qr = ExchangeQr.parse(raw);
+        if (qr.purpose != widget.purpose) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('用途が異なるQRコードです')));
+          }
+          throw const FormatException('QR purpose mismatch');
         }
-        final ip = s[1].trim();
-        final port = int.tryParse(s[2]) ?? 0;
-        final nonce = int.tryParse(s[3]) ?? 0;
-        await _confirmAndConnect(ip, port, nonce);
+        await _confirmAndConnect(qr.host, qr.port, qr.nonce);
       } catch (_) {
         _isProcessingScan = false;
         await safeStartCamera();
@@ -207,9 +269,12 @@ class _ScannerPageState extends State<ScannerPage> {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      Text('スキャン',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(color: Colors.white)),
+                      Text(
+                        'スキャン',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.titleLarge?.copyWith(color: Colors.white),
+                      ),
                       Positioned(
                         left: 6,
                         child: IconButton(
@@ -254,10 +319,13 @@ class _ScannerPageState extends State<ScannerPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('QRコードをカメラにかざしてください',
+                        Text(
+                          'QRコードをカメラにかざしてください',
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(color: Colors.white)),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.labelLarge?.copyWith(color: Colors.white),
+                        ),
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
@@ -314,8 +382,10 @@ class _ScannerPageState extends State<ScannerPage> {
             children: [
               Row(
                 children: [
-                  Text('手入力で接続',
-                    style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    '手入力で接続',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const Spacer(),
                   IconButton(
                     tooltip: '閉じる',
@@ -361,11 +431,12 @@ class _ScannerPageState extends State<ScannerPage> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: () => _confirmAndConnect(
-                    ipController.text.trim(),
-                    int.tryParse(portController.text) ?? 50051,
-                    int.tryParse(nonceController.text) ?? 0,
-                  ),
+                  onPressed:
+                      () => _confirmAndConnect(
+                        ipController.text.trim(),
+                        int.tryParse(portController.text) ?? 50051,
+                        int.tryParse(nonceController.text) ?? 0,
+                      ),
                   icon: const Icon(Icons.link),
                   label: const Text('接続'),
                 ),
